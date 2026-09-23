@@ -1,0 +1,11 @@
+{
+  "name": "airloom-sfo",
+  "version": "1.0.0",
+  "description": "Standalone AirLoom-style 3D live ADS-B viewer for KSFO",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": { "node": ">=20" }
+}

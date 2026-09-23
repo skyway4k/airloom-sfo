@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: airloom-sfo
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /status
+    envVars:
+      - key: PORT
+        value: "8767"
+      - key: ADSB_PRIMARY
+        value: adsb.lol
+      - key: OSKY_ID
+        sync: false
+      - key: OSKY_SECRET
+        sync: false
