@@ -117,6 +117,30 @@
   .arr-empty { color: var(--muted); padding: 8px 0; font-size: 11px; }
 
   #c { touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+  #acLabels {
+    position: absolute; inset: 0; z-index: 4; pointer-events: none; overflow: hidden;
+  }
+  .ac-label {
+    position: absolute; left: 0; top: 0;
+    transform: translate(-50%, calc(-100% - 10px));
+    background: rgba(8, 14, 22, 0.78);
+    border: 1px solid rgba(120, 180, 230, 0.4);
+    border-radius: 4px;
+    padding: 2px 6px 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.2;
+    color: #e8f4ff;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+    will-change: transform, opacity;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+  .ac-label .cs { font-weight: 600; letter-spacing: 0.04em; font-size: 11px; }
+  .ac-label .meta { color: #9bb4c8; font-size: 9px; margin-top: 1px; }
+  .ac-label.dim { opacity: 0.35; }
+  .ac-label.hidden { display: none; }
   #toast.visible { display: block; }
   @media (max-width: 720px) {
     #drawer { width: min(86vw, 320px); }
@@ -134,6 +158,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="acLabels" aria-hidden="true"></div>
 
 <div id="hud">
   <h1>AIR LOOM — <span id="hudAirport">KSFO</span></h1>
@@ -251,7 +276,7 @@ const KT_MS = 0.514444;
 const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
-const SIZE_MULT = 3.5; // visibility multiplier over real meters
+const SIZE_MULT = 7.0; // visibility multiplier (~2× prior 3.5; relative type sizing kept)
 
 function enu(lat, lon, altM) {
   const dLat = (lat - ORIGIN.lat) * Math.PI / 180;
@@ -285,26 +310,12 @@ function angDiff(a, b) {
 }
 
 function altColor(altM) {
-  // Strong altitude ramp: low blue → mid cyan/green → high yellow/red (0–12000 m)
+  // Full vivid rainbow by altitude (0–12000 m):
+  // low red → orange → yellow → green → cyan → blue → violet (high)
   const t = Math.max(0, Math.min(1, (altM || 0) / 12000));
+  const hue = t * 0.78; // 0 → ~280° (stop before wrapping to red)
   const c = new THREE.Color();
-  if (t < 0.25) {
-    // deep blue → cyan
-    const u = t / 0.25;
-    c.setRGB(0.08 + u * 0.15, 0.35 + u * 0.45, 0.95);
-  } else if (t < 0.5) {
-    // cyan → green
-    const u = (t - 0.25) / 0.25;
-    c.setRGB(0.23 - u * 0.15, 0.8 + u * 0.15, 0.95 - u * 0.55);
-  } else if (t < 0.75) {
-    // green → yellow
-    const u = (t - 0.5) / 0.25;
-    c.setRGB(0.08 + u * 0.9, 0.95 - u * 0.15, 0.4 - u * 0.35);
-  } else {
-    // yellow → red
-    const u = (t - 0.75) / 0.25;
-    c.setRGB(0.98, 0.8 - u * 0.55, 0.05 + u * 0.05);
-  }
+  c.setHSL(hue, 1.0, 0.52);
   return c;
 }
 
@@ -566,12 +577,12 @@ function tintModel(model, color) {
   for (const m of bodyMats) {
     if (m.color) m.color.copy(color);
     if (m.emissive) m.emissive.copy(color);
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.4;
+    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.55;
   }
   for (const m of finMats) {
     if (m.color) m.color.copy(color);
     if (m.emissive) m.emissive.copy(color);
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.7;
+    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.95;
   }
 }
 
@@ -984,7 +995,7 @@ function createAircraft(icao, typeHint) {
   stickGeo.setAttribute('position', new THREE.BufferAttribute(stickPos, 3));
   stickGeo.setAttribute('color', new THREE.BufferAttribute(stickCol, 3));
   const stick = new THREE.Line(stickGeo, new THREE.LineBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.55,
+    vertexColors: true, transparent: true, opacity: 0.75,
   }));
   group.add(stick);
 
@@ -1010,11 +1021,10 @@ function createAircraft(icao, typeHint) {
   );
   scene.add(trail);
 
-  const label = makeLabel('');
-  label.visible = false;
-  group.add(label);
-
   scene.add(group);
+
+  const recProbe = { icao, callsign: '', type: typeHint || null, altM: 0, vel: null, gsKt: null };
+  const label = makeLabel(recProbe);
 
   return {
     icao, group, model, glow, stick, velLine, trail, trailGeo, trailPos, trailCol, label,
@@ -1057,47 +1067,60 @@ function ensureModel(rec) {
   rec.glow.scale.set(glowSize, glowSize, 1);
 }
 
-function makeLabel(text) {
-  const cvs = document.createElement('canvas');
-  cvs.width = 256; cvs.height = 64;
-  const ctx = cvs.getContext('2d');
-  const tex = new THREE.CanvasTexture(cvs);
-  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-  spr.scale.set(1200, 300, 1);
-  spr.position.y = 220;
-  spr.userData.cvs = cvs;
-  spr.userData.ctx = ctx;
-  spr.userData.tex = tex;
-  spr.userData.text = '';
-  setLabelText(spr, text);
-  return spr;
+const labelLayer = document.getElementById('acLabels');
+const LABEL_MAX_DIST = 95000; // world units (~m): fade/hide beyond this
+const _lblProj = new THREE.Vector3();
+
+function makeLabel(rec) {
+  const el = document.createElement('div');
+  el.className = 'ac-label hidden';
+  el.innerHTML = '<div class="cs"></div><div class="meta"></div>';
+  labelLayer.appendChild(el);
+  return el;
 }
 
-function setLabelText(spr, text) {
-  if (spr.userData.text === text) return;
-  spr.userData.text = text;
-  const { cvs, ctx, tex } = spr.userData;
-  ctx.clearRect(0, 0, cvs.width, cvs.height);
-  if (!text) { tex.needsUpdate = true; return; }
-  ctx.fillStyle = 'rgba(8,14,22,0.7)';
-  roundRect(ctx, 8, 12, cvs.width - 16, 40, 6);
-  ctx.fill();
-  ctx.font = '600 28px "IBM Plex Mono", monospace';
-  ctx.fillStyle = '#e8f4ff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, cvs.width / 2, 32);
-  tex.needsUpdate = true;
+function setLabelInfo(rec) {
+  const el = rec.label;
+  if (!el) return;
+  const cs = (rec.callsign && rec.callsign.trim()) || rec.icao || '—';
+  const type = (rec.type && String(rec.type).trim()) || '';
+  const altFt = Math.round((rec.altM || 0) / FT_M);
+  const gs = rec.gsKt != null ? Math.round(rec.gsKt)
+    : (rec.vel != null ? Math.round(rec.vel / KT_MS) : null);
+  const line2 = [
+    type || null,
+    Number.isFinite(altFt) ? (altFt + ' ft') : null,
+    gs != null ? (gs + ' kt') : null,
+  ].filter(Boolean).join(' · ');
+  const key = cs + '|' + line2;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.querySelector('.cs').textContent = cs;
+  el.querySelector('.meta').textContent = line2;
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
+function updateLabelScreen(rec, cam) {
+  const el = rec.label;
+  if (!el) return;
+  // Default: show for all visible filtered aircraft; hide if behind camera / far
+  _lblProj.copy(rec.display);
+  _lblProj.y += Math.max(180, (rec.span || 30) * SIZE_MULT * 0.55);
+  const dist = _lblProj.distanceTo(cam.position);
+  _lblProj.project(cam);
+  const behind = _lblProj.z > 1;
+  const offscreen = Math.abs(_lblProj.x) > 1.15 || Math.abs(_lblProj.y) > 1.2;
+  const tooFar = dist > LABEL_MAX_DIST;
+  const show = rec.alive && !behind && !offscreen && !tooFar;
+  if (!show) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.classList.remove('hidden');
+  el.classList.toggle('dim', dist > LABEL_MAX_DIST * 0.55);
+  const x = (_lblProj.x * 0.5 + 0.5) * innerWidth;
+  const y = (-_lblProj.y * 0.5 + 0.5) * innerHeight;
+  el.style.transform = 'translate(' + (x) + 'px,' + (y) + 'px) translate(-50%, calc(-100% - 8px))';
+  setLabelInfo(rec);
 }
 
 function disposeAircraft(rec) {
@@ -1119,8 +1142,7 @@ function disposeAircraft(rec) {
   rec.velLine.material.dispose();
   rec.trailGeo.dispose();
   rec.trail.material.dispose();
-  if (rec.label.userData.tex) rec.label.userData.tex.dispose();
-  rec.label.material.dispose();
+  if (rec.label && rec.label.parentNode) rec.label.parentNode.removeChild(rec.label);
 }
 
 function updateTrail(rec) {
@@ -1133,7 +1155,7 @@ function updateTrail(rec) {
     rec.trailPos[o] = p.x;
     rec.trailPos[o + 1] = p.y;
     rec.trailPos[o + 2] = p.z;
-    const fade = 0.25 + 0.75 * (i / Math.max(1, n - 1));
+    const fade = 0.4 + 0.6 * (i / Math.max(1, n - 1));
     const c = altColor(p.altM);
     rec.trailCol[o] = c.r * fade;
     rec.trailCol[o + 1] = c.g * fade;
@@ -1204,9 +1226,8 @@ function applyPose(rec) {
   }
   rec.velLine.geometry.attributes.position.needsUpdate = true;
 
-  const showLabel = selectedId === rec.icao || (settings.filter && (rec.callsign || '').includes(settings.filter));
-  rec.label.visible = !!showLabel;
-  if (showLabel) setLabelText(rec.label, rec.callsign || rec.icao);
+  // HTML labels positioned in animate() via updateLabelScreen
+  setLabelInfo(rec);
 }
 
 // ─── Polling ─────────────────────────────────────────────────────────────────
@@ -1381,6 +1402,7 @@ function animate() {
     const pos = rec.stick.geometry.attributes.position.array;
     pos[1] = -rec.display.y;
     rec.stick.geometry.attributes.position.needsUpdate = true;
+    updateLabelScreen(rec, camera);
   }
 
   controls.update();
@@ -1404,11 +1426,7 @@ canvas.addEventListener('pointerdown', (ev) => {
     selectedId = id;
     const rec = aircraft.get(id);
     updateSelPanel(rec);
-    for (const r of aircraft.values()) {
-      const show = r.icao === selectedId || (settings.filter && (r.callsign || '').includes(settings.filter));
-      r.label.visible = !!show;
-      if (show) setLabelText(r.label, r.callsign || r.icao);
-    }
+    for (const r of aircraft.values()) setLabelInfo(r);
     renderArrivalsList(lastArrivals);
   }
 });
