@@ -249,8 +249,8 @@ const NM_M = 1852;
 const FT_M = 0.3048;
 const KT_MS = 0.514444;
 const MAX_AIRCRAFT = 400;
-const POLL_MS = 8000;
-const ARRIVAL_NM = 40;
+const POLL_MS = 12000;
+const ARRIVAL_NM = 50;
 const SIZE_MULT = 3.5; // visibility multiplier over real meters
 
 function enu(lat, lon, altM) {
@@ -927,27 +927,29 @@ function renderArrivalsList(arrs) {
   });
 }
 
-/** Heuristic: arriving into KSFO */
+/** Heuristic: arriving into KSFO (permissive toward-airport) */
 function isArrival(p) {
   if (p.onGround) return false;
   if (p.dist == null || p.dist > ARRIVAL_NM) return false;
   // vertical: descending, level-ish, or low — not climbing hard
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0; // m/s → fpm
   const altFt = (p.altM || 0) / FT_M;
-  const climbingHard = vrFpm > 800 && altFt > 3000;
+  const climbingHard = vrFpm > 1000 && altFt > 4000;
   if (climbingHard) return false;
-  // track toward airport (bearing from ac to ORIGIN within ~90° of track)
+  // track toward airport (bearing from ac to ORIGIN within ~110° of track)
   if (p.track == null) {
-    // no track: still accept if descending/low within 25 nm
-    return (vrFpm < -100) || (altFt < 12000 && p.dist < 25);
+    // no track: still accept if descending/low within 30 nm
+    return (vrFpm < -50) || (altFt < 14000 && p.dist < 30);
   }
   const brgToApt = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
   const diff = Math.abs(angDiff(p.track, brgToApt));
-  const toward = diff <= 95;
-  const descending = vrFpm < -50;
-  const low = altFt < 10000;
-  if (toward && (descending || low || p.dist < 20)) return true;
-  if (toward && vrFpm < 400) return true;
+  const toward = diff <= 110;
+  const descending = vrFpm < -30;
+  const low = altFt < 12000;
+  if (toward && (descending || low || p.dist < 28)) return true;
+  if (toward && vrFpm < 500) return true;
+  // close-in permissive: within 15 nm and not climbing hard
+  if (p.dist < 15 && vrFpm < 600) return true;
   return false;
 }
 
@@ -1220,10 +1222,16 @@ async function poll() {
     const data = await res.json();
     lastSource = data.source || 'unknown';
     pollError = null;
+    const nStates = Array.isArray(data.states) ? data.states.length : (data.n_states || 0);
+    if (!nStates) {
+      showToast('Waiting for ADS-B feed…', 8000);
+    }
     ingest(data);
     lastPollAt = performance.now();
-    $('srcLine').textContent = 'source: ' + lastSource;
-    $('uiSource').textContent = lastSource === 'adsb.lol' ? 'adsb.lol' : lastSource === 'opensky' ? 'OpenSky' : lastSource;
+    $('srcLine').textContent = 'source: ' + lastSource + (nStates ? ' (' + nStates + ')' : '');
+    $('uiSource').textContent = lastSource === 'adsb.lol' ? 'adsb.lol'
+      : lastSource === 'adsb.fi' ? 'adsb.fi'
+      : lastSource === 'opensky' ? 'OpenSky' : lastSource;
     $('pollLine').textContent = 'poll: ' + new Date().toLocaleTimeString();
   } catch (e) {
     pollError = e.message || String(e);

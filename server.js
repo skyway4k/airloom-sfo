@@ -2,7 +2,7 @@
 'use strict';
 /**
  * AirLoom SFO — standalone 3D ADS-B viewer + thin /adsb/states proxy.
- * Primary: adsb.lol. Optional fallback: OpenSky (OSKY_ID / OSKY_SECRET).
+ * Sources (in order): adsb.lol → adsb.fi → OpenSky (optional).
  */
 const http = require('http');
 const fs = require('fs');
@@ -14,7 +14,13 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'Mozilla/5.0 (compatible; AirLoomSFO/1.0; +https://github.com/skyway4k/airloom-sfo)';
+const UA = 'AirLoomSFO/1.2 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
+
+const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 50 };
+const ADSB_CACHE_FRESH_MS = 22000;
+const ADSB_CACHE_STALE_MS = 10 * 60 * 1000;
+const BG_REFRESH_MS = 20000;
+const SOURCE_BACKOFF_MS = 45000;
 
 function log(msg, level) {
   const tag = level === 'ERR' ? 'ERR' : level === 'WARN' ? 'WARN' : level === 'OK' ? 'OK' : 'INFO';
@@ -107,7 +113,7 @@ function centerDistToBbox(lat, lon, distNm) {
   };
 }
 
-function buildAdsbPayload(list) {
+function buildAdsbPayload(list, sourceName) {
   const states = [];
   const acMeta = [];
   for (const ac of list) {
@@ -123,85 +129,180 @@ function buildAdsbPayload(list) {
       alt_baro: ac.alt_baro,
       gs: ac.gs,
       track: ac.track,
-      source: 'adsb.lol',
+      source: sourceName,
     });
   }
-  return { states, ac: acMeta, source: 'adsb.lol', time: Math.floor(Date.now() / 1000) };
+  return {
+    states,
+    ac: acMeta,
+    source: sourceName,
+    n_states: states.length,
+    time: Math.floor(Date.now() / 1000),
+  };
 }
 
-const adsbLolStatus = { ok: false, lastFetchAt: 0, lastCount: 0, lastError: '' };
-let adsbLolCache = { key: '', at: 0, data: null, inflight: null };
-let adsbLolBackoffUntil = 0;
-const ADSB_CACHE_FRESH_MS = 25000;
-const ADSB_CACHE_STALE_MS = 10 * 60 * 1000;
+function extractAcList(data) {
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data.ac)) return data.ac;
+  if (Array.isArray(data.aircraft)) return data.aircraft;
+  return [];
+}
+
+const SOURCES = [
+  {
+    id: 'adsb.lol',
+    url: (lat, lon, dist) =>
+      `https://api.adsb.lol/v2/lat/${encodeURIComponent(lat)}/lon/${encodeURIComponent(lon)}/dist/${dist}`,
+  },
+  {
+    id: 'adsb.fi',
+    url: (lat, lon, dist) =>
+      `https://opendata.adsb.fi/api/v2/lat/${encodeURIComponent(lat)}/lon/${encodeURIComponent(lon)}/dist/${dist}`,
+  },
+];
+
+const sourceStatus = Object.fromEntries(SOURCES.map((s) => [s.id, {
+  ok: false,
+  lastFetchAt: 0,
+  lastCount: 0,
+  lastError: '',
+  backoffUntil: 0,
+}]));
+sourceStatus.opensky = { ok: false, lastFetchAt: 0, lastCount: 0, lastError: '', backoffUntil: 0 };
+
+/** Shared cache keyed by lat,lon,dist — single-flight per key. */
+const cacheByKey = new Map(); // key -> { at, data, inflight, source }
 
 function adsbCacheKey(lat, lon, dist) {
   return Number(lat).toFixed(2) + ',' + Number(lon).toFixed(2) + ',' + dist;
 }
 
-async function fetchAdsbLol(lat, lon, distNm) {
+function statusSnapshot(id) {
+  const s = sourceStatus[id] || {};
+  return {
+    ok: !!s.ok,
+    lastFetchAgo: s.lastFetchAt ? Math.round((Date.now() - s.lastFetchAt) / 1000) : null,
+    lastCount: s.lastCount || 0,
+    lastError: s.lastError || null,
+    backoffSec: s.backoffUntil && s.backoffUntil > Date.now()
+      ? Math.round((s.backoffUntil - Date.now()) / 1000) : 0,
+  };
+}
+
+async function fetchOneSource(src, lat, lon, dist) {
+  const st = sourceStatus[src.id];
+  const now = Date.now();
+  if (now < st.backoffUntil) {
+    return { ok: false, error: 'backoff', payload: null };
+  }
+  const url = src.url(lat, lon, dist);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': UA,
+      },
+    });
+    clearTimeout(timer);
+    st.lastFetchAt = Date.now();
+    if (!r.ok) {
+      st.ok = false;
+      st.lastError = 'HTTP ' + r.status;
+      st.lastCount = 0;
+      if (r.status === 429 || r.status === 503) {
+        st.backoffUntil = Date.now() + SOURCE_BACKOFF_MS;
+        log(src.id + ' HTTP ' + r.status + ' — backoff ' + (SOURCE_BACKOFF_MS / 1000) + 's', 'WARN');
+      }
+      return { ok: false, error: st.lastError, payload: null };
+    }
+    const data = await r.json();
+    const list = extractAcList(data);
+    const payload = buildAdsbPayload(list, src.id);
+    st.lastCount = payload.states.length;
+    if (payload.states.length === 0) {
+      st.ok = false;
+      st.lastError = 'empty';
+      return { ok: false, error: 'empty', payload: null };
+    }
+    st.ok = true;
+    st.lastError = '';
+    st.backoffUntil = 0;
+    return { ok: true, error: null, payload };
+  } catch (e) {
+    clearTimeout(timer);
+    st.ok = false;
+    st.lastError = e.name === 'AbortError' ? 'timeout' : (e.message || String(e));
+    st.lastFetchAt = Date.now();
+    st.lastCount = 0;
+    log(src.id + ' ' + st.lastError, 'WARN');
+    return { ok: false, error: st.lastError, payload: null };
+  }
+}
+
+function orderedSources() {
+  if (ADSB_PRIMARY === 'adsb.fi') {
+    return [SOURCES[1], SOURCES[0]];
+  }
+  return SOURCES.slice();
+}
+
+async function fetchAdsbMulti(lat, lon, distNm) {
   const dist = Math.max(1, Math.min(250, Math.round(Number(distNm) || 50)));
   const key = adsbCacheKey(lat, lon, dist);
   const now = Date.now();
-  if (adsbLolCache.data && adsbLolCache.key === key && (now - adsbLolCache.at) < ADSB_CACHE_FRESH_MS) {
-    return adsbLolCache.data;
+  let entry = cacheByKey.get(key);
+
+  if (entry && entry.data && (now - entry.at) < ADSB_CACHE_FRESH_MS) {
+    return entry.data;
   }
-  if (now < adsbLolBackoffUntil && adsbLolCache.data && (now - adsbLolCache.at) < ADSB_CACHE_STALE_MS) {
-    return adsbLolCache.data;
+  if (entry && entry.inflight) {
+    try { return await entry.inflight; } catch (_) { /* fall through */ }
   }
-  if (adsbLolCache.inflight && adsbLolCache.key === key) {
-    try { return await adsbLolCache.inflight; } catch (_) { /* fall through */ }
-  }
+
   const run = (async () => {
-    if (Date.now() < adsbLolBackoffUntil) {
-      if (adsbLolCache.data && (Date.now() - adsbLolCache.at) < ADSB_CACHE_STALE_MS) return adsbLolCache.data;
-      return null;
-    }
-    const url = `https://api.adsb.lol/v2/lat/${encodeURIComponent(lat)}/lon/${encodeURIComponent(lon)}/dist/${dist}`;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12000);
-    try {
-      const r = await fetch(url, {
-        signal: ctrl.signal,
-        headers: { Accept: 'application/json', 'User-Agent': UA },
-      });
-      clearTimeout(timer);
-      if (!r.ok) {
-        adsbLolStatus.ok = false;
-        adsbLolStatus.lastError = 'HTTP ' + r.status;
-        adsbLolStatus.lastFetchAt = Date.now();
-        if (r.status === 429 || r.status === 503) {
-          adsbLolBackoffUntil = Date.now() + 60000;
-          log('adsb.lol HTTP ' + r.status + ' — backoff 60s', 'WARN');
-        }
-        if (adsbLolCache.data && (Date.now() - adsbLolCache.at) < ADSB_CACHE_STALE_MS) return adsbLolCache.data;
-        return null;
+    const sources = orderedSources();
+    let lastError = null;
+    for (const src of sources) {
+      const result = await fetchOneSource(src, lat, lon, dist);
+      if (result.ok && result.payload) {
+        const fresh = {
+          at: Date.now(),
+          data: result.payload,
+          inflight: null,
+          source: src.id,
+        };
+        cacheByKey.set(key, fresh);
+        log(src.id + ' ok n=' + result.payload.n_states + ' key=' + key, 'OK');
+        return result.payload;
       }
-      const data = await r.json();
-      const list = Array.isArray(data.ac) ? data.ac : [];
-      const payload = buildAdsbPayload(list);
-      adsbLolStatus.ok = payload.states.length > 0;
-      adsbLolStatus.lastCount = payload.states.length;
-      adsbLolStatus.lastError = payload.states.length ? '' : 'empty';
-      adsbLolStatus.lastFetchAt = Date.now();
-      adsbLolCache = { key, at: Date.now(), data: payload, inflight: null };
-      return payload;
-    } catch (e) {
-      clearTimeout(timer);
-      adsbLolStatus.ok = false;
-      adsbLolStatus.lastError = e.name === 'AbortError' ? 'timeout' : (e.message || String(e));
-      adsbLolStatus.lastFetchAt = Date.now();
-      log('adsb.lol ' + adsbLolStatus.lastError, 'WARN');
-      if (adsbLolCache.data && (Date.now() - adsbLolCache.at) < ADSB_CACHE_STALE_MS) return adsbLolCache.data;
-      return null;
+      lastError = result.error || lastError;
+      // immediately try next on 429/503/empty/error
     }
+
+    // Serve stale on total failure
+    entry = cacheByKey.get(key);
+    if (entry && entry.data && (Date.now() - entry.at) < ADSB_CACHE_STALE_MS) {
+      log('all ADS-B sources failed (' + lastError + ') — serving stale from ' + entry.source, 'WARN');
+      return entry.data;
+    }
+    return null;
   })();
-  adsbLolCache.key = key;
-  adsbLolCache.inflight = run;
+
+  cacheByKey.set(key, {
+    at: (entry && entry.at) || 0,
+    data: (entry && entry.data) || null,
+    source: (entry && entry.source) || null,
+    inflight: run,
+  });
+
   try {
     return await run;
   } finally {
-    if (adsbLolCache.inflight === run) adsbLolCache.inflight = null;
+    const cur = cacheByKey.get(key);
+    if (cur && cur.inflight === run) cur.inflight = null;
   }
 }
 
@@ -228,6 +329,7 @@ async function getOpenSkyToken() {
 }
 
 async function fetchOpenSkyStates(bboxPath) {
+  const st = sourceStatus.opensky;
   try {
     const headers = { Accept: 'application/json', 'User-Agent': UA };
     try {
@@ -235,14 +337,28 @@ async function fetchOpenSkyStates(bboxPath) {
       if (tk) headers.Authorization = 'Bearer ' + tk;
     } catch (e) {
       log('OpenSky auth: ' + e.message, 'WARN');
+      st.lastError = 'auth: ' + e.message;
     }
     const r = await fetch('https://opensky-network.org/api' + bboxPath, { headers });
+    st.lastFetchAt = Date.now();
     if (!r.ok) {
+      st.ok = false;
+      st.lastError = 'HTTP ' + r.status;
+      st.lastCount = 0;
       log('OpenSky HTTP ' + r.status, 'WARN');
       return null;
     }
-    return await r.json();
+    const data = await r.json();
+    const n = Array.isArray(data.states) ? data.states.length : 0;
+    st.lastCount = n;
+    st.ok = n > 0;
+    st.lastError = n ? '' : 'empty';
+    return data;
   } catch (e) {
+    st.ok = false;
+    st.lastError = e.message || String(e);
+    st.lastFetchAt = Date.now();
+    st.lastCount = 0;
     log('OpenSky ' + e.message, 'ERR');
     return null;
   }
@@ -267,7 +383,7 @@ async function handleAdsbStates(query, res) {
 
   const preferAdsb = ADSB_PRIMARY !== 'opensky' && dist <= 250;
   if (preferAdsb) {
-    const adsb = await fetchAdsbLol(lat, lon, dist);
+    const adsb = await fetchAdsbMulti(lat, lon, dist);
     if (adsb && adsb.states && adsb.states.length) {
       sendJSON(res, 200, adsb);
       return;
@@ -275,7 +391,25 @@ async function handleAdsbStates(query, res) {
   }
   const osky = await fetchOpenSkyStates(bboxPath);
   const states = (osky && Array.isArray(osky.states)) ? osky.states : [];
-  sendJSON(res, 200, { states, source: 'opensky', time: osky && osky.time ? osky.time : null });
+  sendJSON(res, 200, {
+    states,
+    source: 'opensky',
+    n_states: states.length,
+    time: osky && osky.time ? osky.time : null,
+  });
+}
+
+async function backgroundRefresh() {
+  try {
+    const payload = await fetchAdsbMulti(KSFO_DEFAULT.lat, KSFO_DEFAULT.lon, KSFO_DEFAULT.dist);
+    if (payload && payload.n_states) {
+      log('bg refresh KSFO n=' + payload.n_states + ' via ' + payload.source, 'OK');
+    } else {
+      log('bg refresh KSFO got empty', 'WARN');
+    }
+  } catch (e) {
+    log('bg refresh ' + (e.message || e), 'WARN');
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -294,17 +428,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/status') {
+      const cacheKey = adsbCacheKey(KSFO_DEFAULT.lat, KSFO_DEFAULT.lon, KSFO_DEFAULT.dist);
+      const cached = cacheByKey.get(cacheKey);
+      const anyOk = SOURCES.some((s) => sourceStatus[s.id] && sourceStatus[s.id].ok)
+        || !!(cached && cached.data && cached.data.n_states > 0);
       sendJSON(res, 200, {
         name: 'AirLoom SFO',
         ok: true,
-        adsbLol: {
-          ok: !!adsbLolStatus.ok,
-          lastFetchAgo: adsbLolStatus.lastFetchAt ? Math.round((Date.now() - adsbLolStatus.lastFetchAt) / 1000) : null,
-          lastCount: adsbLolStatus.lastCount || 0,
-          lastError: adsbLolStatus.lastError || null,
+        healthy: anyOk,
+        sources: {
+          'adsb.lol': statusSnapshot('adsb.lol'),
+          'adsb.fi': statusSnapshot('adsb.fi'),
+          opensky: statusSnapshot('opensky'),
         },
+        // back-compat
+        adsbLol: statusSnapshot('adsb.lol'),
         openskyConfigured: !!(OSKY_ID && OSKY_SECRET),
         primary: ADSB_PRIMARY,
+        cache: {
+          key: cacheKey,
+          ageSec: cached && cached.at ? Math.round((Date.now() - cached.at) / 1000) : null,
+          n_states: cached && cached.data ? cached.data.n_states : 0,
+          source: cached && cached.data ? cached.data.source : null,
+        },
       });
       return;
     }
@@ -341,5 +487,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   log(`AirLoom listening on :${PORT}`, 'OK');
   log('Views: /  /airloom', 'OK');
-  log('Feed: /adsb/states (adsb.lol' + (OSKY_ID ? ' + OpenSky fallback)' : ')'), 'OK');
+  log('Feed: /adsb/states (adsb.lol → adsb.fi' + (OSKY_ID ? ' → OpenSky)' : ')'), 'OK');
+  // Warm cache immediately, then every ~20s
+  backgroundRefresh();
+  setInterval(backgroundRefresh, BG_REFRESH_MS);
 });
