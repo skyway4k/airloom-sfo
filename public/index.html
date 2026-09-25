@@ -25,21 +25,33 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
-    position: absolute; top: 14px; left: 18px; z-index: 5; pointer-events: none;
+    position: absolute; top: 14px; left: 18px; right: 18px; z-index: 5; pointer-events: none;
     text-shadow: 0 1px 8px rgba(0,0,0,0.85);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
   }
+  #hud .brand { min-width: 0; flex: 1 1 auto; }
   #hud h1 {
-    font-size: 15px; letter-spacing: 0.28em; font-weight: 600; color: #e8f4ff;
+    font-size: 17px; letter-spacing: 0.01em; font-weight: 600; color: #e8f4ff;
+    line-height: 1.2; text-decoration: none;
   }
-  #hud .sub { margin-top: 4px; font-size: 12px; color: var(--muted); letter-spacing: 0.08em; font-family: var(--mono); }
+  #hud h1 .sep { color: var(--muted); font-weight: 400; margin: 0 0.15em; }
+  #hud h1 #hudAirport { color: var(--cyan); font-weight: 600; letter-spacing: 0.04em; }
+  #hud .sub {
+    margin-top: 3px; font-size: 11px; color: var(--muted);
+    letter-spacing: 0.01em; font-family: var(--mono); line-height: 1.35;
+  }
   #hud .note { margin-top: 2px; font-size: 11px; color: var(--warn); }
   #stats {
-    position: absolute; top: 14px; right: 18px; z-index: 5; text-align: right;
-    font-family: var(--mono); font-size: 11px; color: var(--muted);
-    text-shadow: 0 1px 8px rgba(0,0,0,0.85); pointer-events: none;
+    flex: 0 0 auto; text-align: right;
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    line-height: 1.35; padding-top: 1px;
   }
-  #stats .n { color: var(--cyan); font-size: 18px; font-weight: 600; }
-  #stats .arr { color: var(--accent); font-size: 14px; font-weight: 600; }
+  #stats .stat-main { white-space: nowrap; margin-bottom: 2px; }
+  #stats .n { color: var(--cyan); font-size: 13px; font-weight: 600; }
+  #stats .arr { color: var(--accent); font-size: 13px; font-weight: 600; }
+  #stats .lbl { color: var(--muted); font-size: 10px; margin-right: 8px; }
+  #stats .lbl:last-child { margin-right: 0; }
+  #stats .meta { font-size: 9px; color: #6a7f93; white-space: nowrap; }
   #drawer {
     position: absolute; top: 0; left: 0; bottom: 0; width: 292px; z-index: 10;
     background: var(--panel); border-right: 1px solid var(--border);
@@ -147,8 +159,16 @@
     #drawer.collapsed { transform: translateX(-100%); }
     #toggleDrawer { left: 12px; top: max(12px, env(safe-area-inset-top)); }
     #drawer:not(.collapsed) + #toggleDrawer { left: calc(min(86vw, 320px) + 8px); }
-    #hud { top: max(14px, env(safe-area-inset-top)); left: 14px; }
-    #stats { top: max(14px, env(safe-area-inset-top)); right: 14px; }
+    /* Keep title clear of the green ☰ button (was boxing the leading “A”) */
+    #hud {
+      top: max(14px, env(safe-area-inset-top));
+      left: 52px; right: 12px; gap: 8px;
+    }
+    #hud h1 { font-size: 15px; }
+    #hud .sub { font-size: 10px; }
+    #stats { font-size: 9px; }
+    #stats .n, #stats .arr { font-size: 12px; }
+    #stats .meta { font-size: 8px; }
     #sel { bottom: max(18px, env(safe-area-inset-bottom)); }
     a.credits { bottom: max(10px, env(safe-area-inset-bottom)); }
   }
@@ -161,15 +181,19 @@
 <div id="acLabels" aria-hidden="true"></div>
 
 <div id="hud">
-  <h1>AIR LOOM — <span id="hudAirport">KSFO</span></h1>
-  <div class="sub" id="hudSub">San Francisco Intl · live ADS-B via Skyway</div>
-  <div class="note" id="hudNote" style="display:none"></div>
-</div>
-<div id="stats">
-  <div><span class="arr" id="arrCount">—</span> arrivals</div>
-  <div><span class="n" id="acCount">—</span> shown</div>
-  <div id="srcLine">source: —</div>
-  <div id="pollLine">poll: —</div>
+  <div class="brand">
+    <h1>AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
+    <div class="sub" id="hudSub">San Francisco Intl · live ADS-B</div>
+    <div class="note" id="hudNote" style="display:none"></div>
+  </div>
+  <div id="stats">
+    <div class="stat-main">
+      <span class="arr" id="arrCount">—</span><span class="lbl"> arr</span>
+      <span class="n" id="acCount">—</span><span class="lbl"> shown</span>
+    </div>
+    <div class="meta" id="srcLine">—</div>
+    <div class="meta" id="pollLine">—</div>
+  </div>
 </div>
 
 <aside id="drawer">
@@ -202,8 +226,8 @@
       <h3>View</h3>
       <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">50</span></div>
       <input type="range" id="sRadius" min="15" max="120" value="50" step="5" />
-      <div class="row"><label>Trail length</label><span class="val" id="vTrail">40</span></div>
-      <input type="range" id="sTrail" min="5" max="120" value="40" step="5" />
+      <div class="row"><label>Trail length</label><span class="val" id="vTrail">55</span></div>
+      <input type="range" id="sTrail" min="5" max="120" value="55" step="5" />
       <div class="row"><label>Altitude scale</label><span class="val" id="vAltScale">1.2</span></div>
       <input type="range" id="sAltScale" min="0.4" max="3" value="1.2" step="0.1" />
       <div class="row">
@@ -217,6 +241,10 @@
       <div class="row">
         <label for="sVelVec">Velocity vectors</label>
         <input type="checkbox" id="sVelVec" checked />
+      </div>
+      <div class="row">
+        <label for="sAltSticks">Altitude sticks</label>
+        <input type="checkbox" id="sAltSticks" />
       </div>
     </div>
 
@@ -262,7 +290,7 @@ const ORIGIN = known || AIRPORTS.KSFO;
 const UNKNOWN_APT = !known && params.get('airport');
 
 document.getElementById('hudAirport').textContent = ORIGIN.icao;
-document.getElementById('hudSub').textContent = ORIGIN.name + ' · live ADS-B via Skyway';
+document.getElementById('hudSub').textContent = ORIGIN.name + ' · live ADS-B';
 if (UNKNOWN_APT) {
   const n = document.getElementById('hudNote');
   n.style.display = 'block';
@@ -277,7 +305,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.5; // visibility multiplier (was 7.0 — too cartoon-huge; type-relative sizing kept)
-const BUILD_MARK = 'trail-mesh-v2'; // served-code marker for deploy verify
+const BUILD_MARK = 'hud-trail-v3'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -887,12 +915,13 @@ const aircraft = new Map();
 let selectedId = null;
 let settings = {
   radiusNm: 50,
-  trailLen: 40,
+  trailLen: 55,
   altScale: 1.2,
   showGround: false,
   filter: '',
   arrivalsOnly: true,
   showVelVec: true,
+  showAltSticks: false,
 };
 let lastArrivals = [];
 
@@ -915,6 +944,12 @@ $('sAltScale').oninput = (e) => {
 $('sGround').onchange = (e) => { settings.showGround = e.target.checked; };
 $('sAuto').onchange = (e) => { controls.autoRotate = e.target.checked; };
 $('sVelVec').onchange = (e) => { settings.showVelVec = e.target.checked; };
+$('sAltSticks').onchange = (e) => {
+  settings.showAltSticks = e.target.checked;
+  for (const rec of aircraft.values()) {
+    if (rec.stick) rec.stick.visible = settings.showAltSticks;
+  }
+};
 $('sFilter').oninput = (e) => { settings.filter = e.target.value.trim().toUpperCase(); };
 $('btnClear').onclick = () => {
   settings.filter = '';
@@ -1049,6 +1084,15 @@ function isArrival(p) {
   return false;
 }
 
+// ─── Soft ribbon trails ──────────────────────────────────────────────────────
+const TRAIL_MAX_PTS = 160;
+const TRAIL_HALF_W = 110; // meters — soft wake width at altitude
+const _tA = new THREE.Vector3();
+const _tB = new THREE.Vector3();
+const _tTan = new THREE.Vector3();
+const _tSide = new THREE.Vector3();
+const _tUp = new THREE.Vector3(0, 1, 0);
+
 // ─── Aircraft lifecycle ──────────────────────────────────────────────────────
 function createAircraft(icao, typeHint) {
   const group = new THREE.Group();
@@ -1073,15 +1117,16 @@ function createAircraft(icao, typeHint) {
   glow.scale.set(glowSize, glowSize, 1);
   group.add(glow);
 
-  // vertical stick (altitude-colored)
+  // vertical stick (altitude-colored) — default OFF (toggle in View)
   const stickGeo = new THREE.BufferGeometry();
   const stickPos = new Float32Array(6);
   const stickCol = new Float32Array(6);
   stickGeo.setAttribute('position', new THREE.BufferAttribute(stickPos, 3));
   stickGeo.setAttribute('color', new THREE.BufferAttribute(stickCol, 3));
   const stick = new THREE.Line(stickGeo, new THREE.LineBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.75,
+    vertexColors: true, transparent: true, opacity: 0.28,
   }));
+  stick.visible = settings.showAltSticks;
   group.add(stick);
 
   // short velocity vector
@@ -1092,22 +1137,36 @@ function createAircraft(icao, typeHint) {
   }));
   group.add(velLine);
 
-  // trail
+  // Soft altitude ribbon (wake-like fat path) — not a neon 1px Line
+  const maxPts = TRAIL_MAX_PTS;
   const trailGeo = new THREE.BufferGeometry();
-  const maxPts = 130;
-  const trailPos = new Float32Array(maxPts * 3);
-  const trailCol = new Float32Array(maxPts * 3);
+  // Interleaved L/R ribbon vertices: [L0,R0,L1,R1,...]
+  const trailPos = new Float32Array(maxPts * 2 * 3);
+  const trailCol = new Float32Array(maxPts * 2 * 3);
+  const trailIdx = new Uint16Array(Math.max(0, maxPts - 1) * 6);
+  for (let i = 0; i < maxPts - 1; i++) {
+    const b = i * 6;
+    const v = i * 2;
+    trailIdx[b] = v; trailIdx[b + 1] = v + 1; trailIdx[b + 2] = v + 2;
+    trailIdx[b + 3] = v + 1; trailIdx[b + 4] = v + 3; trailIdx[b + 5] = v + 2;
+  }
   trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
   trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 3));
+  trailGeo.setIndex(new THREE.BufferAttribute(trailIdx, 1));
   trailGeo.setDrawRange(0, 0);
-  const trail = new THREE.Line(
+  const trail = new THREE.Mesh(
     trailGeo,
-    new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.95,
-      linewidth: 2, depthWrite: false,
+    new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
     })
   );
   trail.frustumCulled = false;
+  trail.renderOrder = 1;
   scene.add(trail);
 
   scene.add(group);
@@ -1235,43 +1294,101 @@ function disposeAircraft(rec) {
   if (rec.label && rec.label.parentNode) rec.label.parentNode.removeChild(rec.label);
 }
 
+// Shared centerline scratch (x,y,z per sample) — avoids GC in updateTrail
+const _trailCtr = new Float32Array(TRAIL_MAX_PTS * 3);
+const _tXAxis = new THREE.Vector3(1, 0, 0);
+
+function fillTrailCenter(rec, tp, i, n, out, o) {
+  if (i === n - 1 && rec.display) {
+    out[o] = rec.display.x; out[o + 1] = rec.display.y; out[o + 2] = rec.display.z;
+    return;
+  }
+  if (tp.lat != null && tp.lon != null) {
+    const w = enu(tp.lat, tp.lon, (tp.altM || 0) * settings.altScale);
+    out[o] = w.x; out[o + 1] = w.y; out[o + 2] = w.z;
+  } else {
+    out[o] = tp.x || 0; out[o + 1] = tp.y || 0; out[o + 2] = tp.z || 0;
+  }
+}
+
 function updateTrail(rec) {
   const pts = rec.trailPts;
   const n = Math.min(pts.length, settings.trailLen);
-  if (n < 1) {
+  if (n < 2) {
+    rec.trail.visible = false;
     rec.trailGeo.setDrawRange(0, 0);
     return;
   }
+  rec.trail.visible = true;
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
-    const tp = pts[start + i];
+    fillTrailCenter(rec, pts[start + i], i, n, _trailCtr, i * 3);
+  }
+  for (let i = 0; i < n; i++) {
     const o = i * 3;
-    let x, y, z;
-    // Last vertex always snugs to current aircraft display so the trail
-    // never detaches while dead-reckoning between ADS-B polls.
-    if (i === n - 1 && rec.display) {
-      x = rec.display.x;
-      y = rec.display.y;
-      z = rec.display.z;
-    } else if (tp.lat != null && tp.lon != null) {
-      const w = enu(tp.lat, tp.lon, (tp.altM || 0) * settings.altScale);
-      x = w.x; y = w.y; z = w.z;
+    const cx = _trailCtr[o], cy = _trailCtr[o + 1], cz = _trailCtr[o + 2];
+    if (i < n - 1) {
+      _tTan.set(_trailCtr[o + 3] - cx, _trailCtr[o + 4] - cy, _trailCtr[o + 5] - cz);
     } else {
-      x = tp.x || 0; y = tp.y || 0; z = tp.z || 0;
+      _tTan.set(cx - _trailCtr[o - 3], cy - _trailCtr[o - 2], cz - _trailCtr[o - 1]);
     }
-    rec.trailPos[o] = x;
-    rec.trailPos[o + 1] = y;
-    rec.trailPos[o + 2] = z;
-    const fade = 0.35 + 0.65 * (i / Math.max(1, n - 1));
-    const c = altColor(tp.altM);
-    rec.trailCol[o] = c.r * fade;
-    rec.trailCol[o + 1] = c.g * fade;
-    rec.trailCol[o + 2] = c.b * fade;
+    if (_tTan.lengthSq() < 1e-6) _tTan.set(1, 0, 0);
+    _tTan.normalize();
+    _tSide.crossVectors(_tTan, _tUp);
+    if (_tSide.lengthSq() < 1e-8) _tSide.crossVectors(_tTan, _tXAxis);
+    _tSide.normalize();
+
+    const u = i / Math.max(1, n - 1);
+    const halfW = TRAIL_HALF_W * (0.35 + 0.65 * u);
+    const fade = Math.pow(u, 1.15);
+    const c = altColor(pts[start + i].altM);
+    const cr = c.r * fade, cg = c.g * fade, cb = c.b * fade;
+    const lo = i * 6;
+    rec.trailPos[lo]     = cx + _tSide.x * halfW;
+    rec.trailPos[lo + 1] = cy + _tSide.y * halfW;
+    rec.trailPos[lo + 2] = cz + _tSide.z * halfW;
+    rec.trailPos[lo + 3] = cx - _tSide.x * halfW;
+    rec.trailPos[lo + 4] = cy - _tSide.y * halfW;
+    rec.trailPos[lo + 5] = cz - _tSide.z * halfW;
+    rec.trailCol[lo] = cr; rec.trailCol[lo + 1] = cg; rec.trailCol[lo + 2] = cb;
+    rec.trailCol[lo + 3] = cr; rec.trailCol[lo + 4] = cg; rec.trailCol[lo + 5] = cb;
   }
   rec.trailGeo.attributes.position.needsUpdate = true;
   rec.trailGeo.attributes.color.needsUpdate = true;
-  rec.trailGeo.setDrawRange(0, n);
+  rec.trailGeo.setDrawRange(0, (n - 1) * 6);
   rec.trailGeo.computeBoundingSphere();
+}
+
+/** Fast per-frame tip attach: move last ribbon ring to aircraft without full rebuild. */
+function snugTrailTip(rec) {
+  const pts = rec.trailPts;
+  const n = Math.min(pts.length, settings.trailLen);
+  if (n < 2 || !rec.display) return;
+  const start = pts.length - n;
+  const i = n - 1;
+  const tpPrev = pts[start + i - 1];
+  let px, py, pz;
+  if (tpPrev.lat != null && tpPrev.lon != null) {
+    const w = enu(tpPrev.lat, tpPrev.lon, (tpPrev.altM || 0) * settings.altScale);
+    px = w.x; py = w.y; pz = w.z;
+  } else {
+    px = tpPrev.x || 0; py = tpPrev.y || 0; pz = tpPrev.z || 0;
+  }
+  _tTan.set(rec.display.x - px, rec.display.y - py, rec.display.z - pz);
+  if (_tTan.lengthSq() < 1e-6) _tTan.set(1, 0, 0);
+  _tTan.normalize();
+  _tSide.crossVectors(_tTan, _tUp);
+  if (_tSide.lengthSq() < 1e-8) _tSide.set(0, 0, 1);
+  else _tSide.normalize();
+  const halfW = TRAIL_HALF_W;
+  const lo = i * 6;
+  rec.trailPos[lo]     = rec.display.x + _tSide.x * halfW;
+  rec.trailPos[lo + 1] = rec.display.y + _tSide.y * halfW;
+  rec.trailPos[lo + 2] = rec.display.z + _tSide.z * halfW;
+  rec.trailPos[lo + 3] = rec.display.x - _tSide.x * halfW;
+  rec.trailPos[lo + 4] = rec.display.y - _tSide.y * halfW;
+  rec.trailPos[lo + 5] = rec.display.z - _tSide.z * halfW;
+  rec.trailGeo.attributes.position.needsUpdate = true;
 }
 
 function applyPose(rec) {
@@ -1284,16 +1401,19 @@ function applyPose(rec) {
   tintModel(rec.model, col);
   rec.glow.material.color.copy(col);
 
-  // stick: ground → aircraft, vertex-colored (ground muted, aircraft bright)
-  const pos = rec.stick.geometry.attributes.position.array;
-  const scol = rec.stick.geometry.attributes.color.array;
-  pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
-  pos[3] = 0; pos[4] = 0; pos[5] = 0;
-  const cLo = altColor(0);
-  scol[0] = cLo.r * 0.35; scol[1] = cLo.g * 0.35; scol[2] = cLo.b * 0.35;
-  scol[3] = col.r; scol[4] = col.g; scol[5] = col.b;
-  rec.stick.geometry.attributes.position.needsUpdate = true;
-  rec.stick.geometry.attributes.color.needsUpdate = true;
+  // stick: ground → aircraft (subtle; default hidden)
+  rec.stick.visible = !!settings.showAltSticks;
+  if (settings.showAltSticks) {
+    const pos = rec.stick.geometry.attributes.position.array;
+    const scol = rec.stick.geometry.attributes.color.array;
+    pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
+    pos[3] = 0; pos[4] = 0; pos[5] = 0;
+    const cLo = altColor(0);
+    scol[0] = cLo.r * 0.2; scol[1] = cLo.g * 0.2; scol[2] = cLo.b * 0.2;
+    scol[3] = col.r * 0.45; scol[4] = col.g * 0.45; scol[5] = col.b * 0.45;
+    rec.stick.geometry.attributes.position.needsUpdate = true;
+    rec.stick.geometry.attributes.color.needsUpdate = true;
+  }
 
   // Orient: track (yaw) + slight pitch from vertical rate
   // Local +Z is nose/forward. ENU: +X east, +Y up, +Z south (−north).
@@ -1356,11 +1476,11 @@ async function poll() {
     }
     ingest(data);
     lastPollAt = performance.now();
-    $('srcLine').textContent = 'source: ' + lastSource + (nStates ? ' (' + nStates + ')' : '');
+    $('srcLine').textContent = lastSource + (nStates ? ' · ' + nStates : '');
     $('uiSource').textContent = lastSource === 'adsb.lol' ? 'adsb.lol'
       : lastSource === 'adsb.fi' ? 'adsb.fi'
       : lastSource === 'opensky' ? 'OpenSky' : lastSource;
-    $('pollLine').textContent = 'poll: ' + new Date().toLocaleTimeString();
+    $('pollLine').textContent = new Date().toLocaleTimeString();
   } catch (e) {
     pollError = e.message || String(e);
     showToast('ADS-B poll failed: ' + pollError);
@@ -1454,7 +1574,7 @@ function ingest(data) {
     if (!rec.trailPts.length || prevLat !== p.lat || prevLon !== p.lon ||
         Math.abs((rec.trailPts[rec.trailPts.length - 1].altM || 0) - p.altM) > 25) {
       rec.trailPts.push({ lat: p.lat, lon: p.lon, altM: p.altM || 0 });
-      if (rec.trailPts.length > 130) rec.trailPts.shift();
+      if (rec.trailPts.length > TRAIL_MAX_PTS) rec.trailPts.shift();
       rec.lastTrailSample = now;
     }
     updateTrail(rec);
@@ -1520,31 +1640,27 @@ function animate() {
         const last = rec.trailPts[rec.trailPts.length - 1];
         movedM = haversineNm(last.lat, last.lon, estLat, estLon) * NM_M;
       }
-      if (since > 2500 || movedM > 400) {
+      if (since > 1500 || movedM > 250) {
         rec.trailPts.push({ lat: estLat, lon: estLon, altM: estAlt });
-        if (rec.trailPts.length > 130) rec.trailPts.shift();
+        if (rec.trailPts.length > TRAIL_MAX_PTS) rec.trailPts.shift();
         rec.lastTrailSample = t;
         updateTrail(rec);
       }
     }
-    // Snug trail endpoint to aircraft every frame (positions only — avoid GC)
-    if (rec.trailPts.length >= 1) {
-      const n = Math.min(rec.trailPts.length, settings.trailLen);
-      const o = (n - 1) * 3;
-      rec.trailPos[o] = rec.display.x;
-      rec.trailPos[o + 1] = rec.display.y;
-      rec.trailPos[o + 2] = rec.display.z;
-      rec.trailGeo.attributes.position.needsUpdate = true;
-      // Keep last sample's geo alt in sync for color continuity on next full update
+    // Snug ribbon tip to aircraft every frame (keep wake attached)
+    if (rec.trailPts.length >= 2) {
+      snugTrailTip(rec);
       const last = rec.trailPts[rec.trailPts.length - 1];
       last.altM = estAlt;
     }
 
     // Stick: local ground→aircraft (group origin); keep bottom on y=0 world
-    const pos = rec.stick.geometry.attributes.position.array;
-    pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
-    pos[3] = 0; pos[4] = 0; pos[5] = 0;
-    rec.stick.geometry.attributes.position.needsUpdate = true;
+    if (settings.showAltSticks && rec.stick.visible) {
+      const pos = rec.stick.geometry.attributes.position.array;
+      pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
+      pos[3] = 0; pos[4] = 0; pos[5] = 0;
+      rec.stick.geometry.attributes.position.needsUpdate = true;
+    }
     updateLabelScreen(rec, camera);
   }
 
