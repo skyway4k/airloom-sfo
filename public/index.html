@@ -153,6 +153,129 @@
   .ac-label .meta { color: #9bb4c8; font-size: 9px; margin-top: 1px; }
   .ac-label.dim { opacity: 0.35; }
   .ac-label.hidden { display: none; }
+
+  /* Camera mode control */
+  #camBar {
+    position: absolute; top: max(14px, env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%); z-index: 12; pointer-events: auto;
+    display: flex; gap: 0; border-radius: 8px; overflow: hidden;
+    background: rgba(10, 16, 26, 0.78); border: 1px solid rgba(80,140,200,0.35);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  }
+  #camBar button {
+    width: auto; margin: 0; border: none; border-radius: 0;
+    padding: 8px 16px; letter-spacing: 0.1em; font-size: 11px; font-weight: 600;
+    background: transparent; color: var(--muted); cursor: pointer;
+  }
+  #camBar button + button { border-left: 1px solid rgba(80,140,200,0.25); }
+  #camBar button.active {
+    background: rgba(62, 207, 142, 0.22); color: #e8fff4;
+  }
+  #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
+
+  /* Cockpit infographic (top-right glass) */
+  #infoPanel {
+    position: absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
+    z-index: 12; pointer-events: none; width: min(320px, calc(100vw - 28px));
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #infoPanel .ig-card {
+    background: linear-gradient(145deg, rgba(14,22,34,0.88), rgba(8,12,20,0.82));
+    border: 1px solid rgba(100, 170, 230, 0.28);
+    border-radius: 12px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+    padding: 12px 14px 10px;
+    font-family: var(--mono); color: var(--text);
+    pointer-events: auto;
+  }
+  #infoPanel .ig-card.secondary {
+    opacity: 0.92; border-color: rgba(78, 205, 196, 0.35);
+  }
+  #infoPanel .ig-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    margin-bottom: 6px;
+  }
+  #infoPanel .ig-cs {
+    font-size: 15px; font-weight: 600; letter-spacing: 0.08em; color: #f0f7ff;
+  }
+  #infoPanel .ig-badge {
+    font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); background: rgba(62,207,142,0.12);
+    border: 1px solid rgba(62,207,142,0.35); border-radius: 999px;
+    padding: 2px 8px; white-space: nowrap;
+  }
+  #infoPanel .ig-badge.sec { color: var(--cyan); background: rgba(78,205,196,0.1); border-color: rgba(78,205,196,0.35); }
+  #infoPanel .ig-type {
+    font-size: 11px; color: #a8c0d4; margin-bottom: 8px; line-height: 1.35;
+  }
+  #infoPanel .ig-type b { color: #e0eef8; font-weight: 600; }
+  #infoPanel .ig-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 5px 12px;
+    font-size: 11px;
+  }
+  #infoPanel .ig-grid .k { color: #6a849a; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+  #infoPanel .ig-grid .v { color: #e8f4ff; font-weight: 600; font-size: 12px; }
+  #infoPanel .ig-foot {
+    margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(80,140,200,0.18);
+    font-size: 10px; color: #8aa0b4; display: flex; justify-content: space-between; gap: 8px;
+  }
+  #infoPanel .ig-foot strong { color: var(--cyan); font-weight: 600; }
+  #infoPanel .ig-empty {
+    color: var(--muted); font-size: 11px; padding: 4px 0;
+  }
+  #infoPanel.hidden, #infoPanel .ig-card.hidden { display: none; }
+
+  #dualFrame {
+    position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    display: none;
+  }
+  #dualFrame.on { display: block; }
+  #dualFrame .split-line {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    background: linear-gradient(180deg, transparent, rgba(78,205,196,0.55), transparent);
+    transform: translateX(-50%);
+  }
+  #dualFrame .pip-frame {
+    position: absolute; right: 14px; bottom: max(56px, env(safe-area-inset-bottom));
+    width: min(34vw, 280px); height: min(28vh, 200px);
+    border: 1px solid rgba(78,205,196,0.5); border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+    display: none;
+  }
+  #dualFrame.pip .pip-frame { display: block; }
+  #dualFrame.pip .split-line { display: none; }
+  #dualFrame .tag {
+    position: absolute; top: 8px; left: 10px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+    color: #cfe8ff; text-shadow: 0 1px 6px #000; background: rgba(0,0,0,0.45);
+    padding: 3px 8px; border-radius: 4px;
+  }
+  #dualFrame .tag.b { left: auto; right: 10px; }
+  #dualFrame.pip .tag.a { display: none; }
+  #dualFrame.pip .tag.b {
+    right: 22px; bottom: calc(max(56px, env(safe-area-inset-bottom)) + min(28vh, 200px) - 28px);
+    top: auto; left: auto;
+  }
+
+  #stats.compact-hud { opacity: 0.85; }
+
+  @media (max-width: 720px) {
+    #camBar {
+      top: auto; bottom: max(72px, calc(env(safe-area-inset-bottom) + 64px));
+      left: 50%;
+    }
+    #camBar button { padding: 9px 14px; font-size: 12px; }
+    #infoPanel {
+      top: max(52px, calc(env(safe-area-inset-top) + 44px));
+      right: 10px; width: min(270px, calc(100vw - 64px));
+    }
+    #infoPanel .ig-cs { font-size: 13px; }
+    #infoPanel .ig-grid .v { font-size: 11px; }
+    #hud #stats { display: none; }
+  }
+
   #toast.visible { display: block; }
   @media (max-width: 720px) {
     #drawer { width: min(86vw, 320px); }
@@ -180,13 +303,30 @@
 <canvas id="c"></canvas>
 <div id="acLabels" aria-hidden="true"></div>
 
+<div id="camBar" role="group" aria-label="Camera mode">
+  <button type="button" id="btnOrbit" class="ghost">Orbit</button>
+  <button type="button" id="btnCockpit" class="active">Cockpit</button>
+</div>
+
+<div id="dualFrame" aria-hidden="true">
+  <div class="split-line"></div>
+  <div class="pip-frame"></div>
+  <div class="tag a">PRIMARY</div>
+  <div class="tag b">SECONDARY</div>
+</div>
+
+<div id="infoPanel" class="hidden">
+  <div class="ig-card" id="igPrimary"></div>
+  <div class="ig-card secondary hidden" id="igSecondary"></div>
+</div>
+
 <div id="hud">
   <div class="brand">
     <h1>AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
     <div class="sub" id="hudSub">San Francisco Bay · private &amp; GA ADS-B</div>
     <div class="note" id="hudNote" style="display:none"></div>
   </div>
-  <div id="stats">
+  <div id="stats" class="compact-hud">
     <div class="stat-main">
       <span class="arr" id="gaCount">—</span><span class="lbl"> private/GA</span>
       <span class="n" id="acCount">—</span><span class="lbl"> shown</span>
@@ -226,6 +366,7 @@
 
     <div class="section">
       <h3>View</h3>
+      <div class="row"><label>Camera</label><span class="val" id="uiCamMode">cockpit</span></div>
       <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">50</span></div>
       <input type="range" id="sRadius" min="15" max="120" value="50" step="5" />
       <div class="row"><label>Trail length</label><span class="val" id="vTrail">55</span></div>
@@ -308,7 +449,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'ga-focus-v1'; // served-code marker for deploy verify
+const BUILD_MARK = 'cockpit-v1'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -342,6 +483,106 @@ function angDiff(a, b) {
   let d = ((a - b + 540) % 360) - 180;
   return d;
 }
+
+// Bay Area fields used for inbound / ETA scoring
+const BAY_FIELDS = [
+  { icao: 'KSFO', short: 'SFO', name: 'San Francisco Intl', lat: 37.6189, lon: -122.3750 },
+  { icao: 'KSQL', short: 'SQL', name: 'San Carlos', lat: 37.5119, lon: -122.2495 },
+  { icao: 'KHAF', short: 'HAF', name: 'Half Moon Bay', lat: 37.5134, lon: -122.5012 },
+  { icao: 'KPAO', short: 'PAO', name: 'Palo Alto', lat: 37.4611, lon: -122.1150 },
+  { icao: 'KSJC', short: 'SJC', name: 'San Jose Intl', lat: 37.3626, lon: -121.9290 },
+];
+
+const TYPE_PLAIN = {
+  C152: 'Cessna 152', C172: 'Cessna 172 Skyhawk', C182: 'Cessna 182 Skylane',
+  C206: 'Cessna 206', C208: 'Cessna 208 Caravan', C210: 'Cessna 210',
+  C25A: 'Citation CJ2', C25B: 'Citation CJ3', C25C: 'Citation CJ4', C25M: 'Citation M2',
+  C525: 'Citation Jet', C550: 'Citation II', C560: 'Citation V', C56X: 'Citation Excel',
+  C680: 'Citation Sovereign', C68A: 'Citation Latitude', C700: 'Citation Longitude',
+  C750: 'Citation X',
+  SR20: 'Cirrus SR20', SR22: 'Cirrus SR22', S22T: 'Cirrus SR22T',
+  PA28: 'Piper Cherokee', P28A: 'Piper Cherokee', PA32: 'Piper Saratoga',
+  PA34: 'Piper Seneca', PA46: 'Piper Malibu',
+  DA40: 'Diamond DA40', DA42: 'Diamond DA42', DA62: 'Diamond DA62',
+  BE20: 'King Air 200', BE30: 'King Air 300', B350: 'King Air 350',
+  BE40: 'Beechjet 400', BE58: 'Baron 58', BE9L: 'King Air C90',
+  PC12: 'Pilatus PC-12', PC24: 'Pilatus PC-24',
+  TBM7: 'TBM 700', TBM8: 'TBM 850', TBM9: 'TBM 900',
+  LJ31: 'Learjet 31', LJ35: 'Learjet 35', LJ40: 'Learjet 40', LJ45: 'Learjet 45',
+  LJ55: 'Learjet 55', LJ60: 'Learjet 60', LJ70: 'Learjet 70', LJ75: 'Learjet 75',
+  CL30: 'Challenger 300', CL35: 'Challenger 350', CL60: 'Challenger 600',
+  GLF4: 'Gulfstream IV', GLF5: 'Gulfstream V', GLF6: 'Gulfstream G650',
+  GL5T: 'Gulfstream G550', GL6T: 'Gulfstream G650', GLEX: 'Global Express',
+  GA6C: 'Global 6000', GA7C: 'Global 7500',
+  FA50: 'Falcon 50', FA7X: 'Falcon 7X', FA8X: 'Falcon 8X', F2TH: 'Falcon 2000',
+  F900: 'Falcon 900', GALX: 'Gulfstream G200', G150: 'Gulfstream G150',
+  G200: 'Gulfstream G200', G280: 'Gulfstream G280',
+  HA4T: 'HondaJet', H25B: 'Hawker 800', SF50: 'Vision Jet', E50P: 'Phenom 100',
+  E55P: 'Phenom 300', PRM1: 'Premier 1', HDJT: 'HondaJet',
+  EC35: 'EC135', EC45: 'EC145', B407: 'Bell 407', B429: 'Bell 429', R44: 'Robinson R44',
+  R66: 'Robinson R66', A109: 'AW109', A139: 'AW139', S76: 'S-76',
+};
+
+function plainTypeName(icaoType) {
+  if (!icaoType) return null;
+  const t = String(icaoType).toUpperCase().trim();
+  if (TYPE_PLAIN[t]) return TYPE_PLAIN[t];
+  // soft prefix matches
+  for (const [k, v] of Object.entries(TYPE_PLAIN)) {
+    if (t.startsWith(k.slice(0, 3)) && k.length >= 3 && t.slice(0, 3) === k.slice(0, 3) && Math.abs(t.length - k.length) <= 1) {
+      // too fuzzy — skip
+    }
+  }
+  if (/^C25/.test(t)) return 'Citation CJ';
+  if (/^C56|^C68|^C75/.test(t)) return 'Cessna Citation';
+  if (/^GLF|^GL[56]|^GLE/.test(t)) return 'Gulfstream';
+  if (/^LJ/.test(t)) return 'Learjet';
+  if (/^CL3|^CL6/.test(t)) return 'Challenger';
+  if (/^FA|^F2TH|^F900/.test(t)) return 'Dassault Falcon';
+  if (/^PC1/.test(t)) return 'Pilatus PC-12';
+  if (/^TBM/.test(t)) return 'Daher TBM';
+  if (/^BE2|^B35/.test(t)) return 'King Air';
+  if (/^SR2/.test(t)) return 'Cirrus SR';
+  return null;
+}
+
+function nearestBayField(lat, lon) {
+  let best = BAY_FIELDS[0], bestD = Infinity;
+  for (const f of BAY_FIELDS) {
+    const d = haversineNm(lat, lon, f.lat, f.lon);
+    if (d < bestD) { bestD = d; best = f; }
+  }
+  return { field: best, distNm: bestD };
+}
+
+/** Closing-speed ETA (minutes) toward a field; null if diverging / too slow. */
+function etaToFieldMin(lat, lon, track, gsKt, field) {
+  if (!field || gsKt == null || gsKt < 25) return null;
+  const dist = haversineNm(lat, lon, field.lat, field.lon);
+  const brg = bearingDeg(lat, lon, field.lat, field.lon);
+  let closing = gsKt;
+  if (track != null && !isNaN(track)) {
+    const diff = Math.abs(angDiff(track, brg));
+    const cos = Math.cos(diff * Math.PI / 180);
+    if (cos <= 0.05) return null; // not closing
+    closing = gsKt * Math.max(0.15, cos);
+  }
+  if (closing < 15) return null;
+  return (dist / closing) * 60;
+}
+
+/** Time (min) to closest point of approach along track to ORIGIN / field. */
+function timeToClosestApproachMin(lat, lon, track, gsKt, fieldLat, fieldLon) {
+  if (track == null || gsKt == null || gsKt < 25) return null;
+  const brg = bearingDeg(lat, lon, fieldLat, fieldLon);
+  const dist = haversineNm(lat, lon, fieldLat, fieldLon);
+  const diff = angDiff(track, brg) * Math.PI / 180;
+  // along-track distance to CPA ≈ dist * cos(heading error)
+  const along = dist * Math.cos(diff);
+  if (along <= 0) return null;
+  return (along / gsKt) * 60;
+}
+
 
 function altColor(altM) {
   // Full vivid rainbow by altitude (0–12000 m):
@@ -1313,8 +1554,31 @@ let settings = {
   trafficMode: 'ga', // 'ga' | 'arrivals' | 'all'
   showVelVec: true,
   showAltSticks: false,
+  cameraMode: 'cockpit', // 'orbit' | 'cockpit' — cockpit default for GA focus
 };
 let lastArrivals = [];
+
+// ─── Cockpit follow state ────────────────────────────────────────────────────
+const cockpitCam = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 5, 5e6);
+const cockpitCamB = new THREE.PerspectiveCamera(62, innerWidth / (innerHeight * 0.5), 5, 5e6);
+const _ckPos = new THREE.Vector3();
+const _ckLook = new THREE.Vector3();
+const _ckPosSm = new THREE.Vector3();
+const _ckLookSm = new THREE.Vector3();
+const _ckPosB = new THREE.Vector3();
+const _ckLookB = new THREE.Vector3();
+const _ckPosBSm = new THREE.Vector3();
+const _ckLookBSm = new THREE.Vector3();
+const _ckFwd = new THREE.Vector3();
+const _ckUp = new THREE.Vector3(0, 1, 0);
+let cockpitPrimaryId = null;
+let cockpitSecondaryId = null;
+let cockpitDual = false;
+let cockpitDualLayout = 'split'; // 'split' | 'pip'
+let _ckSmoothInit = false;
+let _ckSmoothInitB = false;
+let inboundCache = []; // scored inbound GA from last ingest
+
 
 // ─── UI wiring ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -1333,7 +1597,6 @@ $('sAltScale').oninput = (e) => {
   }
 };
 $('sGround').onchange = (e) => { settings.showGround = e.target.checked; };
-$('sAuto').onchange = (e) => { controls.autoRotate = e.target.checked; };
 $('sVelVec').onchange = (e) => { settings.showVelVec = e.target.checked; };
 $('sAltSticks').onchange = (e) => {
   settings.showAltSticks = e.target.checked;
@@ -1439,6 +1702,277 @@ $('btnArrivals').onclick = () => setMode('arrivals');
 $('btnAllTraffic').onclick = () => setMode('all');
 setMode('ga'); // persist initial default: Private/GA
 
+function setCameraMode(mode) {
+  settings.cameraMode = mode === 'orbit' ? 'orbit' : 'cockpit';
+  const isCockpit = settings.cameraMode === 'cockpit';
+  $('btnCockpit').classList.toggle('active', isCockpit);
+  $('btnOrbit').classList.toggle('active', !isCockpit);
+  if ($('uiCamMode')) $('uiCamMode').textContent = settings.cameraMode;
+  controls.enabled = !isCockpit;
+  controls.autoRotate = !isCockpit && $('sAuto').checked;
+  if (!isCockpit) {
+    $('dualFrame').classList.remove('on', 'pip');
+    _ckSmoothInit = false;
+    _ckSmoothInitB = false;
+  } else {
+    // snap smooth state on next frame
+    _ckSmoothInit = false;
+    _ckSmoothInitB = false;
+  }
+  updateInfoPanel();
+}
+$('btnCockpit').onclick = () => setCameraMode('cockpit');
+$('btnOrbit').onclick = () => setCameraMode('orbit');
+$('sAuto').onchange = (e) => {
+  if (settings.cameraMode === 'orbit') controls.autoRotate = e.target.checked;
+};
+setCameraMode(settings.cameraMode);
+
+/** Score whether private/GA is inbound to the Bay Area. */
+function scoreInboundGa(p) {
+  if (!p || p.onGround) return null;
+  if (!(p.isPrivateGa || isPrivateOrGa(p))) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  if (altFt < 50) return null; // essentially on deck
+  const { field, distNm } = nearestBayField(p.lat, p.lon);
+  if (distNm > 90) return null;
+
+  const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
+    : (p.vel != null ? p.vel / KT_MS : null);
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  const brg = bearingDeg(p.lat, p.lon, field.lat, field.lon);
+  const trackDiff = p.track != null ? Math.abs(angDiff(p.track, brg)) : 60;
+  const toward = trackDiff <= 105;
+  const descending = vrFpm < -40;
+  const low = altFt < 14000;
+  const close = distNm < 35;
+
+  // Decreasing distance to nearest Bay field (from prior poll on this aircraft)
+  let closingDist = false;
+  const prevD = (p._prevDistField != null) ? p._prevDistField
+    : (p._distField != null && distNm < p._distField - 0.15 ? p._distField : null);
+  if (p._distField != null && distNm < p._distField - 0.15) closingDist = true;
+  if (prevD != null && prevD - distNm > 0.15) closingDist = true;
+
+  const inbound = toward && (descending || low || close || closingDist);
+  // Also accept classic KSFO arrival heuristic for GA
+  const arr = p.isArrival || isArrival(p);
+  if (!inbound && !arr) return null;
+
+  const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
+  const tca = timeToClosestApproachMin(p.lat, p.lon, p.track, gs, field.lat, field.lon);
+  const etaUse = eta != null ? eta : (tca != null ? tca : distNm * 1.2);
+
+  // Prefer closer / sooner ETA / descending
+  let score = etaUse;
+  score += distNm * 0.15;
+  if (descending) score *= 0.88;
+  if (toward) score *= 0.92;
+  if (arr) score *= 0.9;
+  if (!toward && arr) score *= 1.05;
+
+  return {
+    icao: p.icao,
+    score,
+    etaMin: etaUse,
+    etaExact: eta,
+    tcaMin: tca,
+    field,
+    distNm,
+    toward,
+    descending,
+    gsKt: gs,
+    altFt,
+  };
+}
+
+function pickCockpitTargets(fromList) {
+  const scored = [];
+  const src = fromList || [...aircraft.values()];
+  for (const p of src) {
+    const s = scoreInboundGa(p);
+    if (s) scored.push(s);
+  }
+  scored.sort((a, b) => a.score - b.score);
+  inboundCache = scored;
+
+  if (!scored.length) {
+    cockpitPrimaryId = null;
+    cockpitSecondaryId = null;
+    cockpitDual = false;
+    return;
+  }
+
+  const primary = scored[0];
+  cockpitPrimaryId = primary.icao;
+  cockpitSecondaryId = null;
+  cockpitDual = false;
+
+  if (scored.length >= 2) {
+    const secondary = scored[1];
+    const etaDiff = Math.abs((primary.etaMin || 0) - (secondary.etaMin || 0));
+    // Dual when ETAs within ~5 minutes, or along-track / score separation is tight
+    const closeInTime = etaDiff <= 5.0;
+    const bothSoon = (primary.etaMin || 99) <= 25 && (secondary.etaMin || 99) <= 25 && etaDiff <= 5.5;
+    const scoreNear = Math.abs(primary.score - secondary.score) < 4 && etaDiff <= 6;
+    if (closeInTime || bothSoon || scoreNear) {
+      cockpitSecondaryId = secondary.icao;
+      cockpitDual = true;
+      cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
+    }
+  }
+}
+
+function cockpitEyeFor(rec, outPos, outLook, lagScale) {
+  const track = rec.track != null ? rec.track : 0;
+  const rad = THREE.MathUtils.degToRad(track);
+  // Forward in ENU: east=sin, north=-z ⇒ (sin, 0, -cos)
+  _ckFwd.set(Math.sin(rad), 0, -Math.cos(rad));
+  let pitch = 0;
+  if (rec.vr != null && rec.vel != null && rec.vel > 5) {
+    pitch = Math.max(-0.25, Math.min(0.25, Math.atan2(rec.vr, rec.vel)));
+  }
+  // Pitch forward vector slightly
+  const cy = Math.cos(pitch), sy = Math.sin(pitch);
+  const fwdX = _ckFwd.x * cy;
+  const fwdY = sy;
+  const fwdZ = _ckFwd.z * cy;
+  _ckFwd.set(fwdX, fwdY, fwdZ).normalize();
+
+  const back = Math.max(12, (rec.len || 12) * SIZE_MULT * 0.08);
+  const up = Math.max(4.5, (rec.span || 10) * SIZE_MULT * 0.04);
+  outPos.copy(rec.display)
+    .addScaledVector(_ckFwd, -back)
+    .addScaledVector(_ckUp, up);
+  outLook.copy(rec.display)
+    .addScaledVector(_ckFwd, Math.max(400, 900 * (lagScale || 1)))
+    .addScaledVector(_ckUp, up * 0.35);
+}
+
+function updateCockpitCameras(dt) {
+  const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
+  const sec = (cockpitDual && cockpitSecondaryId) ? aircraft.get(cockpitSecondaryId) : null;
+
+  if (!prim || !prim.alive) {
+    // fallback: any closest airborne GA
+    let best = null, bestD = Infinity;
+    for (const r of aircraft.values()) {
+      if (r.onGround || !r.isPrivateGa) continue;
+      if (r.dist < bestD) { bestD = r.dist; best = r; }
+    }
+    if (!best) return false;
+    cockpitPrimaryId = best.icao;
+    return updateCockpitCameras(dt);
+  }
+
+  cockpitEyeFor(prim, _ckPos, _ckLook, 1);
+  const alpha = 1 - Math.exp(-3.2 * dt);
+  if (!_ckSmoothInit) {
+    _ckPosSm.copy(_ckPos); _ckLookSm.copy(_ckLook); _ckSmoothInit = true;
+  } else {
+    _ckPosSm.lerp(_ckPos, alpha);
+    _ckLookSm.lerp(_ckLook, alpha);
+  }
+  cockpitCam.position.copy(_ckPosSm);
+  cockpitCam.up.set(0, 1, 0);
+  cockpitCam.lookAt(_ckLookSm);
+
+  if (sec && sec.alive) {
+    cockpitEyeFor(sec, _ckPosB, _ckLookB, 1);
+    const alphaB = 1 - Math.exp(-3.2 * dt);
+    if (!_ckSmoothInitB) {
+      _ckPosBSm.copy(_ckPosB); _ckLookBSm.copy(_ckLookB); _ckSmoothInitB = true;
+    } else {
+      _ckPosBSm.lerp(_ckPosB, alphaB);
+      _ckLookBSm.lerp(_ckLookB, alphaB);
+    }
+    cockpitCamB.position.copy(_ckPosBSm);
+    cockpitCamB.up.set(0, 1, 0);
+    cockpitCamB.lookAt(_ckLookBSm);
+  } else {
+    cockpitDual = false;
+    _ckSmoothInitB = false;
+  }
+  return true;
+}
+
+function fmtEta(min) {
+  if (min == null || !isFinite(min)) return '—';
+  if (min < 1) return '<1 min';
+  if (min >= 90) return Math.round(min / 60) + ' h';
+  return Math.round(min) + ' min';
+}
+
+function fmtVr(rec) {
+  if (rec.vr == null || isNaN(rec.vr)) return '—';
+  const fpm = Math.round(rec.vr / 0.00508);
+  const sign = fpm > 0 ? '+' : '';
+  return sign + fpm.toLocaleString() + ' fpm';
+}
+
+function buildIgCardHtml(rec, scored, role) {
+  if (!rec) return '<div class="ig-empty">No inbound GA</div>';
+  const cs = (rec.callsign && rec.callsign.trim()) || rec.reg || rec.icao || '—';
+  const typ = rec.type || '—';
+  const plain = plainTypeName(rec.type);
+  const altFt = Math.round((rec.altM || 0) / FT_M);
+  const kt = spdKt(rec);
+  const hdg = rec.track != null ? Math.round(rec.track) : null;
+  const field = scored?.field || nearestBayField(rec.lat, rec.lon).field;
+  const distNm = scored?.distNm != null ? scored.distNm : nearestBayField(rec.lat, rec.lon).distNm;
+  const eta = scored?.etaExact != null ? scored.etaExact : scored?.etaMin;
+  const reg = rec.reg && rec.reg !== cs ? rec.reg : null;
+  const sq = rec.squawk || null;
+  const badge = role === 'secondary' ? 'SECONDARY' : (cockpitDual ? 'PRIMARY' : 'COCKPIT');
+  const badgeCls = role === 'secondary' ? 'ig-badge sec' : 'ig-badge';
+  return (
+    `<div class="ig-head"><div class="ig-cs">${cs}</div><div class="${badgeCls}">${badge}</div></div>` +
+    `<div class="ig-type"><b>${typ}</b>${plain ? ' · ' + plain : ''}${reg ? ' · ' + reg : ''}</div>` +
+    `<div class="ig-grid">` +
+      `<div><div class="k">Altitude</div><div class="v">${altFt.toLocaleString()} ft</div></div>` +
+      `<div><div class="k">Groundspeed</div><div class="v">${kt != null ? kt + ' kt' : '—'}</div></div>` +
+      `<div><div class="k">Heading</div><div class="v">${hdg != null ? hdg + '°' : '—'}</div></div>` +
+      `<div><div class="k">Vert rate</div><div class="v">${fmtVr(rec)}</div></div>` +
+      `<div><div class="k">To ${field.short}</div><div class="v">${distNm.toFixed(1)} nm</div></div>` +
+      `<div><div class="k">ETA</div><div class="v">${fmtEta(eta)}</div></div>` +
+    `</div>` +
+    `<div class="ig-foot"><span>hex <strong>${rec.icao}</strong></span>` +
+      `<span>${sq ? 'sqk <strong>' + sq + '</strong>' : (scored?.descending ? 'descending' : 'inbound')}</span></div>`
+  );
+}
+
+function updateInfoPanel() {
+  const panel = $('infoPanel');
+  const igP = $('igPrimary');
+  const igS = $('igSecondary');
+  if (settings.cameraMode !== 'cockpit') {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
+  const scoredP = inboundCache.find((s) => s.icao === cockpitPrimaryId) || null;
+  igP.innerHTML = buildIgCardHtml(prim, scoredP, 'primary');
+  if (cockpitDual && cockpitSecondaryId) {
+    const sec = aircraft.get(cockpitSecondaryId);
+    const scoredS = inboundCache.find((s) => s.icao === cockpitSecondaryId) || null;
+    igS.innerHTML = buildIgCardHtml(sec, scoredS, 'secondary');
+    igS.classList.remove('hidden');
+  } else {
+    igS.classList.add('hidden');
+  }
+}
+
+function syncDualChrome() {
+  const fr = $('dualFrame');
+  if (settings.cameraMode === 'cockpit' && cockpitDual && cockpitSecondaryId) {
+    fr.classList.add('on');
+    fr.classList.toggle('pip', cockpitDualLayout === 'pip');
+  } else {
+    fr.classList.remove('on', 'pip');
+  }
+}
+
 function showToast(msg, ms = 4000) {
   const t = $('toast');
   t.textContent = msg;
@@ -1515,8 +2049,26 @@ function renderArrivalsList(arrs) {
       const rec = aircraft.get(id);
       if (rec) {
         updateSelPanel(rec);
-        // nudge camera toward aircraft
-        controls.target.lerp(rec.display, 0.6);
+        if (settings.cameraMode === 'cockpit' && !rec.onGround) {
+          cockpitPrimaryId = id;
+          _ckSmoothInit = false;
+          const scored = scoreInboundGa(rec);
+          if (scored) {
+            const others = inboundCache.filter((s) => s.icao !== id);
+            if (others.length && Math.abs((scored.etaMin || 0) - (others[0].etaMin || 0)) <= 5) {
+              cockpitSecondaryId = others[0].icao;
+              cockpitDual = true;
+              cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
+            } else {
+              cockpitSecondaryId = null;
+              cockpitDual = false;
+            }
+          }
+          syncDualChrome();
+          updateInfoPanel();
+        } else {
+          controls.target.lerp(rec.display, 0.6);
+        }
       }
       renderArrivalsList(lastArrivals);
     });
@@ -1644,9 +2196,9 @@ function createAircraft(icao, typeHint) {
     lastTrailSample: 0,
     trailSide: new THREE.Vector3(1, 0, 0),
     lat: 0, lon: 0, altM: 0, track: 0, vel: 0, vr: 0, onGround: false, callsign: '',
-    type: typeHint || null, reg: null, gsKt: null, cat: info.cat, modelKey: info.key,
-    span: info.span, len: info.len, dist: 0, isArrival: false,
-    source: '',
+    type: typeHint || null, reg: null, gsKt: null, squawk: null, cat: info.cat, modelKey: info.key,
+    span: info.span, len: info.len, dist: 0, isArrival: false, isPrivateGa: false,
+    source: '', _distField: null, _prevDistField: null,
     target: new THREE.Vector3(),
     display: new THREE.Vector3(),
     lastPoll: 0,
@@ -2039,6 +2591,7 @@ function ingest(data) {
     const track = s[10];
     const vr = s[11];
     const geo = s[13];
+    const squawk = s[14] != null && String(s[14]).trim() ? String(s[14]).trim() : null;
     const altM = (geo != null && geo > 0) ? geo : (baro != null ? baro : 0);
     const dist = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
     const meta = metaByHex.get(icao);
@@ -2049,7 +2602,7 @@ function ingest(data) {
     if ((vel == null || isNaN(vel)) && gsKt != null) vel = gsKt * KT_MS;
     if (gsKt == null && vel != null) gsKt = vel / KT_MS;
     const cat = classifyType(type);
-    const p = { icao, callsign, lat, lon, altM, onGround, vel, track, vr, dist, source: src, type, reg, gsKt, cat };
+    const p = { icao, callsign, lat, lon, altM, onGround, vel, track, vr, dist, source: src, type, reg, gsKt, cat, squawk };
     p.isArrival = isArrival(p);
     parsed.push(p);
   }
@@ -2092,13 +2645,22 @@ function ingest(data) {
       aircraft.set(p.icao, rec);
     }
     const prevLat = rec.lat, prevLon = rec.lon;
+    const near = nearestBayField(p.lat, p.lon);
+    rec._prevDistField = rec._distField;
+    rec._distField = near.distNm;
+    p._prevDistField = rec._prevDistField;
+    p._distField = near.distNm;
     Object.assign(rec, {
       callsign: p.callsign, lat: p.lat, lon: p.lon, altM: p.altM,
       onGround: p.onGround, vel: p.vel, track: p.track, vr: p.vr,
       source: p.source, lastPoll: now, alive: true,
       type: p.type || rec.type, reg: p.reg || rec.reg, gsKt: p.gsKt,
       dist: p.dist, isArrival: p.isArrival, isPrivateGa: !!p.isPrivateGa, cat: p.cat || rec.cat,
+      squawk: p.squawk || rec.squawk || null,
+      nearestField: near.field.short, nearestFieldNm: near.distNm,
     });
+    // feed closing-distance into score via parsed proxy fields
+    p._prevDistField = p._prevDistField;
     ensureModel(rec);
     applyPose(rec);
 
@@ -2134,6 +2696,43 @@ function ingest(data) {
     : arrivals;
   renderArrivalsList(listForPanel);
   if (selectedId && aircraft.has(selectedId)) updateSelPanel(aircraft.get(selectedId));
+
+  // Cockpit target selection from live private/GA (prefer inbound)
+  const cockpitPool = [...aircraft.values()].filter((r) => r.isPrivateGa || settings.trafficMode !== 'ga');
+  // Attach prev dist onto pool objects for scoring
+  for (const r of cockpitPool) {
+    r._prevDistField = r._prevDistField;
+  }
+  pickCockpitTargets(cockpitPool);
+  // If selected aircraft is inbound GA, prefer it as primary
+  if (selectedId && aircraft.has(selectedId)) {
+    const sel = aircraft.get(selectedId);
+    if (sel && (sel.isPrivateGa || isPrivateOrGa(sel)) && !sel.onGround) {
+      const scored = scoreInboundGa(sel);
+      if (scored) {
+        cockpitPrimaryId = sel.icao;
+        // keep dual partner if still valid & within 5 min
+        if (cockpitDual && cockpitSecondaryId && cockpitSecondaryId !== sel.icao) {
+          const sec = inboundCache.find((s) => s.icao === cockpitSecondaryId);
+          if (sec && Math.abs((scored.etaMin || 0) - (sec.etaMin || 0)) <= 5.5) {
+            /* keep */
+          } else {
+            // re-evaluate dual vs new primary
+            const others = inboundCache.filter((s) => s.icao !== sel.icao);
+            if (others.length && Math.abs((scored.etaMin || 0) - (others[0].etaMin || 0)) <= 5) {
+              cockpitSecondaryId = others[0].icao;
+              cockpitDual = true;
+            } else {
+              cockpitSecondaryId = null;
+              cockpitDual = false;
+            }
+          }
+        }
+      }
+    }
+  }
+  syncDualChrome();
+  updateInfoPanel();
 }
 
 // ─── Interpolation / render ──────────────────────────────────────────────────
@@ -2201,11 +2800,72 @@ function animate() {
       pos[3] = 0; pos[4] = 0; pos[5] = 0;
       rec.stick.geometry.attributes.position.needsUpdate = true;
     }
-    updateLabelScreen(rec, camera);
+    // Labels use active camera (cockpit primary when in cockpit)
+    const labelCam = (settings.cameraMode === 'cockpit') ? cockpitCam : camera;
+    updateLabelScreen(rec, labelCam);
   }
 
-  controls.update();
-  renderer.render(scene, camera);
+  if (settings.cameraMode === 'cockpit') {
+    const ok = updateCockpitCameras(dt);
+    const w = innerWidth, h = innerHeight;
+    const dual = ok && cockpitDual && cockpitSecondaryId && aircraft.has(cockpitSecondaryId);
+    syncDualChrome();
+    if (dual && cockpitDualLayout === 'split') {
+      renderer.setScissorTest(true);
+      // Left — primary
+      cockpitCam.aspect = (w * 0.5) / h;
+      cockpitCam.updateProjectionMatrix();
+      renderer.setViewport(0, 0, w * 0.5, h);
+      renderer.setScissor(0, 0, w * 0.5, h);
+      renderer.render(scene, cockpitCam);
+      // Right — secondary
+      cockpitCamB.aspect = (w * 0.5) / h;
+      cockpitCamB.updateProjectionMatrix();
+      renderer.setViewport(w * 0.5, 0, w * 0.5, h);
+      renderer.setScissor(w * 0.5, 0, w * 0.5, h);
+      renderer.render(scene, cockpitCamB);
+      renderer.setScissorTest(false);
+    } else if (dual && cockpitDualLayout === 'pip') {
+      cockpitCam.aspect = w / h;
+      cockpitCam.updateProjectionMatrix();
+      renderer.setViewport(0, 0, w, h);
+      renderer.setScissorTest(false);
+      renderer.render(scene, cockpitCam);
+      // PiP bottom-right
+      const pipW = Math.min(w * 0.34, 280);
+      const pipH = Math.min(h * 0.28, 200);
+      const pipX = w - pipW - 14;
+      const pipY = Math.max(56, 14); // from bottom in GL coords
+      renderer.clearDepth();
+      renderer.setScissorTest(true);
+      cockpitCamB.aspect = pipW / pipH;
+      cockpitCamB.updateProjectionMatrix();
+      renderer.setViewport(pipX, pipY, pipW, pipH);
+      renderer.setScissor(pipX, pipY, pipW, pipH);
+      renderer.render(scene, cockpitCamB);
+      renderer.setScissorTest(false);
+    } else {
+      cockpitCam.aspect = w / h;
+      cockpitCam.updateProjectionMatrix();
+      renderer.setViewport(0, 0, w, h);
+      renderer.setScissorTest(false);
+      if (ok) renderer.render(scene, cockpitCam);
+      else {
+        controls.update();
+        renderer.render(scene, camera);
+      }
+    }
+    // Refresh infographic occasionally (every ~0.5s via frame counter)
+    if (!updateInfoPanel._t || performance.now() - updateInfoPanel._t > 400) {
+      updateInfoPanel._t = performance.now();
+      updateInfoPanel();
+    }
+  } else {
+    controls.update();
+    renderer.setViewport(0, 0, innerWidth, innerHeight);
+    renderer.setScissorTest(false);
+    renderer.render(scene, camera);
+  }
 }
 animate();
 
@@ -2227,13 +2887,38 @@ canvas.addEventListener('pointerdown', (ev) => {
     updateSelPanel(rec);
     for (const r of aircraft.values()) setLabelInfo(r);
     renderArrivalsList(lastArrivals);
+    if (settings.cameraMode === 'cockpit' && rec && !rec.onGround) {
+      cockpitPrimaryId = id;
+      _ckSmoothInit = false;
+      // Keep dual if the other inbound is within 5 min
+      const scored = scoreInboundGa(rec);
+      if (scored && cockpitSecondaryId && cockpitSecondaryId !== id) {
+        const sec = inboundCache.find((s) => s.icao === cockpitSecondaryId);
+        if (!(sec && Math.abs((scored.etaMin || 0) - (sec.etaMin || 0)) <= 5.5)) {
+          cockpitSecondaryId = null;
+          cockpitDual = false;
+        }
+      }
+      syncDualChrome();
+      updateInfoPanel();
+    } else if (settings.cameraMode === 'orbit' && rec) {
+      controls.target.lerp(rec.display, 0.7);
+    }
   }
 });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  cockpitCam.aspect = innerWidth / innerHeight;
+  cockpitCam.updateProjectionMatrix();
+  cockpitCamB.aspect = innerWidth / innerHeight;
+  cockpitCamB.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (settings.cameraMode === 'cockpit' && cockpitDual) {
+    cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
+    syncDualChrome();
+  }
 });
 
 poll();

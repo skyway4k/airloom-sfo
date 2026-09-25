@@ -30,3 +30,9 @@ Licenses: amvlab CC BY 4.0 + Flightradar24/FlightGear GPLv2. No payware.
 
 Default **Private / GA** filters to light aircraft, turboprops, bizjets, and helicopters
 (airliners hidden). Switch to **Arrivals** or **All traffic** in the drawer.
+
+## Camera
+
+Default **Cockpit** follows the nearest inbound private/GA toward KSFO / SQL / HAF / PAO / SJC.
+If two inbound GA share an ETA within ~5 minutes, dual cockpit (split desktop / PiP mobile)
+shows both. Switch to **Orbit** anytime from the top control bar.
