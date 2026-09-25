@@ -274,6 +274,7 @@
 <script type="module">
 import * as THREE from '/vendor/three/three.module.js';
 import { OrbitControls } from '/vendor/three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from '/vendor/three/addons/loaders/GLTFLoader.js';
 
 // ─── Airport / ENU ───────────────────────────────────────────────────────────
 const AIRPORTS = {
@@ -305,7 +306,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'premium-v1'; // served-code marker for deploy verify
+const BUILD_MARK = 'gltf-models-v1'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -491,6 +492,227 @@ function sizeForType(icaoType) {
 
 // ─── 3D aircraft models (nose along +Z) ──────────────────────────────────────
 const modelCache = new Map(); // icaoType/key → Group template
+
+// ─── GLTF aircraft library (ICAO → family GLB) ───────────────────────────────
+const gltfLoader = new GLTFLoader();
+const gltfTemplateCache = new Map(); // familyId → Promise<Group template>
+const gltfLoading = new Map();       // path → Promise
+let icaoMap = null;
+const MAX_CONCURRENT_GLTF = 3;
+let gltfInflight = 0;
+const gltfQueue = [];
+
+async function loadIcaoMap() {
+  if (icaoMap) return icaoMap;
+  try {
+    const res = await fetch('/models/icao-map.json?v=' + encodeURIComponent(BUILD_MARK));
+    icaoMap = await res.json();
+  } catch (err) {
+    console.warn('icao-map load failed', err);
+    icaoMap = { families: {}, exact: {}, prefixes: [], categories: {} };
+  }
+  return icaoMap;
+}
+loadIcaoMap();
+
+function resolveFamilyId(icaoType, catHint) {
+  const map = icaoMap;
+  if (!map) return null;
+  const t = icaoType ? String(icaoType).toUpperCase().trim() : '';
+  if (t && map.exact && map.exact[t]) return map.exact[t];
+  if (t && Array.isArray(map.prefixes)) {
+    for (const row of map.prefixes) {
+      const pref = row[0], fam = row[1];
+      if (t.startsWith(pref)) return fam;
+    }
+  }
+  const cat = catHint || classifyType(t);
+  return (map.categories && map.categories[cat]) || null;
+}
+
+function runGltfQueue() {
+  while (gltfInflight < MAX_CONCURRENT_GLTF && gltfQueue.length) {
+    const job = gltfQueue.shift();
+    gltfInflight++;
+    job().finally(() => { gltfInflight--; runGltfQueue(); });
+  }
+}
+
+function loadGltfPath(url) {
+  if (gltfLoading.has(url)) return gltfLoading.get(url);
+  const p = new Promise((resolve, reject) => {
+    gltfQueue.push(() => new Promise((res) => {
+      gltfLoader.load(
+        url,
+        (gltf) => { resolve(gltf); res(); },
+        undefined,
+        (err) => { reject(err); res(); }
+      );
+    }));
+    runGltfQueue();
+  });
+  gltfLoading.set(url, p);
+  return p;
+}
+
+/** Center, lightly auto-orient, apply family offsets, scale to target length. */
+function prepareGltfTemplate(scene, famMeta, targetLen) {
+  const root = new THREE.Group();
+  root.name = 'gltf_' + (famMeta.file || 'ac');
+  const raw = scene.clone(true);
+  root.add(raw);
+
+  // Family Euler offsets (degrees) — nose should end up +Z, Y up
+  const yaw = (famMeta.yaw || 0) * Math.PI / 180;
+  const pitch = (famMeta.pitch || 0) * Math.PI / 180;
+  const roll = (famMeta.roll || 0) * Math.PI / 180;
+  raw.rotation.set(pitch, yaw, roll);
+  raw.updateMatrixWorld(true);
+
+  let box = new THREE.Box3().setFromObject(root);
+  let size = box.getSize(new THREE.Vector3());
+  // Auto-orient if a non-Y axis is clearly not length: prefer Y = smallest (height)
+  // If Y is the longest axis, pitch -90° so former Y becomes Z (nose)
+  if (size.y > size.x * 1.05 && size.y > size.z * 1.05) {
+    raw.rotation.x += -Math.PI / 2;
+    raw.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(root);
+    size = box.getSize(new THREE.Vector3());
+  }
+  // If length appears on X (X >> Z) and Y is height, yaw so X → Z
+  if (size.x > size.z * 1.2 && size.y < Math.min(size.x, size.z) * 0.75) {
+    raw.rotation.y += Math.PI / 2;
+    raw.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(root);
+    size = box.getSize(new THREE.Vector3());
+  }
+
+  const center = box.getCenter(new THREE.Vector3());
+  raw.position.sub(center);
+  raw.position.y += (famMeta.yOffset || 0);
+  raw.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(root);
+  size = box.getSize(new THREE.Vector3());
+
+  const modelLen = Math.max(size.z, 0.001);
+  const refLen = famMeta.refLen || targetLen || modelLen;
+  // Normalize template to refLen meters (unit scale); per-aircraft scale applied later
+  const s = refLen / modelLen;
+  root.scale.setScalar(s);
+
+  // Night-readable materials: slight emissive, keep albedo (no altitude paint)
+  root.traverse((ch) => {
+    if (!ch.isMesh || !ch.material) return;
+    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+    const out = mats.map((m) => {
+      const mm = m.clone();
+      if (mm.emissive) {
+        if (mm.emissive.getHex() === 0) mm.emissive.setHex(0x111820);
+        if ('emissiveIntensity' in mm) mm.emissiveIntensity = Math.max(mm.emissiveIntensity || 0, 0.12);
+      }
+      if ('roughness' in mm && mm.roughness > 0.85) mm.roughness = 0.55;
+      if ('metalness' in mm && mm.metalness < 0.05) mm.metalness = 0.25;
+      mm.side = THREE.DoubleSide;
+      return mm;
+    });
+    ch.material = Array.isArray(ch.material) ? out : out[0];
+    if (!ch.userData.part) ch.userData.part = 'body';
+  });
+
+  root.userData.bodyMats = [];
+  root.userData.finMats = [];
+  root.userData.isGltf = true;
+  root.userData.refLen = refLen;
+  root.userData.refSpan = famMeta.refSpan || refLen;
+  root.userData.familyFile = famMeta.file;
+  return root;
+}
+
+function getGltfTemplate(familyId) {
+  if (!familyId || !icaoMap || !icaoMap.families) return null;
+  if (gltfTemplateCache.has(familyId)) return gltfTemplateCache.get(familyId);
+  const fam = icaoMap.families[familyId];
+  if (!fam || !fam.file) return null;
+  const url = (icaoMap.basePath || '/models/') + fam.file + '?v=' + encodeURIComponent(BUILD_MARK);
+  const promise = loadGltfPath(url).then((gltf) => {
+    const template = prepareGltfTemplate(gltf.scene, fam, fam.refLen);
+    return template;
+  }).catch((err) => {
+    console.warn('GLTF load failed', familyId, err);
+    gltfTemplateCache.delete(familyId);
+    return null;
+  });
+  gltfTemplateCache.set(familyId, promise);
+  return promise;
+}
+
+function cloneGltfModel(template, icao, targetLen) {
+  const g = template.clone(true);
+  g.traverse((ch) => {
+    if (!ch.isMesh || !ch.material) return;
+    if (Array.isArray(ch.material)) ch.material = ch.material.map((m) => m.clone());
+    else ch.material = ch.material.clone();
+    ch.userData.icao = icao;
+  });
+  // Scale from family refLen → this ICAO's length
+  const ref = template.userData.refLen || targetLen;
+  if (ref > 0 && targetLen > 0) g.scale.multiplyScalar(targetLen / ref);
+  g.userData.bodyMats = [];
+  g.userData.finMats = [];
+  g.userData.isGltf = true;
+  g.traverse((ch) => {
+    if (!ch.isMesh || !ch.material) return;
+    const part = ch.userData.part || 'body';
+    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+    if (part === 'fin') g.userData.finMats.push(...mats);
+    else g.userData.bodyMats.push(...mats);
+  });
+  return g;
+}
+
+function attachGltfToRec(rec, template) {
+  if (!rec || !template || !rec.alive) return;
+  const info = sizeForType(rec.type);
+  const gltfModel = cloneGltfModel(template, rec.icao, info.len);
+  // Replace procedural child but keep group extras (glow/stick/vel)
+  if (rec.model) {
+    rec.group.remove(rec.model);
+    // Do not dispose shared procedural templates aggressively; only dispose if gltf swap
+    rec.model.traverse((ch) => {
+      if (ch.isMesh && ch.material) {
+        // materials were cloned per-instance for procedural; dispose clones
+        if (Array.isArray(ch.material)) ch.material.forEach((m) => { if (!m.userData?.shared) m.dispose?.(); });
+        else if (!ch.material.userData?.shared) ch.material.dispose?.();
+      }
+    });
+  }
+  gltfModel.scale.multiplyScalar(SIZE_MULT);
+  gltfModel.userData.icao = rec.icao;
+  rec.group.add(gltfModel);
+  rec.model = gltfModel;
+  rec.gltfFamily = template.userData.familyFile || true;
+  rec.modelKey = info.key;
+  rec.span = info.span;
+  rec.len = info.len;
+}
+
+function requestGltfForRec(rec) {
+  if (!rec || rec.gltfFamily || rec._gltfRequested) return;
+  const famId = resolveFamilyId(rec.type, rec.cat);
+  if (!famId) return;
+  rec._gltfRequested = famId;
+  const p = getGltfTemplate(famId);
+  if (!p) return;
+  Promise.resolve(p).then((template) => {
+    if (!template || !rec.alive) return;
+    // If type changed to another family, skip
+    const nowFam = resolveFamilyId(rec.type, rec.cat);
+    if (nowFam !== famId) { rec._gltfRequested = null; requestGltfForRec(rec); return; }
+    attachGltfToRec(rec, template);
+  });
+}
+
+
 
 /**
  * Thin trapezoidal airfoil plate (one half-wing).
@@ -1275,7 +1497,7 @@ function createAircraft(icao, typeHint) {
   const recProbe = { icao, callsign: '', type: typeHint || null, altM: 0, vel: null, gsKt: null };
   const label = makeLabel(recProbe);
 
-  return {
+  const rec = {
     icao, group, model, glow, stick, velLine, trail, trailGeo, trailPos, trailCol, label,
     trailPts: [],
     lastTrailSample: 0,
@@ -1288,12 +1510,21 @@ function createAircraft(icao, typeHint) {
     display: new THREE.Vector3(),
     lastPoll: 0,
     alive: true,
+    gltfFamily: null,
+    _gltfRequested: null,
   };
+  // Procedural first; swap to GLTF when family GLB is ready
+  loadIcaoMap().then(() => requestGltfForRec(rec));
+  return rec;
 }
 
 function ensureModel(rec) {
   const info = sizeForType(rec.type);
-  if (rec.modelKey === info.key && rec.model) return;
+  if (rec.modelKey === info.key && rec.model) {
+    // Still try GLTF if procedural is showing
+    if (!rec.gltfFamily) requestGltfForRec(rec);
+    return;
+  }
   if (rec.model) {
     rec.group.remove(rec.model);
     rec.model.traverse((ch) => {
@@ -1314,8 +1545,11 @@ function ensureModel(rec) {
   rec.modelKey = info.key;
   rec.span = info.span;
   rec.len = info.len;
+  rec.gltfFamily = null;
+  rec._gltfRequested = null;
   const glowSize = Math.max(90, info.span * SIZE_MULT * 0.85);
   rec.glow.scale.set(glowSize, glowSize, 1);
+  loadIcaoMap().then(() => requestGltfForRec(rec));
 }
 
 const labelLayer = document.getElementById('acLabels');

@@ -18,3 +18,10 @@ npm start
 
 Push to GitHub; Blueprint `render.yaml` or create a Docker web service pointed at this repo.
 Set `OSKY_ID` / `OSKY_SECRET` in the dashboard if you want OpenSky fallback.
+
+## Aircraft models
+
+Detailed GLB airframes live in `public/models/` (see `ATTRIBUTION.md` + `icao-map.json`).
+ICAO type codes map to family models (e.g. B752 → 757 family, B738 → 737, E75L → E-Jet).
+Licenses: amvlab CC BY 4.0 + Flightradar24/FlightGear GPLv2. No payware.
+

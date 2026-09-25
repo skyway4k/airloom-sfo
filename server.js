@@ -49,6 +49,9 @@ function contentType(filePath) {
     '.svg': 'image/svg+xml',
     '.ico': 'image/x-icon',
     '.webp': 'image/webp',
+    '.glb': 'model/gltf-binary',
+    '.gltf': 'model/gltf+json',
+    '.md': 'text/markdown; charset=utf-8',
   })[ext] || 'application/octet-stream';
 }
 
@@ -473,6 +476,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       serveFile(res, path.join(PUBLIC_DIR, 'vendor', rel));
+      return;
+    }
+
+    if (pathname.startsWith('/models/')) {
+      const rel = pathname.slice('/models/'.length);
+      if (!rel || rel.includes('..') || path.isAbsolute(rel)) {
+        res.writeHead(400).end('bad path');
+        return;
+      }
+      serveFile(res, path.join(PUBLIC_DIR, 'models', rel));
       return;
     }
 

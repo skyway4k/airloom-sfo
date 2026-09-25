@@ -1,0 +1,1007 @@
+{
+  "version": 1,
+  "basePath": "/models/",
+  "families": {
+    "b737": {
+      "file": "b737.glb",
+      "source": "amvlab",
+      "license": "CC-BY-4.0",
+      "refLen": 39.5,
+      "refSpan": 35.8,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "b757": {
+      "file": "b757.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 47.3,
+      "refSpan": 38.05,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "b767": {
+      "file": "b767.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 54.9,
+      "refSpan": 47.6,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "b777": {
+      "file": "b777.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 63.7,
+      "refSpan": 60.9,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "b787": {
+      "file": "b787.glb",
+      "source": "amvlab",
+      "license": "CC-BY-4.0",
+      "refLen": 62.8,
+      "refSpan": 60.1,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "b747": {
+      "file": "b747.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 70.7,
+      "refSpan": 64.4,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "a320": {
+      "file": "a320.glb",
+      "source": "amvlab",
+      "license": "CC-BY-4.0",
+      "refLen": 37.6,
+      "refSpan": 35.8,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "a330": {
+      "file": "a330.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 58.8,
+      "refSpan": 60.3,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "a350": {
+      "file": "a350.glb",
+      "source": "amvlab",
+      "license": "CC-BY-4.0",
+      "refLen": 66.8,
+      "refSpan": 64.8,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "a380": {
+      "file": "a380.glb",
+      "source": "amvlab",
+      "license": "CC-BY-4.0",
+      "refLen": 72.7,
+      "refSpan": 79.8,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "a220": {
+      "file": "a220.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 35.0,
+      "refSpan": 35.1,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "ejet": {
+      "file": "ejet.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 31.7,
+      "refSpan": 28.7,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "crj": {
+      "file": "crj.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 32.3,
+      "refSpan": 23.2,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "q400": {
+      "file": "q400.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 32.8,
+      "refSpan": 28.4,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "atr": {
+      "file": "atr.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 22.7,
+      "refSpan": 27.1,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "bae146": {
+      "file": "bae146.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 28.6,
+      "refSpan": 26.3,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "bizjet": {
+      "file": "bizjet.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 14.4,
+      "refSpan": 15.9,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "ga": {
+      "file": "ga.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 8.3,
+      "refSpan": 11.0,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    },
+    "heli": {
+      "file": "heli.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 12.0,
+      "refSpan": 10.2,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0
+    }
+  },
+  "exact": {
+    "B731": "b737",
+    "B732": "b737",
+    "B733": "b737",
+    "B734": "b737",
+    "B735": "b737",
+    "B736": "b737",
+    "B737": "b737",
+    "B738": "b737",
+    "B739": "b737",
+    "B37M": "b737",
+    "B38M": "b737",
+    "B39M": "b737",
+    "B3XM": "b737",
+    "B74S": "b737",
+    "73H": "b737",
+    "73J": "b737",
+    "73W": "b737",
+    "B752": "b757",
+    "B753": "b757",
+    "B75B": "b757",
+    "B75T": "b757",
+    "B757": "b757",
+    "B762": "b767",
+    "B763": "b767",
+    "B764": "b767",
+    "B76W": "b767",
+    "B767": "b767",
+    "B772": "b777",
+    "B77L": "b777",
+    "B77W": "b777",
+    "B773": "b777",
+    "B778": "b777",
+    "B779": "b777",
+    "B777": "b777",
+    "B788": "b787",
+    "B789": "b787",
+    "B78X": "b787",
+    "B787": "b787",
+    "B741": "b747",
+    "B742": "b747",
+    "B743": "b747",
+    "B744": "b747",
+    "B748": "b747",
+    "B74R": "b747",
+    "B74D": "b747",
+    "B747": "b747",
+    "B703": "b737",
+    "B707": "b737",
+    "B712": "b737",
+    "B717": "b737",
+    "B722": "b757",
+    "B721": "b757",
+    "B727": "b757",
+    "A318": "a320",
+    "A319": "a320",
+    "A320": "a320",
+    "A321": "a320",
+    "A19N": "a320",
+    "A20N": "a320",
+    "A21N": "a320",
+    "A21B": "a320",
+    "A32X": "a320",
+    "A332": "a330",
+    "A333": "a330",
+    "A338": "a330",
+    "A339": "a330",
+    "A330": "a330",
+    "A30B": "a330",
+    "A306": "a330",
+    "A310": "a330",
+    "A3ST": "a330",
+    "A342": "a330",
+    "A343": "a330",
+    "A345": "a330",
+    "A346": "a330",
+    "A340": "a330",
+    "A359": "a350",
+    "A35K": "a350",
+    "A350": "a350",
+    "A388": "a380",
+    "A380": "a380",
+    "A225": "a380",
+    "A221": "a220",
+    "A223": "a220",
+    "BCS1": "a220",
+    "BCS3": "a220",
+    "CS1": "a220",
+    "CS3": "a220",
+    "A400": "a380",
+    "A124": "b747",
+    "E170": "ejet",
+    "E75L": "ejet",
+    "E75S": "ejet",
+    "E190": "ejet",
+    "E195": "ejet",
+    "E290": "ejet",
+    "E295": "ejet",
+    "E2": "ejet",
+    "EJET": "ejet",
+    "E45X": "ejet",
+    "E35L": "ejet",
+    "E55P": "bizjet",
+    "E50P": "bizjet",
+    "E55L": "ejet",
+    "E135": "ejet",
+    "E145": "ejet",
+    "E45J": "ejet",
+    "CRJ1": "crj",
+    "CRJ2": "crj",
+    "CRJ7": "crj",
+    "CRJ9": "crj",
+    "CRJX": "crj",
+    "CRJ": "crj",
+    "CL60": "bizjet",
+    "CL30": "crj",
+    "CL35": "crj",
+    "CL2T": "crj",
+    "DH8A": "q400",
+    "DH8B": "q400",
+    "DH8C": "q400",
+    "DH8D": "q400",
+    "DH4": "q400",
+    "DHC6": "q400",
+    "DHC7": "q400",
+    "DHC8": "q400",
+    "Q400": "q400",
+    "AT43": "atr",
+    "AT45": "atr",
+    "AT46": "atr",
+    "AT72": "atr",
+    "AT73": "atr",
+    "AT75": "atr",
+    "AT76": "atr",
+    "ATR": "atr",
+    "AT4": "atr",
+    "AT7": "atr",
+    "B461": "bae146",
+    "B462": "bae146",
+    "B463": "bae146",
+    "RJ70": "bae146",
+    "RJ85": "bae146",
+    "RJ1H": "bae146",
+    "BA46": "bae146",
+    "SF34": "atr",
+    "SF3": "atr",
+    "SB20": "atr",
+    "JS32": "atr",
+    "JS41": "atr",
+    "BE02": "atr",
+    "BE20": "atr",
+    "BE30": "atr",
+    "BE40": "bizjet",
+    "BE99": "atr",
+    "C208": "atr",
+    "C212": "atr",
+    "CN35": "atr",
+    "Y12": "atr",
+    "IL14": "atr",
+    "AN24": "atr",
+    "AN26": "atr",
+    "AN28": "atr",
+    "AN30": "atr",
+    "AN32": "atr",
+    "C25A": "bizjet",
+    "C25B": "bizjet",
+    "C25C": "bizjet",
+    "C500": "bizjet",
+    "C501": "bizjet",
+    "C525": "bizjet",
+    "C550": "bizjet",
+    "C560": "bizjet",
+    "C56X": "bizjet",
+    "C650": "bizjet",
+    "C680": "bizjet",
+    "C68A": "bizjet",
+    "C700": "bizjet",
+    "C750": "bizjet",
+    "C25M": "bizjet",
+    "FA7X": "bizjet",
+    "FA8X": "bizjet",
+    "FA50": "bizjet",
+    "FA20": "bizjet",
+    "FA10": "bizjet",
+    "G150": "bizjet",
+    "G200": "bizjet",
+    "G280": "bizjet",
+    "G100": "bizjet",
+    "GALX": "bizjet",
+    "GLF2": "bizjet",
+    "GLF3": "bizjet",
+    "GLF4": "bizjet",
+    "GLF5": "bizjet",
+    "GLF6": "bizjet",
+    "GL5T": "bizjet",
+    "GL6T": "bizjet",
+    "GLEX": "bizjet",
+    "GJ4": "bizjet",
+    "HA4T": "bizjet",
+    "HDJT": "bizjet",
+    "LJ31": "bizjet",
+    "LJ35": "bizjet",
+    "LJ40": "bizjet",
+    "LJ45": "bizjet",
+    "LJ55": "bizjet",
+    "LJ60": "bizjet",
+    "LJ70": "bizjet",
+    "LJ75": "bizjet",
+    "LJ85": "bizjet",
+    "PC24": "bizjet",
+    "H25A": "bizjet",
+    "H25B": "bizjet",
+    "H25C": "bizjet",
+    "PRM1": "bizjet",
+    "F2TH": "bizjet",
+    "F900": "bizjet",
+    "ASTR": "bizjet",
+    "WW24": "bizjet",
+    "SBR1": "bizjet",
+    "C150": "ga",
+    "C152": "ga",
+    "C162": "ga",
+    "C170": "ga",
+    "C172": "ga",
+    "C175": "ga",
+    "C177": "ga",
+    "C180": "ga",
+    "C182": "ga",
+    "C185": "ga",
+    "C206": "ga",
+    "C207": "ga",
+    "C210": "ga",
+    "C337": "ga",
+    "PA22": "ga",
+    "PA24": "ga",
+    "PA28": "ga",
+    "PA32": "ga",
+    "PA34": "ga",
+    "PA44": "ga",
+    "PA46": "ga",
+    "BE33": "ga",
+    "BE35": "ga",
+    "BE36": "ga",
+    "BE55": "ga",
+    "BE58": "ga",
+    "SR20": "ga",
+    "SR22": "ga",
+    "DA40": "ga",
+    "DA42": "ga",
+    "DA62": "ga",
+    "P28A": "ga",
+    "P28B": "ga",
+    "P28R": "ga",
+    "M20P": "ga",
+    "M20T": "ga",
+    "TB20": "ga",
+    "TOBA": "ga",
+    "DR40": "ga",
+    "RV10": "ga",
+    "RV12": "ga",
+    "RV7": "ga",
+    "RV8": "ga",
+    "RV9": "ga",
+    "BL8": "ga",
+    "CH7A": "ga",
+    "CH7B": "ga",
+    "J3": "ga",
+    "CUB": "ga",
+    "LEG2": "ga",
+    "TBM7": "ga",
+    "TBM8": "ga",
+    "TBM9": "ga",
+    "PC12": "ga",
+    "EPIC": "ga",
+    "EVOT": "ga",
+    "EV95": "ga",
+    "EC20": "heli",
+    "EC30": "heli",
+    "EC35": "heli",
+    "EC45": "heli",
+    "EC55": "heli",
+    "EC75": "heli",
+    "R22": "heli",
+    "R44": "heli",
+    "R66": "heli",
+    "B06": "heli",
+    "B06T": "heli",
+    "B407": "heli",
+    "B412": "heli",
+    "B429": "heli",
+    "B430": "heli",
+    "UH1": "heli",
+    "S76": "heli",
+    "S92": "heli",
+    "A109": "heli",
+    "A139": "heli",
+    "A169": "heli",
+    "A189": "heli",
+    "AS50": "heli",
+    "AS65": "heli",
+    "AS3B": "heli",
+    "H60": "heli",
+    "H64": "heli",
+    "H47": "heli",
+    "H53": "heli",
+    "MI8": "heli",
+    "MI17": "heli",
+    "MI24": "heli",
+    "KA32": "heli",
+    "B212": "heli",
+    "B222": "heli",
+    "B230": "heli",
+    "EXPL": "heli",
+    "MD50": "heli",
+    "MD52": "heli",
+    "MD60": "heli",
+    "MD90": "b757",
+    "S330": "heli",
+    "S61": "heli",
+    "S62": "heli",
+    "S64": "heli",
+    "S70": "heli",
+    "AW13": "heli",
+    "AW18": "heli",
+    "AW39": "heli",
+    "MD80": "b757",
+    "MD81": "b757",
+    "MD82": "b757",
+    "MD83": "b757",
+    "MD87": "b757",
+    "MD88": "b757",
+    "DC9": "b757",
+    "DC10": "b757",
+    "MD11": "b757",
+    "DC3": "ga",
+    "DC6": "ga",
+    "DC4": "ga",
+    "C46": "ga",
+    "B350": "ga",
+    "IL76": "b747",
+    "IL86": "b747",
+    "IL96": "b747",
+    "TU95": "b747",
+    "TU54": "b747",
+    "TU34": "b747",
+    "AN12": "b747",
+    "AN22": "b747",
+    "AN72": "b747",
+    "AN74": "b747",
+    "AN124": "b747",
+    "AN225": "b747",
+    "C5M": "b747",
+    "C17": "b747",
+    "C130": "b747",
+    "C30J": "b747",
+    "CONC": "b747",
+    "L101": "b747",
+    "L10": "b747",
+    "VC10": "b747"
+  },
+  "prefixes": [
+    [
+      "B73",
+      "b737"
+    ],
+    [
+      "B37",
+      "b737"
+    ],
+    [
+      "B38",
+      "b737"
+    ],
+    [
+      "B39",
+      "b737"
+    ],
+    [
+      "B75",
+      "b757"
+    ],
+    [
+      "B76",
+      "b767"
+    ],
+    [
+      "B77",
+      "b777"
+    ],
+    [
+      "B78",
+      "b787"
+    ],
+    [
+      "B74",
+      "b747"
+    ],
+    [
+      "B70",
+      "b737"
+    ],
+    [
+      "B71",
+      "b737"
+    ],
+    [
+      "B72",
+      "b757"
+    ],
+    [
+      "A31",
+      "a320"
+    ],
+    [
+      "A32",
+      "a320"
+    ],
+    [
+      "A19",
+      "a320"
+    ],
+    [
+      "A20",
+      "a320"
+    ],
+    [
+      "A21",
+      "a320"
+    ],
+    [
+      "A33",
+      "a330"
+    ],
+    [
+      "A30",
+      "a330"
+    ],
+    [
+      "A34",
+      "a330"
+    ],
+    [
+      "A35",
+      "a350"
+    ],
+    [
+      "A38",
+      "a380"
+    ],
+    [
+      "A22",
+      "a220"
+    ],
+    [
+      "BCS",
+      "a220"
+    ],
+    [
+      "E17",
+      "ejet"
+    ],
+    [
+      "E19",
+      "ejet"
+    ],
+    [
+      "E75",
+      "ejet"
+    ],
+    [
+      "E29",
+      "ejet"
+    ],
+    [
+      "E13",
+      "ejet"
+    ],
+    [
+      "E14",
+      "ejet"
+    ],
+    [
+      "E55",
+      "ejet"
+    ],
+    [
+      "E35",
+      "ejet"
+    ],
+    [
+      "E45",
+      "ejet"
+    ],
+    [
+      "E50",
+      "ejet"
+    ],
+    [
+      "CRJ",
+      "crj"
+    ],
+    [
+      "CL6",
+      "crj"
+    ],
+    [
+      "CL3",
+      "crj"
+    ],
+    [
+      "DH8",
+      "q400"
+    ],
+    [
+      "DHC",
+      "q400"
+    ],
+    [
+      "AT4",
+      "atr"
+    ],
+    [
+      "AT7",
+      "atr"
+    ],
+    [
+      "ATR",
+      "atr"
+    ],
+    [
+      "B46",
+      "bae146"
+    ],
+    [
+      "RJ7",
+      "bae146"
+    ],
+    [
+      "RJ8",
+      "bae146"
+    ],
+    [
+      "RJ1",
+      "bae146"
+    ],
+    [
+      "C25",
+      "bizjet"
+    ],
+    [
+      "C50",
+      "bizjet"
+    ],
+    [
+      "C55",
+      "bizjet"
+    ],
+    [
+      "C56",
+      "bizjet"
+    ],
+    [
+      "C65",
+      "bizjet"
+    ],
+    [
+      "C68",
+      "bizjet"
+    ],
+    [
+      "C70",
+      "bizjet"
+    ],
+    [
+      "C75",
+      "bizjet"
+    ],
+    [
+      "GLF",
+      "bizjet"
+    ],
+    [
+      "G15",
+      "bizjet"
+    ],
+    [
+      "G20",
+      "bizjet"
+    ],
+    [
+      "G28",
+      "bizjet"
+    ],
+    [
+      "LJ",
+      "bizjet"
+    ],
+    [
+      "FA",
+      "bizjet"
+    ],
+    [
+      "PC2",
+      "bizjet"
+    ],
+    [
+      "H25",
+      "bizjet"
+    ],
+    [
+      "C15",
+      "ga"
+    ],
+    [
+      "C16",
+      "ga"
+    ],
+    [
+      "C17",
+      "ga"
+    ],
+    [
+      "C18",
+      "ga"
+    ],
+    [
+      "C20",
+      "ga"
+    ],
+    [
+      "C21",
+      "ga"
+    ],
+    [
+      "PA2",
+      "ga"
+    ],
+    [
+      "PA3",
+      "ga"
+    ],
+    [
+      "PA4",
+      "ga"
+    ],
+    [
+      "SR2",
+      "ga"
+    ],
+    [
+      "DA4",
+      "ga"
+    ],
+    [
+      "DA6",
+      "ga"
+    ],
+    [
+      "BE3",
+      "ga"
+    ],
+    [
+      "BE5",
+      "ga"
+    ],
+    [
+      "TBM",
+      "ga"
+    ],
+    [
+      "PC1",
+      "ga"
+    ],
+    [
+      "P28",
+      "ga"
+    ],
+    [
+      "EC",
+      "heli"
+    ],
+    [
+      "R22",
+      "heli"
+    ],
+    [
+      "R44",
+      "heli"
+    ],
+    [
+      "R66",
+      "heli"
+    ],
+    [
+      "B06",
+      "heli"
+    ],
+    [
+      "B40",
+      "heli"
+    ],
+    [
+      "B41",
+      "heli"
+    ],
+    [
+      "B42",
+      "heli"
+    ],
+    [
+      "UH",
+      "heli"
+    ],
+    [
+      "S76",
+      "heli"
+    ],
+    [
+      "S92",
+      "heli"
+    ],
+    [
+      "A10",
+      "heli"
+    ],
+    [
+      "A13",
+      "heli"
+    ],
+    [
+      "A16",
+      "heli"
+    ],
+    [
+      "A18",
+      "heli"
+    ],
+    [
+      "H6",
+      "heli"
+    ],
+    [
+      "H4",
+      "heli"
+    ],
+    [
+      "H5",
+      "heli"
+    ],
+    [
+      "MI",
+      "heli"
+    ],
+    [
+      "AW",
+      "heli"
+    ],
+    [
+      "MD8",
+      "b757"
+    ],
+    [
+      "MD9",
+      "b757"
+    ],
+    [
+      "MD1",
+      "b747"
+    ],
+    [
+      "DC9",
+      "b757"
+    ],
+    [
+      "DC1",
+      "b747"
+    ]
+  ],
+  "categories": {
+    "super": "a380",
+    "heavy": "b777",
+    "medium": "b737",
+    "regional": "ejet",
+    "light": "ga",
+    "heli": "heli",
+    "unknown": "b737"
+  },
+  "stats": {
+    "uniqueGlbs": 19,
+    "exactIcaoMapped": 358,
+    "prefixRules": 104
+  }
+}
