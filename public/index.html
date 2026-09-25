@@ -174,7 +174,7 @@
   }
   #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
 
-  /* Cockpit infographic (top-right glass) */
+  /* Follow-mode infographic (top-right glass) */
   #infoPanel {
     position: absolute; top: max(14px, env(safe-area-inset-top)); right: 14px;
     z-index: 12; pointer-events: none; width: min(320px, calc(100vw - 28px));
@@ -305,7 +305,7 @@
 
 <div id="camBar" role="group" aria-label="Camera mode">
   <button type="button" id="btnOrbit" class="ghost">Orbit</button>
-  <button type="button" id="btnCockpit" class="active">Cockpit</button>
+  <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
 <div id="dualFrame" aria-hidden="true">
@@ -366,7 +366,7 @@
 
     <div class="section">
       <h3>View</h3>
-      <div class="row"><label>Camera</label><span class="val" id="uiCamMode">cockpit</span></div>
+      <div class="row"><label>Camera</label><span class="val" id="uiCamMode">follow</span></div>
       <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">50</span></div>
       <input type="range" id="sRadius" min="15" max="120" value="50" step="5" />
       <div class="row"><label>Trail length</label><span class="val" id="vTrail">55</span></div>
@@ -449,7 +449,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'cockpit-v1'; // served-code marker for deploy verify
+const BUILD_MARK = 'follow-v1'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1554,13 +1554,13 @@ let settings = {
   trafficMode: 'ga', // 'ga' | 'arrivals' | 'all'
   showVelVec: true,
   showAltSticks: false,
-  cameraMode: 'cockpit', // 'orbit' | 'cockpit' — cockpit default for GA focus
+  cameraMode: 'follow', // 'orbit' | 'follow' — elevated chase default for GA focus
 };
 let lastArrivals = [];
 
-// ─── Cockpit follow state ────────────────────────────────────────────────────
-const cockpitCam = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 5, 5e6);
-const cockpitCamB = new THREE.PerspectiveCamera(62, innerWidth / (innerHeight * 0.5), 5, 5e6);
+// ─── Follow (chase-above) camera state ───────────────────────────────────────
+const cockpitCam = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 5, 5e6);
+const cockpitCamB = new THREE.PerspectiveCamera(52, innerWidth / (innerHeight * 0.5), 5, 5e6);
 const _ckPos = new THREE.Vector3();
 const _ckLook = new THREE.Vector3();
 const _ckPosSm = new THREE.Vector3();
@@ -1703,14 +1703,14 @@ $('btnAllTraffic').onclick = () => setMode('all');
 setMode('ga'); // persist initial default: Private/GA
 
 function setCameraMode(mode) {
-  settings.cameraMode = mode === 'orbit' ? 'orbit' : 'cockpit';
-  const isCockpit = settings.cameraMode === 'cockpit';
-  $('btnCockpit').classList.toggle('active', isCockpit);
-  $('btnOrbit').classList.toggle('active', !isCockpit);
+  settings.cameraMode = mode === 'orbit' ? 'orbit' : 'follow';
+  const isFollow = settings.cameraMode === 'follow';
+  $('btnFollow').classList.toggle('active', isFollow);
+  $('btnOrbit').classList.toggle('active', !isFollow);
   if ($('uiCamMode')) $('uiCamMode').textContent = settings.cameraMode;
-  controls.enabled = !isCockpit;
-  controls.autoRotate = !isCockpit && $('sAuto').checked;
-  if (!isCockpit) {
+  controls.enabled = !isFollow;
+  controls.autoRotate = !isFollow && $('sAuto').checked;
+  if (!isFollow) {
     $('dualFrame').classList.remove('on', 'pip');
     _ckSmoothInit = false;
     _ckSmoothInitB = false;
@@ -1721,7 +1721,7 @@ function setCameraMode(mode) {
   }
   updateInfoPanel();
 }
-$('btnCockpit').onclick = () => setCameraMode('cockpit');
+$('btnFollow').onclick = () => setCameraMode('follow');
 $('btnOrbit').onclick = () => setCameraMode('orbit');
 $('sAuto').onchange = (e) => {
   if (settings.cameraMode === 'orbit') controls.autoRotate = e.target.checked;
@@ -1824,29 +1824,26 @@ function pickCockpitTargets(fromList) {
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
+  // Third-person chase from above: elevated behind the aircraft, looking down at
+  // the mesh + along-track toward the field (not a nose/cockpit POV).
   const track = rec.track != null ? rec.track : 0;
   const rad = THREE.MathUtils.degToRad(track);
   // Forward in ENU: east=sin, north=-z ⇒ (sin, 0, -cos)
   _ckFwd.set(Math.sin(rad), 0, -Math.cos(rad));
-  let pitch = 0;
-  if (rec.vr != null && rec.vel != null && rec.vel > 5) {
-    pitch = Math.max(-0.25, Math.min(0.25, Math.atan2(rec.vr, rec.vel)));
-  }
-  // Pitch forward vector slightly
-  const cy = Math.cos(pitch), sy = Math.sin(pitch);
-  const fwdX = _ckFwd.x * cy;
-  const fwdY = sy;
-  const fwdZ = _ckFwd.z * cy;
-  _ckFwd.set(fwdX, fwdY, fwdZ).normalize();
 
-  const back = Math.max(12, (rec.len || 12) * SIZE_MULT * 0.08);
-  const up = Math.max(4.5, (rec.span || 10) * SIZE_MULT * 0.04);
+  const body = Math.max(18, (rec.len || 12) * SIZE_MULT); // visual length (m)
+  const lag = lagScale || 1;
+  const back = Math.max(110, body * 2.4) * lag;   // behind along track
+  const up = Math.max(95, body * 2.0) * lag;      // elevated bird's-eye chase
+  const lookAhead = Math.max(35, body * 0.5);     // slight forward bias on look target
+
   outPos.copy(rec.display)
     .addScaledVector(_ckFwd, -back)
     .addScaledVector(_ckUp, up);
+  // Look at the aircraft (slightly ahead) so the plane + trails frame well
   outLook.copy(rec.display)
-    .addScaledVector(_ckFwd, Math.max(400, 900 * (lagScale || 1)))
-    .addScaledVector(_ckUp, up * 0.35);
+    .addScaledVector(_ckFwd, lookAhead)
+    .addScaledVector(_ckUp, body * 0.08);
 }
 
 function updateCockpitCameras(dt) {
@@ -1923,7 +1920,7 @@ function buildIgCardHtml(rec, scored, role) {
   const eta = scored?.etaExact != null ? scored.etaExact : scored?.etaMin;
   const reg = rec.reg && rec.reg !== cs ? rec.reg : null;
   const sq = rec.squawk || null;
-  const badge = role === 'secondary' ? 'SECONDARY' : (cockpitDual ? 'PRIMARY' : 'COCKPIT');
+  const badge = role === 'secondary' ? 'SECONDARY' : (cockpitDual ? 'PRIMARY' : 'FOLLOW');
   const badgeCls = role === 'secondary' ? 'ig-badge sec' : 'ig-badge';
   return (
     `<div class="ig-head"><div class="ig-cs">${cs}</div><div class="${badgeCls}">${badge}</div></div>` +
@@ -1945,7 +1942,7 @@ function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
   const igS = $('igSecondary');
-  if (settings.cameraMode !== 'cockpit') {
+  if (settings.cameraMode !== 'follow') {
     panel.classList.add('hidden');
     return;
   }
@@ -1965,7 +1962,7 @@ function updateInfoPanel() {
 
 function syncDualChrome() {
   const fr = $('dualFrame');
-  if (settings.cameraMode === 'cockpit' && cockpitDual && cockpitSecondaryId) {
+  if (settings.cameraMode === 'follow' && cockpitDual && cockpitSecondaryId) {
     fr.classList.add('on');
     fr.classList.toggle('pip', cockpitDualLayout === 'pip');
   } else {
@@ -2049,7 +2046,7 @@ function renderArrivalsList(arrs) {
       const rec = aircraft.get(id);
       if (rec) {
         updateSelPanel(rec);
-        if (settings.cameraMode === 'cockpit' && !rec.onGround) {
+        if (settings.cameraMode === 'follow' && !rec.onGround) {
           cockpitPrimaryId = id;
           _ckSmoothInit = false;
           const scored = scoreInboundGa(rec);
@@ -2697,7 +2694,7 @@ function ingest(data) {
   renderArrivalsList(listForPanel);
   if (selectedId && aircraft.has(selectedId)) updateSelPanel(aircraft.get(selectedId));
 
-  // Cockpit target selection from live private/GA (prefer inbound)
+  // Follow-target selection from live private/GA (prefer inbound)
   const cockpitPool = [...aircraft.values()].filter((r) => r.isPrivateGa || settings.trafficMode !== 'ga');
   // Attach prev dist onto pool objects for scoring
   for (const r of cockpitPool) {
@@ -2800,12 +2797,12 @@ function animate() {
       pos[3] = 0; pos[4] = 0; pos[5] = 0;
       rec.stick.geometry.attributes.position.needsUpdate = true;
     }
-    // Labels use active camera (cockpit primary when in cockpit)
-    const labelCam = (settings.cameraMode === 'cockpit') ? cockpitCam : camera;
+    // Labels use active camera (follow primary when in Follow mode)
+    const labelCam = (settings.cameraMode === 'follow') ? cockpitCam : camera;
     updateLabelScreen(rec, labelCam);
   }
 
-  if (settings.cameraMode === 'cockpit') {
+  if (settings.cameraMode === 'follow') {
     const ok = updateCockpitCameras(dt);
     const w = innerWidth, h = innerHeight;
     const dual = ok && cockpitDual && cockpitSecondaryId && aircraft.has(cockpitSecondaryId);
@@ -2887,7 +2884,7 @@ canvas.addEventListener('pointerdown', (ev) => {
     updateSelPanel(rec);
     for (const r of aircraft.values()) setLabelInfo(r);
     renderArrivalsList(lastArrivals);
-    if (settings.cameraMode === 'cockpit' && rec && !rec.onGround) {
+    if (settings.cameraMode === 'follow' && rec && !rec.onGround) {
       cockpitPrimaryId = id;
       _ckSmoothInit = false;
       // Keep dual if the other inbound is within 5 min
@@ -2915,7 +2912,7 @@ addEventListener('resize', () => {
   cockpitCamB.aspect = innerWidth / innerHeight;
   cockpitCamB.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  if (settings.cameraMode === 'cockpit' && cockpitDual) {
+  if (settings.cameraMode === 'follow' && cockpitDual) {
     cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
     syncDualChrome();
   }

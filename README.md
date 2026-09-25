@@ -33,6 +33,8 @@ Default **Private / GA** filters to light aircraft, turboprops, bizjets, and hel
 
 ## Camera
 
-Default **Cockpit** follows the nearest inbound private/GA toward KSFO / SQL / HAF / PAO / SJC.
-If two inbound GA share an ETA within ~5 minutes, dual cockpit (split desktop / PiP mobile)
-shows both. Switch to **Orbit** anytime from the top control bar.
+Default **Follow** is a third-person chase from above (elevated behind the aircraft,
+looking down at the mesh and along-track) on the nearest inbound private/GA toward
+KSFO / SQL / HAF / PAO / SJC. If two inbound GA share an ETA within ~5 minutes, dual
+Follow (split desktop / PiP mobile) shows both. Switch to **Orbit** anytime from the
+top control bar.
