@@ -276,7 +276,10 @@ const KT_MS = 0.514444;
 const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
-const SIZE_MULT = 7.0; // visibility multiplier (~2× prior 3.5; relative type sizing kept)
+const SIZE_MULT = 4.5; // visibility multiplier (was 7.0 — too cartoon-huge; type-relative sizing kept)
+const BUILD_MARK = 'trail-mesh-v2'; // served-code marker for deploy verify
+window.__AIRLOOM_BUILD = BUILD_MARK;
+window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
 function enu(lat, lon, altM) {
   const dLat = (lat - ORIGIN.lat) * Math.PI / 180;
@@ -363,13 +366,13 @@ const TYPE_CAT = {
 };
 
 const CAT_SIZE = {
-  super:    { span: 79.8, len: 73.0, engines: 4 },
-  heavy:    { span: 60.9, len: 63.7, engines: 2 },
-  medium:   { span: 35.8, len: 39.5, engines: 2 },
-  regional: { span: 28.7, len: 31.7, engines: 2 },
-  light:    { span: 11.0, len: 8.3,  engines: 1 },
-  heli:     { span: 12.0, len: 12.0, engines: 0 },
-  unknown:  { span: 30.0, len: 33.0, engines: 2 },
+  super:    { span: 79.8, len: 73.0, engines: 4, ttail: false },
+  heavy:    { span: 60.9, len: 63.7, engines: 2, ttail: false },
+  medium:   { span: 35.8, len: 39.5, engines: 2, ttail: false },
+  regional: { span: 28.7, len: 31.7, engines: 2, ttail: true  },
+  light:    { span: 11.0, len: 8.3,  engines: 1, ttail: false },
+  heli:     { span: 12.0, len: 12.0, engines: 0, ttail: false },
+  unknown:  { span: 30.0, len: 33.0, engines: 2, ttail: false },
 };
 
 function classifyType(icaoType) {
@@ -393,149 +396,218 @@ function sizeForType(icaoType) {
 // ─── 3D aircraft models (nose along +Z) ──────────────────────────────────────
 const modelCache = new Map(); // cat → Group template (cloneable)
 
+/** Trapezoidal wing half (root→tip), extruded, then mirrored. */
+function makeSweptWing(span, chordRoot, chordTip, thick, sweepDeg) {
+  const half = span * 0.5;
+  const sweep = Math.tan(sweepDeg * Math.PI / 180) * half;
+  const shape = new THREE.Shape();
+  // Shape XY → after extrude+rotateX(-π/2): x=span, z=-y (so −y_shape = +Z nose).
+  // Sweep shifts tip toward +y_shape (= aft / −Z).
+  shape.moveTo(0, -chordRoot * 0.30);              // LE root (forward)
+  shape.lineTo(half, -chordTip * 0.22 + sweep);    // LE tip (swept aft)
+  shape.lineTo(half,  chordTip * 0.78 + sweep);    // TE tip
+  shape.lineTo(0,  chordRoot * 0.70);              // TE root
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: thick, bevelEnabled: false, curveSegments: 1, steps: 1,
+  });
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -thick * 0.5, 0);
+  return geo;
+}
+
 function buildAircraftModel(cat) {
   if (modelCache.has(cat)) return cloneAircraftModel(modelCache.get(cat));
 
   const sz = CAT_SIZE[cat] || CAT_SIZE.unknown;
-  const L = sz.len;   // meters (will be scaled by SIZE_MULT later)
+  const L = sz.len;   // meters (scaled by SIZE_MULT later)
   const W = sz.span;
-  const fuseR = Math.max(0.55, L * 0.035);
+  const fuseR = Math.max(0.45, L * 0.032);
   const group = new THREE.Group();
   group.name = 'acModel_' + cat;
 
-  // Shared materials are replaced per-instance with altitude colors;
-  // use MeshStandardMaterial placeholders (cloned on create).
+  // Slightly less flat plastic: lower emissive, mild metalness
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x4ecdc4, emissive: 0x4ecdc4, emissiveIntensity: 0.45,
-    roughness: 0.4, metalness: 0.25,
+    color: 0x6ec8c0, emissive: 0x1a3a38, emissiveIntensity: 0.28,
+    roughness: 0.38, metalness: 0.42,
   });
-  const wingMat = bodyMat.clone();
-  const finMat = bodyMat.clone();
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0x5bb8b0, emissive: 0x143230, emissiveIntensity: 0.22,
+    roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide,
+  });
+  const finMat = new THREE.MeshStandardMaterial({
+    color: 0x4ecdc4, emissive: 0x4ecdc4, emissiveIntensity: 0.55,
+    roughness: 0.35, metalness: 0.3,
+  });
   const engMat = new THREE.MeshStandardMaterial({
-    color: 0x8899aa, emissive: 0x223344, emissiveIntensity: 0.2,
-    roughness: 0.5, metalness: 0.4,
+    color: 0x7a8a9a, emissive: 0x121820, emissiveIntensity: 0.12,
+    roughness: 0.4, metalness: 0.55,
   });
 
   if (cat === 'heli') {
-    // Simple helicopter: cabin + boom + rotor disc
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(fuseR * 2.2, fuseR * 2.4, L * 0.4), bodyMat);
-    cabin.position.z = L * 0.05;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(fuseR * 2.0, fuseR * 2.2, L * 0.38), bodyMat);
+    cabin.position.z = L * 0.06;
     cabin.userData.part = 'body';
     group.add(cabin);
-    const boom = new THREE.Mesh(new THREE.CylinderGeometry(fuseR * 0.35, fuseR * 0.25, L * 0.55, 6), bodyMat);
+    const boom = new THREE.Mesh(new THREE.CylinderGeometry(fuseR * 0.32, fuseR * 0.22, L * 0.52, 8), bodyMat);
     boom.rotation.x = Math.PI / 2;
-    boom.position.z = -L * 0.3;
+    boom.position.z = -L * 0.28;
     boom.userData.part = 'body';
     group.add(boom);
     const rotor = new THREE.Mesh(
-      new THREE.CylinderGeometry(W * 0.48, W * 0.48, 0.15, 24),
-      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.35, roughness: 0.6 })
+      new THREE.CylinderGeometry(W * 0.48, W * 0.48, 0.12, 28),
+      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.32, roughness: 0.55, metalness: 0.2 })
     );
-    rotor.position.y = fuseR * 1.6;
+    rotor.position.y = fuseR * 1.55;
     rotor.userData.part = 'rotor';
     group.add(rotor);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.15, fuseR * 1.8, fuseR * 1.2), finMat);
-    fin.position.set(0, fuseR * 0.6, -L * 0.48);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, fuseR * 1.6, fuseR * 1.1), finMat);
+    fin.position.set(0, fuseR * 0.55, -L * 0.46);
     fin.userData.part = 'fin';
     group.add(fin);
   } else {
-    // Fuselage — elongated capsule approx with cylinder + nose/tail cones
-    const fuseLen = L * 0.92;
+    // Fuselage: main tube + tapered nose/tail for airliner silhouette
+    const fuseLen = L * 0.78;
     const fuse = new THREE.Mesh(
-      new THREE.CylinderGeometry(fuseR, fuseR, fuseLen, 10),
+      new THREE.CylinderGeometry(fuseR * 0.98, fuseR, fuseLen, 12),
       bodyMat
     );
     fuse.rotation.x = Math.PI / 2;
     fuse.userData.part = 'body';
     group.add(fuse);
 
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(fuseR, L * 0.12, 8), bodyMat);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.98, L * 0.14, 10), bodyMat);
     nose.rotation.x = Math.PI / 2;
-    nose.position.z = fuseLen / 2 + L * 0.05;
+    nose.position.z = fuseLen / 2 + L * 0.055;
     nose.userData.part = 'body';
     group.add(nose);
 
-    const tailCone = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.55, L * 0.1, 8), bodyMat);
+    // Cockpit bulge hint
+    const cockpit = new THREE.Mesh(
+      new THREE.SphereGeometry(fuseR * 0.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      bodyMat
+    );
+    cockpit.position.set(0, fuseR * 0.35, fuseLen / 2 * 0.72);
+    cockpit.scale.set(1, 0.7, 1.1);
+    cockpit.userData.part = 'body';
+    group.add(cockpit);
+
+    const tailCone = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.5, L * 0.16, 10), bodyMat);
     tailCone.rotation.x = -Math.PI / 2;
-    tailCone.position.z = -fuseLen / 2 - L * 0.03;
+    tailCone.position.z = -fuseLen / 2 - L * 0.05;
     tailCone.userData.part = 'body';
     group.add(tailCone);
 
-    // Wings
-    const wingThick = Math.max(0.25, fuseR * 0.35);
-    const wingChord = L * 0.22;
-    const wings = new THREE.Mesh(
-      new THREE.BoxGeometry(W, wingThick, wingChord),
-      wingMat
-    );
-    wings.position.z = L * 0.02;
-    wings.position.y = -fuseR * 0.15;
-    wings.userData.part = 'wing';
-    group.add(wings);
+    // Wings — swept, tapered, slight anhedral/dihedral by category
+    const wingThick = Math.max(0.22, fuseR * 0.32);
+    const chordRoot = L * (cat === 'super' || cat === 'heavy' ? 0.20 : 0.22);
+    const chordTip = chordRoot * 0.38;
+    const sweep = (cat === 'super' || cat === 'heavy') ? 28 : (cat === 'medium' ? 24 : (cat === 'light' ? 8 : 18));
+    const wingGeo = makeSweptWing(W, chordRoot, chordTip, wingThick, sweep);
+    const wingY = -fuseR * (cat === 'light' ? 0.05 : 0.35); // low-wing jets, near-mid GA
+    const wingZ = L * (cat === 'light' ? 0.0 : 0.04);
 
-    // Horizontal stabilizer
-    const hStabSpan = W * 0.32;
-    const hStab = new THREE.Mesh(
-      new THREE.BoxGeometry(hStabSpan, wingThick * 0.7, wingChord * 0.45),
-      wingMat
-    );
-    hStab.position.z = -L * 0.42;
-    hStab.position.y = fuseR * 0.1;
-    hStab.userData.part = 'wing';
-    group.add(hStab);
+    const wingR = new THREE.Mesh(wingGeo, wingMat);
+    wingR.position.set(0, wingY, wingZ);
+    wingR.userData.part = 'wing';
+    group.add(wingR);
+    const wingL = new THREE.Mesh(wingGeo.clone(), wingMat);
+    wingL.scale.x = -1;
+    wingL.position.set(0, wingY, wingZ);
+    wingL.userData.part = 'wing';
+    group.add(wingL);
 
-    // Vertical stabilizer (empennage) — strongly altitude-colored
-    const finH = Math.max(2.2, L * 0.16);
+    // Vertical fin — slight sweep via parallelogram box approx
+    const finH = Math.max(2.0, L * 0.18);
+    const finChord = chordRoot * 0.55;
     const fin = new THREE.Mesh(
-      new THREE.BoxGeometry(wingThick * 0.9, finH, wingChord * 0.55),
+      new THREE.BoxGeometry(wingThick * 0.85, finH, finChord),
       finMat
     );
-    fin.position.z = -L * 0.4;
-    fin.position.y = fuseR + finH * 0.4;
+    fin.position.z = -L * 0.38;
+    fin.position.y = fuseR * 0.15 + finH * 0.48;
+    fin.rotation.x = -0.12; // mild sweep lean
     fin.userData.part = 'fin';
     group.add(fin);
+
+    // Horizontal stabilizer — T-tail for regional, conventional otherwise
+    const hStabSpan = W * (sz.ttail ? 0.36 : 0.30);
+    const hStabChord = chordRoot * 0.40;
+    const hStab = new THREE.Mesh(
+      new THREE.BoxGeometry(hStabSpan, wingThick * 0.65, hStabChord),
+      wingMat
+    );
+    if (sz.ttail) {
+      hStab.position.set(0, fuseR * 0.15 + finH * 0.92, -L * 0.40);
+    } else {
+      hStab.position.set(0, fuseR * 0.05, -L * 0.42);
+    }
+    hStab.userData.part = 'wing';
+    group.add(hStab);
 
     // Engines
     const nEng = sz.engines || 0;
     if (nEng >= 2) {
-      const engR = fuseR * 0.7;
-      const engLen = L * 0.14;
-      const yOff = -fuseR * 0.85;
-      const zOff = L * 0.05;
-      const xOffs = nEng === 4
-        ? [-W * 0.28, -W * 0.15, W * 0.15, W * 0.28]
-        : (cat === 'heavy' || cat === 'super'
-            ? [-W * 0.22, W * 0.22]
-            : [-W * 0.18, W * 0.18]);
-      // For under-wing twins on medium/regional, slightly outboard
-      if (cat === 'medium' || cat === 'regional') {
-        xOffs[0] = -W * 0.2; xOffs[1] = W * 0.2;
+      const engR = fuseR * (cat === 'super' || cat === 'heavy' ? 0.85 : 0.72);
+      const engLen = L * 0.15;
+      const yOff = wingY - engR * 0.95;
+      const zOff = wingZ + chordRoot * 0.05;
+      let xOffs;
+      if (nEng === 4) {
+        xOffs = [-W * 0.30, -W * 0.16, W * 0.16, W * 0.30];
+      } else if (cat === 'heavy' || cat === 'super') {
+        xOffs = [-W * 0.24, W * 0.24];
+      } else if (cat === 'regional' && sz.ttail) {
+        // rear-fuselage mounts common on CRJ / older RJ
+        xOffs = [-fuseR * 1.35, fuseR * 1.35];
+      } else {
+        xOffs = [-W * 0.22, W * 0.22];
       }
+      const rearMount = cat === 'regional' && sz.ttail;
       for (const x of xOffs) {
         const eng = new THREE.Mesh(
-          new THREE.CylinderGeometry(engR, engR * 0.85, engLen, 8),
+          new THREE.CylinderGeometry(engR, engR * 0.82, engLen, 10),
           engMat
         );
         eng.rotation.x = Math.PI / 2;
-        eng.position.set(x, yOff, zOff);
+        if (rearMount) {
+          eng.position.set(x, fuseR * 0.15, -L * 0.28);
+        } else {
+          eng.position.set(x, yOff, zOff);
+        }
         eng.userData.part = 'engine';
         group.add(eng);
+        // intake lip
+        const lip = new THREE.Mesh(
+          new THREE.TorusGeometry(engR * 0.92, engR * 0.08, 6, 12),
+          engMat
+        );
+        lip.position.copy(eng.position);
+        lip.position.z += engLen * 0.48;
+        lip.userData.part = 'engine';
+        group.add(lip);
       }
     } else if (nEng === 1 && cat === 'light') {
-      // single prop spinner at nose
-      const spinner = new THREE.Mesh(new THREE.SphereGeometry(fuseR * 0.55, 8, 6), engMat);
-      spinner.position.z = fuseLen / 2 + L * 0.1;
+      const spinner = new THREE.Mesh(new THREE.SphereGeometry(fuseR * 0.5, 8, 6), engMat);
+      spinner.position.z = fuseLen / 2 + L * 0.12;
       spinner.userData.part = 'engine';
       group.add(spinner);
+      // simple prop disc
+      const prop = new THREE.Mesh(
+        new THREE.CylinderGeometry(fuseR * 2.2, fuseR * 2.2, 0.06, 16),
+        new THREE.MeshStandardMaterial({ color: 0xcccccc, transparent: true, opacity: 0.25, roughness: 0.5 })
+      );
+      prop.rotation.x = Math.PI / 2;
+      prop.position.z = fuseLen / 2 + L * 0.13;
+      prop.userData.part = 'rotor';
+      group.add(prop);
     }
   }
 
-  // Store materials list for altitude recolor
   group.userData.bodyMats = [];
   group.userData.finMats = [];
   group.traverse((ch) => {
     if (!ch.isMesh) return;
-    // Clone materials so instances are independent
     if (Array.isArray(ch.material)) {
       ch.material = ch.material.map((m) => m.clone());
     } else {
@@ -561,7 +633,6 @@ function cloneAircraftModel(template) {
 }
 
 function tintModel(model, color) {
-  // Recollect mats if cloned (userData may not deep-clone arrays of mats correctly)
   const bodyMats = [];
   const finMats = [];
   model.traverse((ch) => {
@@ -576,13 +647,16 @@ function tintModel(model, color) {
   });
   for (const m of bodyMats) {
     if (m.color) m.color.copy(color);
-    if (m.emissive) m.emissive.copy(color);
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.55;
+    if (m.emissive) {
+      m.emissive.copy(color);
+      m.emissive.multiplyScalar(0.35);
+    }
+    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.32;
   }
   for (const m of finMats) {
     if (m.color) m.color.copy(color);
     if (m.emissive) m.emissive.copy(color);
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.95;
+    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.75;
   }
 }
 
@@ -825,8 +899,19 @@ let lastArrivals = [];
 // ─── UI wiring ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 $('sRadius').oninput = (e) => { settings.radiusNm = +e.target.value; $('vRadius').textContent = settings.radiusNm; };
-$('sTrail').oninput = (e) => { settings.trailLen = +e.target.value; $('vTrail').textContent = settings.trailLen; };
-$('sAltScale').oninput = (e) => { settings.altScale = +e.target.value; $('vAltScale').textContent = settings.altScale.toFixed(1); };
+$('sTrail').oninput = (e) => {
+  settings.trailLen = +e.target.value;
+  $('vTrail').textContent = settings.trailLen;
+  for (const rec of aircraft.values()) updateTrail(rec);
+};
+$('sAltScale').oninput = (e) => {
+  settings.altScale = +e.target.value;
+  $('vAltScale').textContent = settings.altScale.toFixed(1);
+  for (const rec of aircraft.values()) {
+    applyPose(rec);
+    updateTrail(rec);
+  }
+};
 $('sGround').onchange = (e) => { settings.showGround = e.target.checked; };
 $('sAuto').onchange = (e) => { controls.autoRotate = e.target.checked; };
 $('sVelVec').onchange = (e) => { settings.showVelVec = e.target.checked; };
@@ -1017,8 +1102,12 @@ function createAircraft(icao, typeHint) {
   trailGeo.setDrawRange(0, 0);
   const trail = new THREE.Line(
     trailGeo,
-    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, linewidth: 1 })
+    new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.95,
+      linewidth: 2, depthWrite: false,
+    })
   );
+  trail.frustumCulled = false;
   scene.add(trail);
 
   scene.add(group);
@@ -1029,6 +1118,7 @@ function createAircraft(icao, typeHint) {
   return {
     icao, group, model, glow, stick, velLine, trail, trailGeo, trailPos, trailCol, label,
     trailPts: [],
+    lastTrailSample: 0,
     lat: 0, lon: 0, altM: 0, track: 0, vel: 0, vr: 0, onGround: false, callsign: '',
     type: typeHint || null, reg: null, gsKt: null, cat: info.cat,
     span: info.span, len: info.len, dist: 0, isArrival: false,
@@ -1148,15 +1238,32 @@ function disposeAircraft(rec) {
 function updateTrail(rec) {
   const pts = rec.trailPts;
   const n = Math.min(pts.length, settings.trailLen);
+  if (n < 1) {
+    rec.trailGeo.setDrawRange(0, 0);
+    return;
+  }
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
-    const p = pts[start + i];
+    const tp = pts[start + i];
     const o = i * 3;
-    rec.trailPos[o] = p.x;
-    rec.trailPos[o + 1] = p.y;
-    rec.trailPos[o + 2] = p.z;
-    const fade = 0.4 + 0.6 * (i / Math.max(1, n - 1));
-    const c = altColor(p.altM);
+    let x, y, z;
+    // Last vertex always snugs to current aircraft display so the trail
+    // never detaches while dead-reckoning between ADS-B polls.
+    if (i === n - 1 && rec.display) {
+      x = rec.display.x;
+      y = rec.display.y;
+      z = rec.display.z;
+    } else if (tp.lat != null && tp.lon != null) {
+      const w = enu(tp.lat, tp.lon, (tp.altM || 0) * settings.altScale);
+      x = w.x; y = w.y; z = w.z;
+    } else {
+      x = tp.x || 0; y = tp.y || 0; z = tp.z || 0;
+    }
+    rec.trailPos[o] = x;
+    rec.trailPos[o + 1] = y;
+    rec.trailPos[o + 2] = z;
+    const fade = 0.35 + 0.65 * (i / Math.max(1, n - 1));
+    const c = altColor(tp.altM);
     rec.trailCol[o] = c.r * fade;
     rec.trailCol[o + 1] = c.g * fade;
     rec.trailCol[o + 2] = c.b * fade;
@@ -1342,13 +1449,15 @@ function ingest(data) {
     ensureModel(rec);
     applyPose(rec);
 
-    const tp = rec.display.clone();
-    tp.altM = rec.altM;
-    if (!rec.trailPts.length || prevLat !== p.lat || prevLon !== p.lon) {
-      rec.trailPts.push(tp);
+    // Store geographic history (reprojected on update) so alt-scale changes
+    // and dead-reckon snugging stay correct.
+    if (!rec.trailPts.length || prevLat !== p.lat || prevLon !== p.lon ||
+        Math.abs((rec.trailPts[rec.trailPts.length - 1].altM || 0) - p.altM) > 25) {
+      rec.trailPts.push({ lat: p.lat, lon: p.lon, altM: p.altM || 0 });
       if (rec.trailPts.length > 130) rec.trailPts.shift();
-      updateTrail(rec);
+      rec.lastTrailSample = now;
     }
+    updateTrail(rec);
   }
 
   for (const [id, rec] of aircraft) {
@@ -1379,6 +1488,7 @@ function animate() {
 
   for (const rec of aircraft.values()) {
     // dead-reckon using ground speed
+    let estLat = rec.lat, estLon = rec.lon, estAlt = rec.altM || 0;
     const spd = rec.vel != null ? rec.vel : (rec.gsKt != null ? rec.gsKt * KT_MS : 0);
     if (spd > 1 && rec.track != null && !rec.onGround) {
       const age = (t - rec.lastPoll) / 1000;
@@ -1390,17 +1500,50 @@ function animate() {
         const dLat = (dNorth / R_EARTH) * 180 / Math.PI;
         const dLon = (dEast / (R_EARTH * Math.cos(ORIGIN.lat * Math.PI / 180))) * 180 / Math.PI;
         const dAlt = (rec.vr || 0) * age;
-        const lat = rec.lat + dLat;
-        const lon = rec.lon + dLon;
-        const altVis = Math.max(0, (rec.altM + dAlt)) * settings.altScale;
-        const p = enu(lat, lon, altVis);
+        estLat = rec.lat + dLat;
+        estLon = rec.lon + dLon;
+        estAlt = Math.max(0, (rec.altM || 0) + dAlt);
+        const altVis = estAlt * settings.altScale;
+        const p = enu(estLat, estLon, altVis);
         rec.target.set(p.x, p.y, p.z);
       }
     }
     rec.display.lerp(rec.target, 1 - Math.exp(-3.5 * dt));
     rec.group.position.copy(rec.display);
+
+    // Sample trail along dead-reckoned path (~every 2.5s or 400m) so trails
+    // follow the track between ADS-B polls instead of long straight gaps.
+    if (rec.alive && !rec.onGround && spd > 1) {
+      const since = t - (rec.lastTrailSample || 0);
+      let movedM = 0;
+      if (rec.trailPts.length) {
+        const last = rec.trailPts[rec.trailPts.length - 1];
+        movedM = haversineNm(last.lat, last.lon, estLat, estLon) * NM_M;
+      }
+      if (since > 2500 || movedM > 400) {
+        rec.trailPts.push({ lat: estLat, lon: estLon, altM: estAlt });
+        if (rec.trailPts.length > 130) rec.trailPts.shift();
+        rec.lastTrailSample = t;
+        updateTrail(rec);
+      }
+    }
+    // Snug trail endpoint to aircraft every frame (positions only — avoid GC)
+    if (rec.trailPts.length >= 1) {
+      const n = Math.min(rec.trailPts.length, settings.trailLen);
+      const o = (n - 1) * 3;
+      rec.trailPos[o] = rec.display.x;
+      rec.trailPos[o + 1] = rec.display.y;
+      rec.trailPos[o + 2] = rec.display.z;
+      rec.trailGeo.attributes.position.needsUpdate = true;
+      // Keep last sample's geo alt in sync for color continuity on next full update
+      const last = rec.trailPts[rec.trailPts.length - 1];
+      last.altM = estAlt;
+    }
+
+    // Stick: local ground→aircraft (group origin); keep bottom on y=0 world
     const pos = rec.stick.geometry.attributes.position.array;
-    pos[1] = -rec.display.y;
+    pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
+    pos[3] = 0; pos[4] = 0; pos[5] = 0;
     rec.stick.geometry.attributes.position.needsUpdate = true;
     updateLabelScreen(rec, camera);
   }
