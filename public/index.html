@@ -183,12 +183,12 @@
 <div id="hud">
   <div class="brand">
     <h1>AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
-    <div class="sub" id="hudSub">San Francisco Intl · live ADS-B</div>
+    <div class="sub" id="hudSub">San Francisco Bay · private &amp; GA ADS-B</div>
     <div class="note" id="hudNote" style="display:none"></div>
   </div>
   <div id="stats">
     <div class="stat-main">
-      <span class="arr" id="arrCount">—</span><span class="lbl"> arr</span>
+      <span class="arr" id="gaCount">—</span><span class="lbl"> private/GA</span>
       <span class="n" id="acCount">—</span><span class="lbl"> shown</span>
     </div>
     <div class="meta" id="srcLine">—</div>
@@ -200,20 +200,22 @@
   <header>AIR LOOM CONTROLS</header>
   <div class="body">
     <div class="row"><label>Shown</label><span class="val" id="uiCount">0</span></div>
-    <div class="row"><label>Arrivals</label><span class="val" id="uiArrCount" style="color:var(--accent)">0</span></div>
+    <div class="row"><label>Private/GA</label><span class="val" id="uiGaCount" style="color:var(--accent)">0</span></div>
+    <div class="row"><label>Arrivals</label><span class="val" id="uiArrCount" style="color:var(--muted)">0</span></div>
     <div class="row"><label>Recording</label><span class="val" style="color:var(--muted)">inactive</span></div>
     <div class="row"><label>Memory</label><span class="val" id="uiMem" style="color:var(--muted)">—</span></div>
 
     <div class="section">
       <h3>Traffic mode</h3>
-      <button type="button" class="mode-btn active" id="btnArrivals">Arrivals focus</button>
-      <button type="button" class="mode-btn ghost" id="btnAllTraffic" style="margin-top:6px">Show all traffic</button>
-      <div class="row" style="margin-top:8px"><label>Mode</label><span class="val" id="uiMode">arrivals</span></div>
+      <button type="button" class="mode-btn active" id="btnGa">Private / GA</button>
+      <button type="button" class="mode-btn ghost" id="btnArrivals" style="margin-top:6px">Arrivals</button>
+      <button type="button" class="mode-btn ghost" id="btnAllTraffic" style="margin-top:6px">All traffic</button>
+      <div class="row" style="margin-top:8px"><label>Mode</label><span class="val" id="uiMode">private/GA</span></div>
     </div>
 
     <div class="section">
-      <h3>Live arrivals</h3>
-      <div id="arrivalsList"><div class="arr-empty">Waiting for ADS-B…</div></div>
+      <h3>Nearby private / GA</h3>
+      <div id="arrivalsList"><div class="arr-empty">Waiting for private/GA ADS-B…</div></div>
     </div>
 
     <div class="section">
@@ -291,7 +293,7 @@ const ORIGIN = known || AIRPORTS.KSFO;
 const UNKNOWN_APT = !known && params.get('airport');
 
 document.getElementById('hudAirport').textContent = ORIGIN.icao;
-document.getElementById('hudSub').textContent = ORIGIN.name + ' · live ADS-B';
+document.getElementById('hudSub').textContent = 'San Francisco Bay · private & GA ADS-B';
 if (UNKNOWN_APT) {
   const n = document.getElementById('hudNote');
   n.style.display = 'block';
@@ -306,7 +308,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'gltf-models-v1'; // served-code marker for deploy verify
+const BUILD_MARK = 'ga-focus-v1'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -392,6 +394,9 @@ const TYPE_CAT = {
   B06: 'heli', B407: 'heli', B412: 'heli', B429: 'heli', B505: 'heli',
   EC35: 'heli', EC45: 'heli', EC55: 'heli', A109: 'heli', A139: 'heli',
   R44: 'heli', R66: 'heli', S76: 'heli', UH1: 'heli',
+  // Military transports — must not classify as light GA
+  C17: 'heavy', C130: 'heavy', C30J: 'heavy', C5M: 'heavy', C5: 'heavy',
+  C141: 'heavy', C27J: 'heavy', KC10: 'heavy', KC46: 'heavy', KC135: 'heavy',
 };
 
 /** Per-ICAO real-world-ish dims (meters). Cache key = type string. */
@@ -445,6 +450,65 @@ const TYPE_DIMS = {
   B744: { len: 70.7, span: 64.4, fuseR: 3.25, engines: 4, mount: 'underwing', ttail: false, sweep: 37, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.1 },
   B748: { len: 76.3, span: 68.4, fuseR: 3.25, engines: 4, mount: 'underwing', ttail: false, sweep: 37, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.15 },
   A388: { len: 72.7, span: 79.8, fuseR: 3.55, engines: 4, mount: 'underwing', ttail: false, sweep: 33, wingZ: 0.02, chordFrac: 0.18, finH: 0.22, engScale: 1.2 },
+  // ── General aviation / private (meters) — drives per-type GLB scale ──
+  C172: { len: 8.28, span: 11.0, fuseR: 0.55, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.22, finH: 0.22, engScale: 0.45 },
+  C182: { len: 8.84, span: 11.0, fuseR: 0.58, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.22, finH: 0.22, engScale: 0.48 },
+  SR22: { len: 7.92, span: 11.7, fuseR: 0.55, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.20, finH: 0.20, engScale: 0.45 },
+  SR20: { len: 7.92, span: 11.7, fuseR: 0.52, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.20, finH: 0.20, engScale: 0.42 },
+  PA28: { len: 7.25, span: 10.7, fuseR: 0.50, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.22, finH: 0.22, engScale: 0.42 },
+  P28A: { len: 7.25, span: 10.7, fuseR: 0.50, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.22, finH: 0.22, engScale: 0.42 },
+  DA40: { len: 8.06, span: 11.9, fuseR: 0.52, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.20, finH: 0.20, engScale: 0.42 },
+  BE58: { len: 9.09, span: 11.53, fuseR: 0.60, engines: 2, mount: 'wing', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.20, finH: 0.22, engScale: 0.5 },
+  // Turboprops
+  PC12: { len: 14.40, span: 16.23, fuseR: 0.85, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.7 },
+  TBM9: { len: 10.74, span: 12.82, fuseR: 0.75, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.65 },
+  TBM8: { len: 10.74, span: 12.82, fuseR: 0.75, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.65 },
+  TBM7: { len: 10.74, span: 12.68, fuseR: 0.75, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.65 },
+  BE20: { len: 13.34, span: 16.61, fuseR: 0.85, engines: 2, mount: 'wing', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.7 },
+  B350: { len: 14.22, span: 17.65, fuseR: 0.90, engines: 2, mount: 'wing', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.18, finH: 0.22, engScale: 0.75 },
+  C208: { len: 11.46, span: 15.88, fuseR: 0.80, engines: 1, mount: 'nose', ttail: false, sweep: 0, wingZ: 0.05, chordFrac: 0.20, finH: 0.22, engScale: 0.65 },
+  // Light jets
+  C25A: { len: 12.98, span: 14.40, fuseR: 0.80, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.16, finH: 0.22, engScale: 0.55 },
+  C25B: { len: 14.30, span: 15.19, fuseR: 0.82, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.16, finH: 0.22, engScale: 0.55 },
+  C25C: { len: 16.26, span: 15.49, fuseR: 0.85, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.15, finH: 0.22, engScale: 0.58 },
+  C525: { len: 12.98, span: 14.40, fuseR: 0.80, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.16, finH: 0.22, engScale: 0.55 },
+  C56X: { len: 16.00, span: 17.17, fuseR: 0.90, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.0, chordFrac: 0.15, finH: 0.22, engScale: 0.65 },
+  LJ45: { len: 17.68, span: 14.56, fuseR: 0.85, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.0, chordFrac: 0.15, finH: 0.24, engScale: 0.6 },
+  LJ60: { len: 17.68, span: 14.56, fuseR: 0.88, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.0, chordFrac: 0.15, finH: 0.24, engScale: 0.62 },
+  LJ75: { len: 17.68, span: 14.56, fuseR: 0.88, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.0, chordFrac: 0.15, finH: 0.24, engScale: 0.62 },
+  BE40: { len: 14.75, span: 13.26, fuseR: 0.80, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.0, chordFrac: 0.16, finH: 0.22, engScale: 0.55 },
+  E50P: { len: 12.82, span: 12.30, fuseR: 0.78, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.16, finH: 0.22, engScale: 0.5 },
+  E55P: { len: 15.64, span: 12.30, fuseR: 0.82, engines: 2, mount: 'rear', ttail: true, sweep: 15, wingZ: 0.0, chordFrac: 0.15, finH: 0.22, engScale: 0.55 },
+  PC24: { len: 16.80, span: 17.00, fuseR: 0.90, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.0, chordFrac: 0.15, finH: 0.22, engScale: 0.6 },
+  HA4T: { len: 21.40, span: 18.80, fuseR: 1.05, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.75 },
+  // Super-mid
+  CL30: { len: 20.90, span: 19.46, fuseR: 1.10, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
+  CL35: { len: 20.90, span: 19.46, fuseR: 1.10, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
+  CL60: { len: 20.90, span: 19.61, fuseR: 1.15, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.85 },
+  C68A: { len: 18.97, span: 22.00, fuseR: 1.00, engines: 2, mount: 'rear', ttail: true, sweep: 22, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.75 },
+  C680: { len: 18.97, span: 19.24, fuseR: 1.00, engines: 2, mount: 'rear', ttail: true, sweep: 22, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.75 },
+  C750: { len: 22.04, span: 19.38, fuseR: 1.05, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.13, finH: 0.20, engScale: 0.9 },
+  F2TH: { len: 20.23, span: 19.33, fuseR: 1.05, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
+  GALX: { len: 18.97, span: 17.70, fuseR: 1.00, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.75 },
+  G280: { len: 20.30, span: 19.20, fuseR: 1.05, engines: 2, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
+  // Large cabin — must look huge vs C172
+  GLF4: { len: 26.90, span: 23.50, fuseR: 1.25, engines: 2, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.0 },
+  GLF5: { len: 29.40, span: 28.50, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.1 },
+  GLF6: { len: 30.40, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
+  GLEX: { len: 30.30, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
+  GL5T: { len: 28.65, span: 28.65, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.1 },
+  GL6T: { len: 30.30, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
+  FA7X: { len: 26.30, span: 26.21, fuseR: 1.25, engines: 3, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.0 },
+  FA8X: { len: 27.35, span: 26.21, fuseR: 1.25, engines: 3, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.05 },
+  FA50: { len: 18.86, span: 18.86, fuseR: 1.05, engines: 3, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
+  // Helicopters
+  EC35: { len: 12.16, span: 10.20, fuseR: 0.70, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.15, engScale: 0.5 },
+  EC45: { len: 13.03, span: 11.00, fuseR: 0.75, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.15, engScale: 0.5 },
+  R44:  { len: 11.76, span: 10.10, fuseR: 0.55, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.12, engScale: 0.4 },
+  R66:  { len: 11.76, span: 10.10, fuseR: 0.55, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.12, engScale: 0.4 },
+  B407: { len: 12.70, span: 10.67, fuseR: 0.65, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.14, engScale: 0.45 },
+  A139: { len: 16.66, span: 13.80, fuseR: 0.90, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.15, engScale: 0.55 },
+  S76:  { len: 16.00, span: 13.40, fuseR: 0.85, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.15, engScale: 0.55 },
 };
 
 const CAT_SIZE = {
@@ -463,9 +527,11 @@ function classifyType(icaoType) {
   if (TYPE_CAT[t]) return TYPE_CAT[t];
   if (/^A3[5-8]|^B74|^B77|^B78|^A38|^MD11/.test(t)) return 'heavy';
   if (/^B7[3-5]|^A31|^A32|^BCS|^MD8|^MD9/.test(t)) return 'medium';
-  if (/^E1|^E2|^CRJ|^DH8|^AT[457]|^SF3|^RJ/.test(t)) return 'regional';
-  if (/^C[1-7]|^PA|^BE|^SR|^DA|^PC|^TBM|^GLF|^LJ|^CL|^FA|^H25/.test(t)) return 'light';
-  if (/^EC|^R4|^R6|^UH|^B4|^A1[0-4]|^S76/.test(t)) return 'heli';
+  if (/^E1[789]|^E2[09]|^CRJ|^DH8|^AT[457]|^SF3|^RJ/.test(t)) return 'regional';
+  // Broad GA / bizjet / turboprop / VLJ patterns (private-aircraft focus).
+  // Note: avoid bare C1/C5/C17 — those collide with military transports (C17, C130, C5M).
+  if (/^(C15|C16|C17[0-9]|C18|C19|C20[6-9]|C21|C22|C25|C30[0-9]|C31|C33|C34|C35|C36|C37|C40|C41|C42|C44|C45|C46|C50|C51|C52|C55|C56|C57|C60|C68|C70|C75|PA|P28|P32|P46|BE[1-9]|SR|DA[1-6]|PC1|PC2|TBM|GLF|GL[56]|GLEX|LJ|CL[236]|FA|F2TH|F900|H25|HA4|E50|E55|G1[58]|G2[08]|GALX|PAY|MU2|AC9|EPIC|EVOT|SF50|HDJT|PRM)/.test(t)) return 'light';
+  if (/^(EC|R2|R4|R6|UH|B06|B4[0-3]|B50|A10|A13|A16|A18|S76|S92|AS[356]|EXPL|H6|MI|AW|BK17|BO10)/.test(t)) return 'heli';
   return 'unknown';
 }
 
@@ -1243,7 +1309,8 @@ let settings = {
   altScale: 1.2,
   showGround: false,
   filter: '',
-  arrivalsOnly: true,
+  // Default product mode: private / general aviation (not airline arrivals).
+  trafficMode: 'ga', // 'ga' | 'arrivals' | 'all'
   showVelVec: true,
   showAltSticks: false,
 };
@@ -1287,16 +1354,90 @@ if (matchMedia('(max-width: 720px)').matches) {
   $('drawer').classList.add('collapsed');
 }
 
-function setMode(arrivalsOnly) {
-  settings.arrivalsOnly = arrivalsOnly;
-  $('btnArrivals').classList.toggle('active', arrivalsOnly);
-  $('btnArrivals').classList.toggle('ghost', !arrivalsOnly);
-  $('btnAllTraffic').classList.toggle('active', !arrivalsOnly);
-  $('btnAllTraffic').classList.toggle('ghost', arrivalsOnly);
-  $('uiMode').textContent = arrivalsOnly ? 'arrivals' : 'all';
+/**
+ * Private / GA classification heuristic (product default filter).
+ *
+ * Include when ANY of:
+ *  1. ICAO wake/category is light or heli (ADS-B cat A/B or our classifyType light/heli)
+ *  2. Type code matches known bizjet / turboprop / piston / heli families
+ *     (C25*, C56X, C68A, C750, CL30/35/60, GLF*, GLEX, FA*, LJ*, BE40, HA4T,
+ *      PC12, TBM*, SR2*, DA4*, C172, BE20, etc. — see PRIVATE_GA_TYPES / prefixes)
+ *  3. Aircraft has no airline-style callsign (not [A-Z]{2,3}\d{1,4}[A-Z]?) AND
+ *     type classifies as light/biz OR family resolves to ga/turboprop/lightjet/midjet/largecabin/heli/bizjet
+ *
+ * Exclude by default: medium/heavy/super airliners (B73*, A32*, B77*, etc.) unless
+ * trafficMode is 'arrivals' or 'all'. Small regionals (E-Jets/CRJ) stay hidden in GA mode
+ * unless their callsign looks private (rare).
+ */
+const PRIVATE_GA_TYPES = new Set([
+  // piston / light
+  'C150','C152','C162','C170','C172','C175','C177','C180','C182','C185','C206','C207','C210','C337',
+  'PA28','PA32','PA34','PA44','PA46','P28A','P28B','P28R','P28T','SR20','SR22','S22T',
+  'DA40','DA42','DA62','BE33','BE35','BE36','BE55','BE58','M20P','M20T','RV7','RV10','RV12',
+  // turboprop
+  'PC12','TBM7','TBM8','TBM9','BE9L','BE9T','BE20','BE30','B350','C208','C408','C425','C441','P180','PAY2','PAY3','PAY4',
+  // light / mid / large cabin jets
+  'C25A','C25B','C25C','C25M','C500','C525','C550','C560','C56X','C680','C68A','C700','C750',
+  'LJ31','LJ35','LJ40','LJ45','LJ55','LJ60','LJ70','LJ75',
+  'CL30','CL35','CL60','CL60','CL2T',
+  'GLF2','GLF3','GLF4','GLF5','GLF6','GL5T','GL6T','GLEX','GA6C','GA7C',
+  'FA50','FA7X','FA8X','FA20','FA10','F2TH','F900','GALX','G150','G200','G280',
+  'BE40','HA4T','H25B','PC24','E50P','E55P','E545','E550','PRM1','HDJT','SF50',
+  // heli
+  'EC35','EC45','EC55','R22','R44','R66','B06','B407','B412','B429','B505','A109','A139','S76','UH1','AS50','EXPL',
+]);
+const PRIVATE_GA_PREFIXES = [
+  'C25','C50','C55','C56','C65','C68','C70','C75','GLF','GLE','GL5','GL6','GL7',
+  'LJ','FA7','FA8','FA6','FA5','FA2','CL3','CL6','PC1','PC2','TBM','BE9','BE2','BE3','B35',
+  'C20','C40','PAY','P28','PA2','PA3','PA4','SR2','DA4','DA6','M20','RV','H25','HA4',
+  'EC','R22','R44','R66','B06','B40','B41','B42','B50','UH','S76','S92','A10','A13','A16','A18','AW','AS5','AS6','EXPL',
+];
+const GA_FAMILY_IDS = new Set(['ga','turboprop','lightjet','midjet','largecabin','bizjet','heli']);
+
+const AIRLINE_CS_RE = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/; // UAL123, SWA45, ASA812A
+
+function isPrivateOrGa(p) {
+  const typ = (p.type || '').toUpperCase().trim();
+  const cat = p.cat || classifyType(typ);
+  if (cat === 'light' || cat === 'heli') return true;
+  if (typ && PRIVATE_GA_TYPES.has(typ)) return true;
+  if (typ && PRIVATE_GA_PREFIXES.some((pref) => typ.startsWith(pref))) {
+    // Avoid swallowing airliners that share a short prefix (e.g. none of the above should)
+    if (!/^(B7|A3|A2|E1|E2|CRJ|DH8|AT[457]|MD[89])/.test(typ)) return true;
+  }
+  const fam = resolveFamilyId(typ, cat);
+  if (fam && GA_FAMILY_IDS.has(fam)) {
+    const cs = (p.callsign || '').trim().toUpperCase();
+    if (!cs || !AIRLINE_CS_RE.test(cs)) return true;
+    // Bizjet family with airline callsign still counts as GA/private type
+    if (fam !== 'ga' || cat === 'light' || cat === 'heli') return true;
+  }
+  // No type, non-airline callsign, not obviously heavy → soft include
+  if (!typ && cat === 'unknown') {
+    const cs = (p.callsign || '').trim().toUpperCase();
+    if (cs && !AIRLINE_CS_RE.test(cs)) return true;
+  }
+  return false;
 }
-$('btnArrivals').onclick = () => setMode(true);
-$('btnAllTraffic').onclick = () => setMode(false);
+
+function setMode(mode) {
+  settings.trafficMode = mode;
+  const modes = [
+    ['btnGa', 'ga', 'private/GA'],
+    ['btnArrivals', 'arrivals', 'arrivals'],
+    ['btnAllTraffic', 'all', 'all'],
+  ];
+  for (const [id, m, label] of modes) {
+    const on = mode === m;
+    $(id).classList.toggle('active', on);
+    $(id).classList.toggle('ghost', !on);
+    if (on) $('uiMode').textContent = label;
+  }
+}
+$('btnGa').onclick = () => setMode('ga');
+$('btnArrivals').onclick = () => setMode('arrivals');
+$('btnAllTraffic').onclick = () => setMode('all');
+setMode('ga'); // persist initial default: Private/GA
 
 function showToast(msg, ms = 4000) {
   const t = $('toast');
@@ -1353,7 +1494,7 @@ function renderArrivalsList(arrs) {
   lastArrivals = arrs;
   const el = $('arrivalsList');
   if (!arrs.length) {
-    el.innerHTML = '<div class="arr-empty">No arrivals in range</div>';
+    el.innerHTML = '<div class="arr-empty">No private/GA in range</div>';
     return;
   }
   const sorted = arrs.slice().sort((a, b) => a.dist - b.dist);
@@ -1915,9 +2056,14 @@ function ingest(data) {
 
   const arrivals = parsed.filter((p) => p.isArrival);
 
+  // Tag private/GA on every parsed aircraft (used by filter + stats)
+  for (const p of parsed) p.isPrivateGa = isPrivateOrGa(p);
+  const privateGa = parsed.filter((p) => p.isPrivateGa);
+
   let list = parsed.filter((p) => {
     if (!settings.showGround && p.onGround) return false;
-    if (settings.arrivalsOnly && !p.isArrival) return false;
+    if (settings.trafficMode === 'ga' && !p.isPrivateGa) return false;
+    if (settings.trafficMode === 'arrivals' && !p.isArrival) return false;
     if (settings.filter) {
       const f = settings.filter;
       if (!(p.callsign.includes(f) || p.icao.toUpperCase().includes(f) || (p.type || '').includes(f))) return false;
@@ -1927,6 +2073,8 @@ function ingest(data) {
 
   if (list.length > MAX_AIRCRAFT) {
     list.sort((a, b) => {
+      const agA = a.isPrivateGa ? 0 : 1, agB = b.isPrivateGa ? 0 : 1;
+      if (agA !== agB) return agA - agB;
       const aa = a.isArrival ? 0 : 1, ba = b.isArrival ? 0 : 1;
       if (aa !== ba) return aa - ba;
       const ag = a.onGround ? 1 : 0, bg = b.onGround ? 1 : 0;
@@ -1949,7 +2097,7 @@ function ingest(data) {
       onGround: p.onGround, vel: p.vel, track: p.track, vr: p.vr,
       source: p.source, lastPoll: now, alive: true,
       type: p.type || rec.type, reg: p.reg || rec.reg, gsKt: p.gsKt,
-      dist: p.dist, isArrival: p.isArrival, cat: p.cat || rec.cat,
+      dist: p.dist, isArrival: p.isArrival, isPrivateGa: !!p.isPrivateGa, cat: p.cat || rec.cat,
     });
     ensureModel(rec);
     applyPose(rec);
@@ -1975,9 +2123,16 @@ function ingest(data) {
 
   $('acCount').textContent = String(aircraft.size);
   $('uiCount').textContent = String(aircraft.size);
-  $('arrCount').textContent = String(arrivals.length);
+  const gaShown = [...aircraft.values()].filter((r) => r.isPrivateGa).length;
+  const gaTotal = privateGa.length;
+  if ($('gaCount')) $('gaCount').textContent = String(settings.trafficMode === 'ga' ? aircraft.size : gaTotal);
+  if ($('uiGaCount')) $('uiGaCount').textContent = String(gaTotal);
   $('uiArrCount').textContent = String(arrivals.length);
-  renderArrivalsList(arrivals);
+  // List panel: private/GA in default mode, arrivals otherwise
+  const listForPanel = settings.trafficMode === 'ga'
+    ? privateGa.slice().sort((a, b) => a.dist - b.dist).slice(0, 40)
+    : arrivals;
+  renderArrivalsList(listForPanel);
   if (selectedId && aircraft.has(selectedId)) updateSelPanel(aircraft.get(selectedId));
 }
 

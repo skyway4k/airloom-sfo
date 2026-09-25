@@ -182,23 +182,25 @@
       "file": "bizjet.glb",
       "source": "fr24",
       "license": "GPLv2",
-      "refLen": 14.4,
-      "refSpan": 15.9,
+      "refLen": 17.0,
+      "refSpan": 16.5,
       "yaw": 0,
       "pitch": 0,
       "roll": 0,
-      "yOffset": 0
+      "yOffset": 0,
+      "notes": "Citation fallback for unmapped bizjets"
     },
     "ga": {
       "file": "ga.glb",
       "source": "fr24",
       "license": "GPLv2",
-      "refLen": 8.3,
+      "refLen": 8.28,
       "refSpan": 11.0,
       "yaw": 0,
       "pitch": 0,
       "roll": 0,
-      "yOffset": 0
+      "yOffset": 0,
+      "notes": "Piper PA-28 stand-in for single-engine piston (C172/SR22/PA28)"
     },
     "heli": {
       "file": "heli.glb",
@@ -209,7 +211,56 @@
       "yaw": 0,
       "pitch": 0,
       "roll": 0,
-      "yOffset": 0
+      "yOffset": 0,
+      "notes": "EC135-family heli stand-in"
+    },
+    "turboprop": {
+      "file": "turboprop.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 14.4,
+      "refSpan": 16.23,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0,
+      "notes": "ATR-42 mesh stand-in for PC-12 / TBM / King Air turboprops"
+    },
+    "lightjet": {
+      "file": "lightjet.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 14.9,
+      "refSpan": 15.19,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0,
+      "notes": "Citation mesh \u2014 light jets (CJ/M2/Lear 40/45)"
+    },
+    "midjet": {
+      "file": "midjet.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 20.9,
+      "refSpan": 19.46,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0,
+      "notes": "Citation mesh scaled \u2014 super-mid (CL30/35, C68A, F2TH)"
+    },
+    "largecabin": {
+      "file": "largecabin.glb",
+      "source": "fr24",
+      "license": "GPLv2",
+      "refLen": 29.4,
+      "refSpan": 28.5,
+      "yaw": 0,
+      "pitch": 0,
+      "roll": 0,
+      "yOffset": 0,
+      "notes": "Citation mesh scaled \u2014 large cabin (Gulfstream/Global/Falcon 7X/8X)"
     }
   },
   "exact": {
@@ -313,29 +364,28 @@
     "E2": "ejet",
     "EJET": "ejet",
     "E45X": "ejet",
-    "E35L": "ejet",
-    "E55P": "bizjet",
-    "E50P": "bizjet",
-    "E55L": "ejet",
+    "E35L": "midjet",
+    "E55P": "lightjet",
+    "E50P": "lightjet",
+    "E55L": "midjet",
     "E135": "ejet",
     "E145": "ejet",
     "E45J": "ejet",
-    "CRJ1": "crj",
     "CRJ2": "crj",
     "CRJ7": "crj",
     "CRJ9": "crj",
     "CRJX": "crj",
     "CRJ": "crj",
-    "CL60": "bizjet",
-    "CL30": "crj",
-    "CL35": "crj",
-    "CL2T": "crj",
+    "CL60": "midjet",
+    "CL30": "midjet",
+    "CL35": "midjet",
+    "CL2T": "midjet",
     "DH8A": "q400",
     "DH8B": "q400",
     "DH8C": "q400",
     "DH8D": "q400",
     "DH4": "q400",
-    "DHC6": "q400",
+    "DHC6": "turboprop",
     "DHC7": "q400",
     "DHC8": "q400",
     "Q400": "q400",
@@ -359,78 +409,75 @@
     "SF34": "atr",
     "SF3": "atr",
     "SB20": "atr",
-    "JS32": "atr",
-    "JS41": "atr",
+    "JS32": "turboprop",
+    "JS41": "turboprop",
     "BE02": "atr",
-    "BE20": "atr",
-    "BE30": "atr",
-    "BE40": "bizjet",
-    "BE99": "atr",
-    "C208": "atr",
+    "BE20": "turboprop",
+    "BE30": "turboprop",
+    "BE40": "lightjet",
+    "BE99": "turboprop",
+    "C208": "turboprop",
     "C212": "atr",
     "CN35": "atr",
-    "Y12": "atr",
     "IL14": "atr",
     "AN24": "atr",
     "AN26": "atr",
     "AN28": "atr",
     "AN30": "atr",
     "AN32": "atr",
-    "C25A": "bizjet",
-    "C25B": "bizjet",
-    "C25C": "bizjet",
-    "C500": "bizjet",
-    "C501": "bizjet",
-    "C525": "bizjet",
-    "C550": "bizjet",
-    "C560": "bizjet",
-    "C56X": "bizjet",
-    "C650": "bizjet",
-    "C680": "bizjet",
-    "C68A": "bizjet",
-    "C700": "bizjet",
-    "C750": "bizjet",
-    "C25M": "bizjet",
-    "FA7X": "bizjet",
-    "FA8X": "bizjet",
-    "FA50": "bizjet",
-    "FA20": "bizjet",
-    "FA10": "bizjet",
-    "G150": "bizjet",
-    "G200": "bizjet",
-    "G280": "bizjet",
-    "G100": "bizjet",
-    "GALX": "bizjet",
-    "GLF2": "bizjet",
-    "GLF3": "bizjet",
-    "GLF4": "bizjet",
-    "GLF5": "bizjet",
-    "GLF6": "bizjet",
-    "GL5T": "bizjet",
-    "GL6T": "bizjet",
-    "GLEX": "bizjet",
-    "GJ4": "bizjet",
-    "HA4T": "bizjet",
-    "HDJT": "bizjet",
-    "LJ31": "bizjet",
-    "LJ35": "bizjet",
-    "LJ40": "bizjet",
-    "LJ45": "bizjet",
-    "LJ55": "bizjet",
-    "LJ60": "bizjet",
-    "LJ70": "bizjet",
-    "LJ75": "bizjet",
-    "LJ85": "bizjet",
-    "PC24": "bizjet",
-    "H25A": "bizjet",
-    "H25B": "bizjet",
-    "H25C": "bizjet",
-    "PRM1": "bizjet",
-    "F2TH": "bizjet",
-    "F900": "bizjet",
-    "ASTR": "bizjet",
-    "WW24": "bizjet",
-    "SBR1": "bizjet",
+    "C25A": "lightjet",
+    "C25B": "lightjet",
+    "C25C": "lightjet",
+    "C500": "lightjet",
+    "C501": "lightjet",
+    "C525": "lightjet",
+    "C550": "lightjet",
+    "C560": "lightjet",
+    "C56X": "lightjet",
+    "C650": "midjet",
+    "C680": "midjet",
+    "C68A": "midjet",
+    "C700": "midjet",
+    "C750": "midjet",
+    "C25M": "lightjet",
+    "FA7X": "largecabin",
+    "FA8X": "largecabin",
+    "FA50": "midjet",
+    "FA20": "midjet",
+    "G150": "midjet",
+    "G200": "midjet",
+    "G280": "midjet",
+    "G100": "midjet",
+    "GLF2": "largecabin",
+    "GLF3": "largecabin",
+    "GLF4": "largecabin",
+    "GLF5": "largecabin",
+    "GLF6": "largecabin",
+    "GL5T": "largecabin",
+    "GL6T": "largecabin",
+    "GLEX": "largecabin",
+    "GJ4": "largecabin",
+    "HA4T": "lightjet",
+    "HDJT": "lightjet",
+    "LJ31": "lightjet",
+    "LJ35": "lightjet",
+    "LJ40": "lightjet",
+    "LJ45": "lightjet",
+    "LJ55": "lightjet",
+    "LJ60": "lightjet",
+    "LJ70": "lightjet",
+    "LJ75": "lightjet",
+    "LJ85": "lightjet",
+    "PC24": "lightjet",
+    "H25A": "lightjet",
+    "H25B": "lightjet",
+    "H25C": "lightjet",
+    "PRM1": "lightjet",
+    "F2TH": "midjet",
+    "F900": "midjet",
+    "ASTR": "midjet",
+    "WW24": "midjet",
+    "SBR1": "midjet",
     "C150": "ga",
     "C152": "ga",
     "C162": "ga",
@@ -481,13 +528,13 @@
     "J3": "ga",
     "CUB": "ga",
     "LEG2": "ga",
-    "TBM7": "ga",
-    "TBM8": "ga",
-    "TBM9": "ga",
-    "PC12": "ga",
-    "EPIC": "ga",
-    "EVOT": "ga",
-    "EV95": "ga",
+    "TBM7": "turboprop",
+    "TBM8": "turboprop",
+    "TBM9": "turboprop",
+    "PC12": "turboprop",
+    "EPIC": "turboprop",
+    "EVOT": "turboprop",
+    "EV95": "turboprop",
     "EC20": "heli",
     "EC30": "heli",
     "EC35": "heli",
@@ -528,7 +575,6 @@
     "MD50": "heli",
     "MD52": "heli",
     "MD60": "heli",
-    "MD90": "b757",
     "S330": "heli",
     "S61": "heli",
     "S62": "heli",
@@ -550,7 +596,7 @@
     "DC6": "ga",
     "DC4": "ga",
     "C46": "ga",
-    "B350": "ga",
+    "B350": "turboprop",
     "IL76": "b747",
     "IL86": "b747",
     "IL96": "b747",
@@ -570,9 +616,538 @@
     "CONC": "b747",
     "L101": "b747",
     "L10": "b747",
-    "VC10": "b747"
+    "VC10": "b747",
+    "C340": "ga",
+    "C402": "ga",
+    "C414": "ga",
+    "C421": "ga",
+    "C303": "ga",
+    "C310": "ga",
+    "C320": "ga",
+    "C335": "ga",
+    "C336": "ga",
+    "PA18": "ga",
+    "P28T": "ga",
+    "P32R": "ga",
+    "P46T": "turboprop",
+    "BE76": "ga",
+    "BE95": "ga",
+    "BE19": "ga",
+    "BE23": "ga",
+    "BE24": "ga",
+    "S22T": "ga",
+    "DA20": "ga",
+    "DV20": "ga",
+    "M20F": "ga",
+    "M20J": "ga",
+    "M20K": "ga",
+    "M20R": "ga",
+    "M20S": "ga",
+    "TB21": "ga",
+    "TRIN": "ga",
+    "DR400": "ga",
+    "CAPL": "ga",
+    "EA50": "lightjet",
+    "RV6": "ga",
+    "RV14": "ga",
+    "CH80": "ga",
+    "LNC2": "ga",
+    "LNC4": "ga",
+    "AA5": "ga",
+    "AA1": "ga",
+    "AA1B": "ga",
+    "GRUM": "ga",
+    "GLAS": "ga",
+    "COL3": "ga",
+    "COL4": "ga",
+    "LC40": "ga",
+    "LC41": "ga",
+    "LC42": "ga",
+    "FDCT": "ga",
+    "PIVI": "ga",
+    "COZY": "ga",
+    "VELO": "ga",
+    "E300": "ga",
+    "E400": "ga",
+    "C82R": "ga",
+    "C77R": "ga",
+    "C72R": "ga",
+    "P180": "turboprop",
+    "E550": "midjet",
+    "TBM850": "turboprop",
+    "TBM900": "turboprop",
+    "TBM910": "turboprop",
+    "TBM930": "turboprop",
+    "TBM940": "turboprop",
+    "TBM960": "turboprop",
+    "BE9L": "turboprop",
+    "BE9T": "turboprop",
+    "B190": "turboprop",
+    "BE10": "turboprop",
+    "C208B": "turboprop",
+    "C408": "turboprop",
+    "C425": "turboprop",
+    "C441": "turboprop",
+    "PAY1": "turboprop",
+    "PAY2": "turboprop",
+    "PAY3": "turboprop",
+    "PAY4": "turboprop",
+    "AC90": "turboprop",
+    "AC95": "turboprop",
+    "MU2": "turboprop",
+    "SW3": "turboprop",
+    "SW4": "turboprop",
+    "JS31": "turboprop",
+    "DHC2": "turboprop",
+    "DHC3": "turboprop",
+    "C526": "lightjet",
+    "C551": "lightjet",
+    "C55B": "lightjet",
+    "CE55": "lightjet",
+    "CE56": "lightjet",
+    "LJ23": "lightjet",
+    "LJ24": "lightjet",
+    "LJ25": "lightjet",
+    "LJ28": "lightjet",
+    "LJ36": "lightjet",
+    "BE42": "lightjet",
+    "H25S": "lightjet",
+    "SF50": "lightjet",
+    "VERY": "lightjet",
+    "VLJ": "lightjet",
+    "CL604": "midjet",
+    "CL605": "midjet",
+    "CL650": "midjet",
+    "GALX": "midjet",
+    "SBR2": "midjet",
+    "GA6C": "largecabin",
+    "GA7C": "largecabin",
+    "GVII": "largecabin",
+    "GV": "largecabin",
+    "FA6X": "largecabin",
+    "G500": "largecabin",
+    "G550": "largecabin",
+    "G600": "largecabin",
+    "G650": "largecabin",
+    "G700": "largecabin",
+    "GL7T": "largecabin",
+    "GLOBAL": "largecabin",
+    "E545": "lightjet",
+    "EC130": "heli",
+    "EC135": "heli",
+    "EC145": "heli",
+    "EC155": "heli",
+    "EC175": "heli",
+    "EC225": "heli",
+    "B206": "heli",
+    "B505": "heli",
+    "B427": "heli",
+    "A119": "heli",
+    "B105": "heli",
+    "BO105": "heli",
+    "BK17": "heli",
+    "H500": "heli",
+    "H600": "heli",
+    "CRJ1": "crj",
+    "MD90": "b757"
   },
   "prefixes": [
+    [
+      "C25",
+      "lightjet"
+    ],
+    [
+      "C50",
+      "lightjet"
+    ],
+    [
+      "C55",
+      "lightjet"
+    ],
+    [
+      "C56",
+      "lightjet"
+    ],
+    [
+      "C65",
+      "midjet"
+    ],
+    [
+      "C68",
+      "midjet"
+    ],
+    [
+      "C70",
+      "midjet"
+    ],
+    [
+      "C75",
+      "midjet"
+    ],
+    [
+      "GLF",
+      "largecabin"
+    ],
+    [
+      "GLE",
+      "largecabin"
+    ],
+    [
+      "GL5",
+      "largecabin"
+    ],
+    [
+      "GL6",
+      "largecabin"
+    ],
+    [
+      "GL7",
+      "largecabin"
+    ],
+    [
+      "G15",
+      "midjet"
+    ],
+    [
+      "G20",
+      "midjet"
+    ],
+    [
+      "G28",
+      "midjet"
+    ],
+    [
+      "G50",
+      "largecabin"
+    ],
+    [
+      "G55",
+      "largecabin"
+    ],
+    [
+      "G60",
+      "largecabin"
+    ],
+    [
+      "G65",
+      "largecabin"
+    ],
+    [
+      "G70",
+      "largecabin"
+    ],
+    [
+      "LJ",
+      "lightjet"
+    ],
+    [
+      "FA7",
+      "largecabin"
+    ],
+    [
+      "FA8",
+      "largecabin"
+    ],
+    [
+      "FA6",
+      "largecabin"
+    ],
+    [
+      "FA2",
+      "midjet"
+    ],
+    [
+      "FA5",
+      "midjet"
+    ],
+    [
+      "FA1",
+      "lightjet"
+    ],
+    [
+      "FA",
+      "midjet"
+    ],
+    [
+      "CL3",
+      "midjet"
+    ],
+    [
+      "CL6",
+      "midjet"
+    ],
+    [
+      "CL2",
+      "midjet"
+    ],
+    [
+      "PC1",
+      "turboprop"
+    ],
+    [
+      "PC2",
+      "lightjet"
+    ],
+    [
+      "TBM",
+      "turboprop"
+    ],
+    [
+      "BE9",
+      "turboprop"
+    ],
+    [
+      "BE2",
+      "turboprop"
+    ],
+    [
+      "BE3",
+      "turboprop"
+    ],
+    [
+      "B35",
+      "turboprop"
+    ],
+    [
+      "C20",
+      "turboprop"
+    ],
+    [
+      "C40",
+      "turboprop"
+    ],
+    [
+      "C44",
+      "turboprop"
+    ],
+    [
+      "PAY",
+      "turboprop"
+    ],
+    [
+      "P46",
+      "turboprop"
+    ],
+    [
+      "P28",
+      "ga"
+    ],
+    [
+      "PA2",
+      "ga"
+    ],
+    [
+      "PA3",
+      "ga"
+    ],
+    [
+      "PA4",
+      "ga"
+    ],
+    [
+      "SR2",
+      "ga"
+    ],
+    [
+      "DA4",
+      "ga"
+    ],
+    [
+      "DA6",
+      "ga"
+    ],
+    [
+      "DA2",
+      "ga"
+    ],
+    [
+      "M20",
+      "ga"
+    ],
+    [
+      "TB2",
+      "ga"
+    ],
+    [
+      "RV",
+      "ga"
+    ],
+    [
+      "C15",
+      "ga"
+    ],
+    [
+      "C16",
+      "ga"
+    ],
+    [
+      "C17",
+      "ga"
+    ],
+    [
+      "C18",
+      "ga"
+    ],
+    [
+      "C21",
+      "ga"
+    ],
+    [
+      "C33",
+      "ga"
+    ],
+    [
+      "H25",
+      "lightjet"
+    ],
+    [
+      "HA4",
+      "lightjet"
+    ],
+    [
+      "HDJ",
+      "lightjet"
+    ],
+    [
+      "PRM",
+      "lightjet"
+    ],
+    [
+      "SF5",
+      "lightjet"
+    ],
+    [
+      "EC",
+      "heli"
+    ],
+    [
+      "R22",
+      "heli"
+    ],
+    [
+      "R44",
+      "heli"
+    ],
+    [
+      "R66",
+      "heli"
+    ],
+    [
+      "B06",
+      "heli"
+    ],
+    [
+      "B40",
+      "heli"
+    ],
+    [
+      "B41",
+      "heli"
+    ],
+    [
+      "B42",
+      "heli"
+    ],
+    [
+      "B50",
+      "heli"
+    ],
+    [
+      "UH",
+      "heli"
+    ],
+    [
+      "S76",
+      "heli"
+    ],
+    [
+      "S92",
+      "heli"
+    ],
+    [
+      "A10",
+      "heli"
+    ],
+    [
+      "A13",
+      "heli"
+    ],
+    [
+      "A16",
+      "heli"
+    ],
+    [
+      "A18",
+      "heli"
+    ],
+    [
+      "AW",
+      "heli"
+    ],
+    [
+      "H6",
+      "heli"
+    ],
+    [
+      "H4",
+      "heli"
+    ],
+    [
+      "H5",
+      "heli"
+    ],
+    [
+      "MI",
+      "heli"
+    ],
+    [
+      "AS5",
+      "heli"
+    ],
+    [
+      "AS6",
+      "heli"
+    ],
+    [
+      "AS3",
+      "heli"
+    ],
+    [
+      "MD5",
+      "heli"
+    ],
+    [
+      "MD6",
+      "heli"
+    ],
+    [
+      "EXPL",
+      "heli"
+    ],
+    [
+      "BK1",
+      "heli"
+    ],
+    [
+      "BO1",
+      "heli"
+    ],
+    [
+      "E50",
+      "lightjet"
+    ],
+    [
+      "E55",
+      "midjet"
+    ],
+    [
+      "E35",
+      "midjet"
+    ],
+    [
+      "E54",
+      "lightjet"
+    ],
     [
       "B73",
       "b737"
@@ -694,31 +1269,7 @@
       "ejet"
     ],
     [
-      "E55",
-      "ejet"
-    ],
-    [
-      "E35",
-      "ejet"
-    ],
-    [
-      "E45",
-      "ejet"
-    ],
-    [
-      "E50",
-      "ejet"
-    ],
-    [
       "CRJ",
-      "crj"
-    ],
-    [
-      "CL6",
-      "crj"
-    ],
-    [
-      "CL3",
       "crj"
     ],
     [
@@ -758,218 +1309,6 @@
       "bae146"
     ],
     [
-      "C25",
-      "bizjet"
-    ],
-    [
-      "C50",
-      "bizjet"
-    ],
-    [
-      "C55",
-      "bizjet"
-    ],
-    [
-      "C56",
-      "bizjet"
-    ],
-    [
-      "C65",
-      "bizjet"
-    ],
-    [
-      "C68",
-      "bizjet"
-    ],
-    [
-      "C70",
-      "bizjet"
-    ],
-    [
-      "C75",
-      "bizjet"
-    ],
-    [
-      "GLF",
-      "bizjet"
-    ],
-    [
-      "G15",
-      "bizjet"
-    ],
-    [
-      "G20",
-      "bizjet"
-    ],
-    [
-      "G28",
-      "bizjet"
-    ],
-    [
-      "LJ",
-      "bizjet"
-    ],
-    [
-      "FA",
-      "bizjet"
-    ],
-    [
-      "PC2",
-      "bizjet"
-    ],
-    [
-      "H25",
-      "bizjet"
-    ],
-    [
-      "C15",
-      "ga"
-    ],
-    [
-      "C16",
-      "ga"
-    ],
-    [
-      "C17",
-      "ga"
-    ],
-    [
-      "C18",
-      "ga"
-    ],
-    [
-      "C20",
-      "ga"
-    ],
-    [
-      "C21",
-      "ga"
-    ],
-    [
-      "PA2",
-      "ga"
-    ],
-    [
-      "PA3",
-      "ga"
-    ],
-    [
-      "PA4",
-      "ga"
-    ],
-    [
-      "SR2",
-      "ga"
-    ],
-    [
-      "DA4",
-      "ga"
-    ],
-    [
-      "DA6",
-      "ga"
-    ],
-    [
-      "BE3",
-      "ga"
-    ],
-    [
-      "BE5",
-      "ga"
-    ],
-    [
-      "TBM",
-      "ga"
-    ],
-    [
-      "PC1",
-      "ga"
-    ],
-    [
-      "P28",
-      "ga"
-    ],
-    [
-      "EC",
-      "heli"
-    ],
-    [
-      "R22",
-      "heli"
-    ],
-    [
-      "R44",
-      "heli"
-    ],
-    [
-      "R66",
-      "heli"
-    ],
-    [
-      "B06",
-      "heli"
-    ],
-    [
-      "B40",
-      "heli"
-    ],
-    [
-      "B41",
-      "heli"
-    ],
-    [
-      "B42",
-      "heli"
-    ],
-    [
-      "UH",
-      "heli"
-    ],
-    [
-      "S76",
-      "heli"
-    ],
-    [
-      "S92",
-      "heli"
-    ],
-    [
-      "A10",
-      "heli"
-    ],
-    [
-      "A13",
-      "heli"
-    ],
-    [
-      "A16",
-      "heli"
-    ],
-    [
-      "A18",
-      "heli"
-    ],
-    [
-      "H6",
-      "heli"
-    ],
-    [
-      "H4",
-      "heli"
-    ],
-    [
-      "H5",
-      "heli"
-    ],
-    [
-      "MI",
-      "heli"
-    ],
-    [
-      "AW",
-      "heli"
-    ],
-    [
       "MD8",
       "b757"
     ],
@@ -997,11 +1336,21 @@
     "regional": "ejet",
     "light": "ga",
     "heli": "heli",
-    "unknown": "b737"
+    "unknown": "ga"
   },
   "stats": {
-    "uniqueGlbs": 19,
-    "exactIcaoMapped": 358,
-    "prefixRules": 104
+    "uniqueGlbs": 23,
+    "exactIcaoMapped": 486,
+    "prefixRules": 144,
+    "gaFamilyExact": 310,
+    "gaFamilies": [
+      "bizjet",
+      "ga",
+      "heli",
+      "largecabin",
+      "lightjet",
+      "midjet",
+      "turboprop"
+    ]
   }
 }

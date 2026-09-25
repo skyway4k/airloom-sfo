@@ -38,9 +38,21 @@ payware or pirated packs.
   - `heli.glb` ← models/heli.glb (Eurocopter EC135 family)
   - `ga.glb` ← models/pa28.glb (Piper PA-28 / light GA stand-in)
   - `bizjet.glb` ← models/citation.glb (Cessna Citation / bizjet stand-in)
+
+  - `turboprop.glb` ← models/atr42.glb (ATR-42 mesh stand-in for PC-12 / TBM / King Air)
+  - `lightjet.glb` ← models/citation.glb (light jets: CJ / Lear / Phenom)
+  - `midjet.glb` ← models/citation.glb (super-mid: Challenger 300/350, Latitude, Falcon 2000)
+  - `largecabin.glb` ← models/citation.glb (large cabin: Gulfstream / Global / Falcon 7X/8X)
 - Changes: glTF 1.0 binary → glTF 2.0 GLB (Assimp); renamed to AirLoom family keys.
 
 ## Runtime fallback
 
 If a GLB is missing or fails to load, the viewer keeps the richer procedural mesh
 (per-ICAO dimensions from `TYPE_DIMS`) until / unless a GLB succeeds.
+
+## GA / private scale notes (ga-focus-v1)
+
+Family `refLen` values track real-world length so a C172 (~8.3 m) stays clearly
+smaller than a G650 / Global (~30 m) even when they share a Citation-derived mesh
+for mid/large cabin stand-ins. Prefer unique redistributable GA meshes when available;
+ATR-42 is the turboprop stand-in until a dedicated PC-12/King Air GLB is vendored.
