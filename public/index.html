@@ -304,8 +304,8 @@ const KT_MS = 0.514444;
 const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
-const SIZE_MULT = 4.5; // visibility multiplier (was 7.0 — too cartoon-huge; type-relative sizing kept)
-const BUILD_MARK = 'hud-trail-v3'; // served-code marker for deploy verify
+const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
+const BUILD_MARK = 'premium-v1'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -350,7 +350,7 @@ function altColor(altM) {
   return c;
 }
 
-// ─── ICAO type → category / size ─────────────────────────────────────────────
+// ─── ICAO type → category / size / per-type dims ─────────────────────────────
 const TYPE_CAT = {
   // Heavy / widebody
   B744: 'heavy', B748: 'heavy', B772: 'heavy', B77W: 'heavy', B77L: 'heavy',
@@ -393,21 +393,73 @@ const TYPE_CAT = {
   R44: 'heli', R66: 'heli', S76: 'heli', UH1: 'heli',
 };
 
+/** Per-ICAO real-world-ish dims (meters). Cache key = type string. */
+const TYPE_DIMS = {
+  // 757 — long narrowbody, underwing engines, conventional tail (NOT T-tail)
+  B752: { len: 47.3, span: 38.05, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.02, chordFrac: 0.17, finH: 0.21, engScale: 1.05 },
+  B753: { len: 54.4, span: 38.05, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.00, chordFrac: 0.16, finH: 0.19, engScale: 1.05 },
+  // 737 family — shorter than 757
+  B737: { len: 33.6, span: 34.3, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.06, chordFrac: 0.20, finH: 0.18, engScale: 0.95 },
+  B738: { len: 39.5, span: 35.8, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  B739: { len: 42.1, span: 35.8, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.04, chordFrac: 0.18, finH: 0.17, engScale: 0.95 },
+  B37M: { len: 35.6, span: 35.9, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  B38M: { len: 39.5, span: 35.9, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  B39M: { len: 42.2, span: 35.9, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.04, chordFrac: 0.18, finH: 0.17, engScale: 0.95 },
+  B736: { len: 31.2, span: 34.3, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.07, chordFrac: 0.21, finH: 0.19, engScale: 0.9 },
+  B733: { len: 33.4, span: 28.9, fuseR: 1.88, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.06, chordFrac: 0.20, finH: 0.18, engScale: 0.85 },
+  // A320 family
+  A318: { len: 31.4, span: 34.1, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.06, chordFrac: 0.20, finH: 0.19, engScale: 0.95 },
+  A319: { len: 33.8, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  A320: { len: 37.6, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  A321: { len: 44.5, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.03, chordFrac: 0.17, finH: 0.17, engScale: 0.95 },
+  A19N: { len: 33.8, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  A20N: { len: 37.6, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.98 },
+  A21N: { len: 44.5, span: 35.8, fuseR: 1.98, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.03, chordFrac: 0.17, finH: 0.17, engScale: 0.98 },
+  BCS1: { len: 35.0, span: 35.1, fuseR: 1.85, engines: 2, mount: 'underwing', ttail: false, sweep: 24, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  BCS3: { len: 38.7, span: 35.1, fuseR: 1.85, engines: 2, mount: 'underwing', ttail: false, sweep: 24, wingZ: 0.04, chordFrac: 0.18, finH: 0.17, engScale: 0.95 },
+  // Regionals — T-tail + rear engines
+  E170: { len: 29.9, span: 26.0, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.02, chordFrac: 0.18, finH: 0.22, engScale: 0.75 },
+  E75L: { len: 31.7, span: 28.7, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.02, chordFrac: 0.17, finH: 0.22, engScale: 0.75 },
+  E75S: { len: 31.7, span: 26.0, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.02, chordFrac: 0.17, finH: 0.22, engScale: 0.75 },
+  E190: { len: 36.2, span: 28.7, fuseR: 1.45, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.01, chordFrac: 0.16, finH: 0.20, engScale: 0.8 },
+  E195: { len: 38.7, span: 28.7, fuseR: 1.45, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.00, chordFrac: 0.15, finH: 0.19, engScale: 0.8 },
+  CRJ2: { len: 26.8, span: 21.2, fuseR: 1.25, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.02, chordFrac: 0.18, finH: 0.24, engScale: 0.7 },
+  CRJ7: { len: 32.3, span: 23.2, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.01, chordFrac: 0.17, finH: 0.22, engScale: 0.72 },
+  CRJ9: { len: 36.4, span: 24.9, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.00, chordFrac: 0.16, finH: 0.21, engScale: 0.72 },
+  CRJX: { len: 39.1, span: 26.2, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 20, wingZ: 0.00, chordFrac: 0.15, finH: 0.20, engScale: 0.72 },
+  // Heavies
+  B763: { len: 54.9, span: 47.6, fuseR: 2.70, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.2 },
+  B764: { len: 61.4, span: 51.9, fuseR: 2.70, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.25 },
+  B772: { len: 63.7, span: 60.9, fuseR: 3.10, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.45 },
+  B77W: { len: 73.9, span: 64.8, fuseR: 3.10, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.00, chordFrac: 0.17, finH: 0.18, engScale: 1.5 },
+  B77L: { len: 63.7, span: 64.8, fuseR: 3.10, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.5 },
+  B788: { len: 56.7, span: 60.1, fuseR: 2.90, engines: 2, mount: 'underwing', ttail: false, sweep: 32, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.35 },
+  B789: { len: 62.8, span: 60.1, fuseR: 2.90, engines: 2, mount: 'underwing', ttail: false, sweep: 32, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.35 },
+  B78X: { len: 68.9, span: 60.1, fuseR: 2.90, engines: 2, mount: 'underwing', ttail: false, sweep: 32, wingZ: 0.00, chordFrac: 0.16, finH: 0.18, engScale: 1.35 },
+  A332: { len: 58.8, span: 60.3, fuseR: 2.82, engines: 2, mount: 'underwing', ttail: false, sweep: 30, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.35 },
+  A333: { len: 63.7, span: 64.0, fuseR: 2.82, engines: 2, mount: 'underwing', ttail: false, sweep: 30, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.4 },
+  A339: { len: 63.7, span: 64.0, fuseR: 2.82, engines: 2, mount: 'underwing', ttail: false, sweep: 30, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.4 },
+  A359: { len: 66.8, span: 64.8, fuseR: 2.95, engines: 2, mount: 'underwing', ttail: false, sweep: 32, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.45 },
+  A35K: { len: 74.0, span: 64.8, fuseR: 2.95, engines: 2, mount: 'underwing', ttail: false, sweep: 32, wingZ: 0.00, chordFrac: 0.16, finH: 0.18, engScale: 1.45 },
+  B744: { len: 70.7, span: 64.4, fuseR: 3.25, engines: 4, mount: 'underwing', ttail: false, sweep: 37, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.1 },
+  B748: { len: 76.3, span: 68.4, fuseR: 3.25, engines: 4, mount: 'underwing', ttail: false, sweep: 37, wingZ: 0.01, chordFrac: 0.17, finH: 0.19, engScale: 1.15 },
+  A388: { len: 72.7, span: 79.8, fuseR: 3.55, engines: 4, mount: 'underwing', ttail: false, sweep: 33, wingZ: 0.02, chordFrac: 0.18, finH: 0.22, engScale: 1.2 },
+};
+
 const CAT_SIZE = {
-  super:    { span: 79.8, len: 73.0, engines: 4, ttail: false },
-  heavy:    { span: 60.9, len: 63.7, engines: 2, ttail: false },
-  medium:   { span: 35.8, len: 39.5, engines: 2, ttail: false },
-  regional: { span: 28.7, len: 31.7, engines: 2, ttail: true  },
-  light:    { span: 11.0, len: 8.3,  engines: 1, ttail: false },
-  heli:     { span: 12.0, len: 12.0, engines: 0, ttail: false },
-  unknown:  { span: 30.0, len: 33.0, engines: 2, ttail: false },
+  super:    { len: 73.0, span: 79.8, fuseR: 3.55, engines: 4, mount: 'underwing', ttail: false, sweep: 33, wingZ: 0.02, chordFrac: 0.18, finH: 0.22, engScale: 1.2 },
+  heavy:    { len: 63.7, span: 60.9, fuseR: 3.00, engines: 2, mount: 'underwing', ttail: false, sweep: 31, wingZ: 0.02, chordFrac: 0.18, finH: 0.20, engScale: 1.35 },
+  medium:   { len: 39.5, span: 35.8, fuseR: 1.90, engines: 2, mount: 'underwing', ttail: false, sweep: 25, wingZ: 0.05, chordFrac: 0.19, finH: 0.18, engScale: 0.95 },
+  regional: { len: 31.7, span: 28.7, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 18, wingZ: 0.02, chordFrac: 0.17, finH: 0.22, engScale: 0.75 },
+  light:    { len: 8.3,  span: 11.0, fuseR: 0.55, engines: 1, mount: 'nose', ttail: false, sweep: 8, wingZ: 0.0, chordFrac: 0.22, finH: 0.20, engScale: 0.5 },
+  heli:     { len: 12.0, span: 12.0, fuseR: 0.70, engines: 0, mount: 'none', ttail: false, sweep: 0, wingZ: 0.0, chordFrac: 0.1, finH: 0.15, engScale: 0.5 },
+  unknown:  { len: 33.0, span: 30.0, fuseR: 1.70, engines: 2, mount: 'underwing', ttail: false, sweep: 22, wingZ: 0.04, chordFrac: 0.19, finH: 0.18, engScale: 0.9 },
 };
 
 function classifyType(icaoType) {
   if (!icaoType) return 'unknown';
   const t = String(icaoType).toUpperCase().trim();
   if (TYPE_CAT[t]) return TYPE_CAT[t];
-  // prefix heuristics
   if (/^A3[5-8]|^B74|^B77|^B78|^A38|^MD11/.test(t)) return 'heavy';
   if (/^B7[3-5]|^A31|^A32|^BCS|^MD8|^MD9/.test(t)) return 'medium';
   if (/^E1|^E2|^CRJ|^DH8|^AT[457]|^SF3|^RJ/.test(t)) return 'regional';
@@ -417,59 +469,101 @@ function classifyType(icaoType) {
 }
 
 function sizeForType(icaoType) {
-  const cat = classifyType(icaoType);
-  return { cat, ...(CAT_SIZE[cat] || CAT_SIZE.unknown) };
+  const raw = icaoType ? String(icaoType).toUpperCase().trim() : '';
+  const cat = classifyType(raw);
+  const dims = (raw && TYPE_DIMS[raw]) ? TYPE_DIMS[raw] : (CAT_SIZE[cat] || CAT_SIZE.unknown);
+  return {
+    key: raw || cat,
+    cat,
+    len: dims.len,
+    span: dims.span,
+    fuseR: dims.fuseR,
+    engines: dims.engines,
+    mount: dims.mount,
+    ttail: !!dims.ttail,
+    sweep: dims.sweep,
+    wingZ: dims.wingZ,
+    chordFrac: dims.chordFrac,
+    finH: dims.finH,
+    engScale: dims.engScale,
+  };
 }
 
 // ─── 3D aircraft models (nose along +Z) ──────────────────────────────────────
-const modelCache = new Map(); // cat → Group template (cloneable)
+const modelCache = new Map(); // icaoType/key → Group template
 
-/** Trapezoidal wing half (root→tip), extruded, then mirrored. */
-function makeSweptWing(span, chordRoot, chordTip, thick, sweepDeg) {
-  const half = span * 0.5;
-  const sweep = Math.tan(sweepDeg * Math.PI / 180) * half;
-  const shape = new THREE.Shape();
-  // Shape XY → after extrude+rotateX(-π/2): x=span, z=-y (so −y_shape = +Z nose).
-  // Sweep shifts tip toward +y_shape (= aft / −Z).
-  shape.moveTo(0, -chordRoot * 0.30);              // LE root (forward)
-  shape.lineTo(half, -chordTip * 0.22 + sweep);    // LE tip (swept aft)
-  shape.lineTo(half,  chordTip * 0.78 + sweep);    // TE tip
-  shape.lineTo(0,  chordRoot * 0.70);              // TE root
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: thick, bevelEnabled: false, curveSegments: 1, steps: 1,
-  });
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, -thick * 0.5, 0);
+/**
+ * Thin trapezoidal airfoil plate (one half-wing).
+ * Span along +X, chord along Z (+Z = LE forward bias), thickness along Y.
+ * Built as explicit BufferGeometry — no ExtrudeGeometry billboard quirks.
+ */
+function makeWingHalf(halfSpan, chordRoot, chordTip, thick, sweepDeg, sideSign) {
+  // sideSign: +1 = right (+X), -1 = left (−X). Explicit mirror keeps normals correct.
+  const s = sideSign < 0 ? -1 : 1;
+  const sweep = Math.tan(sweepDeg * Math.PI / 180) * halfSpan;
+  const leR = chordRoot * 0.30, teR = chordRoot * 0.70;
+  const leT = chordTip * 0.22, teT = chordTip * 0.78;
+  const y = thick * 0.5;
+  const hx = s * halfSpan;
+  const positions = new Float32Array([
+    // 0 root LE upper, 1 root TE upper, 2 tip TE upper, 3 tip LE upper
+    0, y, leR,   0, y, -teR,   hx, y, -teT - sweep,   hx, y, leT - sweep,
+    // 4–7 lower
+    0, -y, leR,  0, -y, -teR,  hx, -y, -teT - sweep,  hx, -y, leT - sweep,
+  ]);
+  // Winding depends on side so outward normals stay correct after mirror
+  const indices = s > 0 ? [
+    0, 1, 2,  0, 2, 3,
+    4, 7, 6,  4, 6, 5,
+    0, 3, 7,  0, 7, 4,
+    1, 5, 6,  1, 6, 2,
+    0, 4, 5,  0, 5, 1,
+    3, 2, 6,  3, 6, 7,
+  ] : [
+    0, 2, 1,  0, 3, 2,
+    4, 6, 7,  4, 5, 6,
+    0, 7, 3,  0, 4, 7,
+    1, 6, 5,  1, 2, 6,
+    0, 5, 4,  0, 1, 5,
+    3, 6, 2,  3, 7, 6,
+  ];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
   return geo;
 }
 
-function buildAircraftModel(cat) {
-  if (modelCache.has(cat)) return cloneAircraftModel(modelCache.get(cat));
+function buildAircraftModel(icaoType) {
+  const info = (typeof icaoType === 'string' || !icaoType)
+    ? sizeForType(icaoType)
+    : icaoType;
+  const cacheKey = info.key || info.cat || 'unknown';
+  if (modelCache.has(cacheKey)) return cloneAircraftModel(modelCache.get(cacheKey));
 
-  const sz = CAT_SIZE[cat] || CAT_SIZE.unknown;
-  const L = sz.len;   // meters (scaled by SIZE_MULT later)
-  const W = sz.span;
-  const fuseR = Math.max(0.45, L * 0.032);
+  const L = info.len;
+  const W = info.span;
+  const fuseR = info.fuseR || Math.max(0.45, L * 0.032);
+  const cat = info.cat;
   const group = new THREE.Group();
-  group.name = 'acModel_' + cat;
+  group.name = 'acModel_' + cacheKey;
 
-  // Slightly less flat plastic: lower emissive, mild metalness
+  // HIGH-END: neutral aluminum / white airframe — altitude color is for trails only
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x6ec8c0, emissive: 0x1a3a38, emissiveIntensity: 0.28,
-    roughness: 0.38, metalness: 0.42,
+    color: 0xe6eaee, emissive: 0x000000, emissiveIntensity: 0,
+    roughness: 0.32, metalness: 0.58,
   });
   const wingMat = new THREE.MeshStandardMaterial({
-    color: 0x5bb8b0, emissive: 0x143230, emissiveIntensity: 0.22,
-    roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide,
+    color: 0xd0d5db, emissive: 0x000000, emissiveIntensity: 0,
+    roughness: 0.40, metalness: 0.50, side: THREE.DoubleSide,
   });
   const finMat = new THREE.MeshStandardMaterial({
-    color: 0x4ecdc4, emissive: 0x4ecdc4, emissiveIntensity: 0.55,
-    roughness: 0.35, metalness: 0.3,
+    color: 0xe8eef2, emissive: 0x0a3a3a, emissiveIntensity: 0.18,
+    roughness: 0.34, metalness: 0.52,
   });
   const engMat = new THREE.MeshStandardMaterial({
-    color: 0x7a8a9a, emissive: 0x121820, emissiveIntensity: 0.12,
-    roughness: 0.4, metalness: 0.55,
+    color: 0x2c323a, emissive: 0x000000, emissiveIntensity: 0,
+    roughness: 0.42, metalness: 0.72,
   });
 
   if (cat === 'heli') {
@@ -494,26 +588,24 @@ function buildAircraftModel(cat) {
     fin.userData.part = 'fin';
     group.add(fin);
   } else {
-    // Fuselage: main tube + tapered nose/tail for airliner silhouette
     const fuseLen = L * 0.78;
     const fuse = new THREE.Mesh(
-      new THREE.CylinderGeometry(fuseR * 0.98, fuseR, fuseLen, 12),
+      new THREE.CylinderGeometry(fuseR * 0.98, fuseR, fuseLen, 14),
       bodyMat
     );
     fuse.rotation.x = Math.PI / 2;
     fuse.userData.part = 'body';
     group.add(fuse);
 
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.98, L * 0.14, 10), bodyMat);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(fuseR * 0.98, L * 0.14, 12), bodyMat);
     nose.rotation.x = Math.PI / 2;
     nose.position.z = fuseLen / 2 + L * 0.055;
     nose.userData.part = 'body';
     group.add(nose);
 
-    // Cockpit bulge hint
     const cockpit = new THREE.Mesh(
       new THREE.SphereGeometry(fuseR * 0.85, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      bodyMat
+      new THREE.MeshStandardMaterial({ color: 0x1a2838, roughness: 0.25, metalness: 0.35 })
     );
     cockpit.position.set(0, fuseR * 0.35, fuseLen / 2 * 0.72);
     cockpit.scale.set(1, 0.7, 1.1);
@@ -526,88 +618,91 @@ function buildAircraftModel(cat) {
     tailCone.userData.part = 'body';
     group.add(tailCone);
 
-    // Wings — swept, tapered, slight anhedral/dihedral by category
-    const wingThick = Math.max(0.22, fuseR * 0.32);
-    const chordRoot = L * (cat === 'super' || cat === 'heavy' ? 0.20 : 0.22);
+    // Wings — thin airfoil plates (span ±X, chord Z, thick Y)
+    const wingThick = Math.max(0.18, fuseR * 0.22);
+    const chordRoot = L * (info.chordFrac || 0.19);
     const chordTip = chordRoot * 0.38;
-    const sweep = (cat === 'super' || cat === 'heavy') ? 28 : (cat === 'medium' ? 24 : (cat === 'light' ? 8 : 18));
-    const wingGeo = makeSweptWing(W, chordRoot, chordTip, wingThick, sweep);
-    const wingY = -fuseR * (cat === 'light' ? 0.05 : 0.35); // low-wing jets, near-mid GA
-    const wingZ = L * (cat === 'light' ? 0.0 : 0.04);
+    const sweep = info.sweep != null ? info.sweep : 24;
+    const wingY = -fuseR * (cat === 'light' ? 0.05 : 0.38);
+    const wingZ = L * (info.wingZ != null ? info.wingZ : 0.04);
+    const halfSpan = W * 0.5;
 
-    const wingR = new THREE.Mesh(wingGeo, wingMat);
+    const wingGeoR = makeWingHalf(halfSpan, chordRoot, chordTip, wingThick, sweep, +1);
+    const wingR = new THREE.Mesh(wingGeoR, wingMat);
     wingR.position.set(0, wingY, wingZ);
     wingR.userData.part = 'wing';
     group.add(wingR);
-    const wingL = new THREE.Mesh(wingGeo.clone(), wingMat);
-    wingL.scale.x = -1;
+
+    const wingGeoL = makeWingHalf(halfSpan, chordRoot, chordTip, wingThick, sweep, -1);
+    const wingL = new THREE.Mesh(wingGeoL, wingMat);
     wingL.position.set(0, wingY, wingZ);
     wingL.userData.part = 'wing';
     group.add(wingL);
 
-    // Vertical fin — slight sweep via parallelogram box approx
-    const finH = Math.max(2.0, L * 0.18);
+    // Vertical fin — tall plate, conventional
+    const finH = Math.max(2.0, L * (info.finH || 0.18));
     const finChord = chordRoot * 0.55;
+    const finThick = Math.max(0.14, wingThick * 0.75);
     const fin = new THREE.Mesh(
-      new THREE.BoxGeometry(wingThick * 0.85, finH, finChord),
+      new THREE.BoxGeometry(finThick, finH, finChord),
       finMat
     );
     fin.position.z = -L * 0.38;
     fin.position.y = fuseR * 0.15 + finH * 0.48;
-    fin.rotation.x = -0.12; // mild sweep lean
+    fin.rotation.x = -0.14;
     fin.userData.part = 'fin';
     group.add(fin);
 
-    // Horizontal stabilizer — T-tail for regional, conventional otherwise
-    const hStabSpan = W * (sz.ttail ? 0.36 : 0.30);
+    // Horizontal stabilizer
+    const hStabSpan = W * (info.ttail ? 0.36 : 0.30);
     const hStabChord = chordRoot * 0.40;
     const hStab = new THREE.Mesh(
-      new THREE.BoxGeometry(hStabSpan, wingThick * 0.65, hStabChord),
+      new THREE.BoxGeometry(hStabSpan, wingThick * 0.7, hStabChord),
       wingMat
     );
-    if (sz.ttail) {
+    if (info.ttail) {
       hStab.position.set(0, fuseR * 0.15 + finH * 0.92, -L * 0.40);
     } else {
-      hStab.position.set(0, fuseR * 0.05, -L * 0.42);
+      hStab.position.set(0, fuseR * 0.08, -L * 0.42);
     }
     hStab.userData.part = 'wing';
     group.add(hStab);
 
     // Engines
-    const nEng = sz.engines || 0;
+    const nEng = info.engines || 0;
+    const engScale = info.engScale || 1;
     if (nEng >= 2) {
-      const engR = fuseR * (cat === 'super' || cat === 'heavy' ? 0.85 : 0.72);
-      const engLen = L * 0.15;
-      const yOff = wingY - engR * 0.95;
-      const zOff = wingZ + chordRoot * 0.05;
+      const engR = fuseR * 0.55 * engScale;
+      const engLen = L * 0.14;
+      const yOff = wingY - engR * 0.85;
+      const zOff = wingZ + chordRoot * 0.08;
       let xOffs;
       if (nEng === 4) {
         xOffs = [-W * 0.30, -W * 0.16, W * 0.16, W * 0.30];
       } else if (cat === 'heavy' || cat === 'super') {
         xOffs = [-W * 0.24, W * 0.24];
-      } else if (cat === 'regional' && sz.ttail) {
-        // rear-fuselage mounts common on CRJ / older RJ
-        xOffs = [-fuseR * 1.35, fuseR * 1.35];
+      } else if (info.mount === 'rear' || info.ttail) {
+        xOffs = [-fuseR * 1.45, fuseR * 1.45];
       } else {
-        xOffs = [-W * 0.22, W * 0.22];
+        // underwing narrowbody — B752 etc.
+        xOffs = [-W * 0.20, W * 0.20];
       }
-      const rearMount = cat === 'regional' && sz.ttail;
+      const rearMount = info.mount === 'rear' || (info.ttail && cat === 'regional');
       for (const x of xOffs) {
         const eng = new THREE.Mesh(
-          new THREE.CylinderGeometry(engR, engR * 0.82, engLen, 10),
+          new THREE.CylinderGeometry(engR, engR * 0.82, engLen, 12),
           engMat
         );
         eng.rotation.x = Math.PI / 2;
         if (rearMount) {
-          eng.position.set(x, fuseR * 0.15, -L * 0.28);
+          eng.position.set(x, fuseR * 0.25, -L * 0.28);
         } else {
           eng.position.set(x, yOff, zOff);
         }
         eng.userData.part = 'engine';
         group.add(eng);
-        // intake lip
         const lip = new THREE.Mesh(
-          new THREE.TorusGeometry(engR * 0.92, engR * 0.08, 6, 12),
+          new THREE.TorusGeometry(engR * 0.92, engR * 0.07, 6, 14),
           engMat
         );
         lip.position.copy(eng.position);
@@ -620,7 +715,6 @@ function buildAircraftModel(cat) {
       spinner.position.z = fuseLen / 2 + L * 0.12;
       spinner.userData.part = 'engine';
       group.add(spinner);
-      // simple prop disc
       const prop = new THREE.Mesh(
         new THREE.CylinderGeometry(fuseR * 2.2, fuseR * 2.2, 0.06, 16),
         new THREE.MeshStandardMaterial({ color: 0xcccccc, transparent: true, opacity: 0.25, roughness: 0.5 })
@@ -632,6 +726,7 @@ function buildAircraftModel(cat) {
     }
   }
 
+  // Tag materials; body stays neutral — only fin may get a soft altitude accent
   group.userData.bodyMats = [];
   group.userData.finMats = [];
   group.traverse((ch) => {
@@ -646,7 +741,7 @@ function buildAircraftModel(cat) {
     else if (part === 'body' || part === 'wing') group.userData.bodyMats.push(ch.material);
   });
 
-  modelCache.set(cat, group);
+  modelCache.set(cacheKey, group);
   return cloneAircraftModel(group);
 }
 
@@ -657,34 +752,41 @@ function cloneAircraftModel(template) {
     if (Array.isArray(ch.material)) ch.material = ch.material.map((m) => m.clone());
     else ch.material = ch.material.clone();
   });
+  // Rebuild mat lists on clone
+  g.userData.bodyMats = [];
+  g.userData.finMats = [];
+  g.traverse((ch) => {
+    if (!ch.isMesh || !ch.material) return;
+    const part = ch.userData.part;
+    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+    if (part === 'fin') g.userData.finMats.push(...mats);
+    else if (part === 'body' || part === 'wing') g.userData.bodyMats.push(...mats);
+  });
   return g;
 }
 
+/** Soft fin accent only — never paint the whole airframe altitude-red. */
 function tintModel(model, color) {
-  const bodyMats = [];
-  const finMats = [];
-  model.traverse((ch) => {
-    if (!ch.isMesh || !ch.material) return;
-    const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
-    const part = ch.userData.part;
-    for (const m of mats) {
-      if (part === 'engine' || part === 'rotor') continue;
-      if (part === 'fin') finMats.push(m);
-      else bodyMats.push(m);
-    }
-  });
-  for (const m of bodyMats) {
-    if (m.color) m.color.copy(color);
-    if (m.emissive) {
-      m.emissive.copy(color);
-      m.emissive.multiplyScalar(0.35);
-    }
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.32;
+  if (!model) return;
+  const finMats = model.userData.finMats || [];
+  if (!finMats.length) {
+    model.traverse((ch) => {
+      if (!ch.isMesh || !ch.material) return;
+      if (ch.userData.part === 'fin') {
+        const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+        finMats.push(...mats);
+      }
+    });
+    model.userData.finMats = finMats;
   }
   for (const m of finMats) {
-    if (m.color) m.color.copy(color);
-    if (m.emissive) m.emissive.copy(color);
-    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.75;
+    if (m.emissive) {
+      m.emissive.copy(color);
+      m.emissive.multiplyScalar(0.22);
+    }
+    if ('emissiveIntensity' in m) m.emissiveIntensity = 0.28;
+    // keep base color near white/aluminum
+    if (m.color) m.color.setHex(0xe8eef2);
   }
 }
 
@@ -1084,14 +1186,17 @@ function isArrival(p) {
   return false;
 }
 
-// ─── Soft ribbon trails ──────────────────────────────────────────────────────
+// ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 160;
-const TRAIL_HALF_W = 110; // meters — soft wake width at altitude
+const TRAIL_HALF_W = 7;       // meters — narrow wake (was 110 = shattered slabs)
+const TRAIL_HALF_W_LOW = 2.2; // taxi / very low alt
 const _tA = new THREE.Vector3();
 const _tB = new THREE.Vector3();
 const _tTan = new THREE.Vector3();
 const _tSide = new THREE.Vector3();
 const _tUp = new THREE.Vector3(0, 1, 0);
+const _tXAxis = new THREE.Vector3(1, 0, 0);
+const _tPrevSide = new THREE.Vector3(1, 0, 0);
 
 // ─── Aircraft lifecycle ──────────────────────────────────────────────────────
 function createAircraft(icao, typeHint) {
@@ -1099,25 +1204,23 @@ function createAircraft(icao, typeHint) {
   group.userData.icao = icao;
 
   const info = sizeForType(typeHint);
-  const model = buildAircraftModel(info.cat);
-  // Scale real meters × visibility multiplier
+  const model = buildAircraftModel(info);
   model.scale.setScalar(SIZE_MULT);
   model.userData.icao = icao;
-  // Tag pickable meshes
   model.traverse((ch) => {
     if (ch.isMesh) ch.userData.icao = icao;
   });
   group.add(model);
 
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0x4ecdc4, transparent: true, opacity: 0.7,
+    map: glowTex, color: 0xb8c4d0, transparent: true, opacity: 0.28,
     blending: THREE.AdditiveBlending, depthWrite: false,
   }));
-  const glowSize = Math.max(180, info.span * SIZE_MULT * 1.8);
+  const glowSize = Math.max(90, info.span * SIZE_MULT * 0.85);
   glow.scale.set(glowSize, glowSize, 1);
   group.add(glow);
 
-  // vertical stick (altitude-colored) — default OFF (toggle in View)
+  // vertical stick (altitude-colored) — default OFF
   const stickGeo = new THREE.BufferGeometry();
   const stickPos = new Float32Array(6);
   const stickCol = new Float32Array(6);
@@ -1129,18 +1232,16 @@ function createAircraft(icao, typeHint) {
   stick.visible = settings.showAltSticks;
   group.add(stick);
 
-  // short velocity vector
   const velGeo = new THREE.BufferGeometry();
   velGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
   const velLine = new THREE.Line(velGeo, new THREE.LineBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.7,
+    color: 0xffffff, transparent: true, opacity: 0.55,
   }));
   group.add(velLine);
 
-  // Soft altitude ribbon (wake-like fat path) — not a neon 1px Line
+  // Premium thin ribbon trail with vertex colors (altitude rainbow)
   const maxPts = TRAIL_MAX_PTS;
   const trailGeo = new THREE.BufferGeometry();
-  // Interleaved L/R ribbon vertices: [L0,R0,L1,R1,...]
   const trailPos = new Float32Array(maxPts * 2 * 3);
   const trailCol = new Float32Array(maxPts * 2 * 3);
   const trailIdx = new Uint16Array(Math.max(0, maxPts - 1) * 6);
@@ -1159,10 +1260,10 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.48,
       depthWrite: false,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
     })
   );
   trail.frustumCulled = false;
@@ -1178,8 +1279,9 @@ function createAircraft(icao, typeHint) {
     icao, group, model, glow, stick, velLine, trail, trailGeo, trailPos, trailCol, label,
     trailPts: [],
     lastTrailSample: 0,
+    trailSide: new THREE.Vector3(1, 0, 0),
     lat: 0, lon: 0, altM: 0, track: 0, vel: 0, vr: 0, onGround: false, callsign: '',
-    type: typeHint || null, reg: null, gsKt: null, cat: info.cat,
+    type: typeHint || null, reg: null, gsKt: null, cat: info.cat, modelKey: info.key,
     span: info.span, len: info.len, dist: 0, isArrival: false,
     source: '',
     target: new THREE.Vector3(),
@@ -1191,8 +1293,7 @@ function createAircraft(icao, typeHint) {
 
 function ensureModel(rec) {
   const info = sizeForType(rec.type);
-  if (rec.cat === info.cat && rec.model) return;
-  // rebuild model for new category
+  if (rec.modelKey === info.key && rec.model) return;
   if (rec.model) {
     rec.group.remove(rec.model);
     rec.model.traverse((ch) => {
@@ -1203,21 +1304,22 @@ function ensureModel(rec) {
       }
     });
   }
-  const model = buildAircraftModel(info.cat);
+  const model = buildAircraftModel(info);
   model.scale.setScalar(SIZE_MULT);
   model.userData.icao = rec.icao;
   model.traverse((ch) => { if (ch.isMesh) ch.userData.icao = rec.icao; });
   rec.group.add(model);
   rec.model = model;
   rec.cat = info.cat;
+  rec.modelKey = info.key;
   rec.span = info.span;
   rec.len = info.len;
-  const glowSize = Math.max(180, info.span * SIZE_MULT * 1.8);
+  const glowSize = Math.max(90, info.span * SIZE_MULT * 0.85);
   rec.glow.scale.set(glowSize, glowSize, 1);
 }
 
 const labelLayer = document.getElementById('acLabels');
-const LABEL_MAX_DIST = 95000; // world units (~m): fade/hide beyond this
+const LABEL_MAX_DIST = 95000;
 const _lblProj = new THREE.Vector3();
 
 function makeLabel(rec) {
@@ -1251,9 +1353,8 @@ function setLabelInfo(rec) {
 function updateLabelScreen(rec, cam) {
   const el = rec.label;
   if (!el) return;
-  // Default: show for all visible filtered aircraft; hide if behind camera / far
   _lblProj.copy(rec.display);
-  _lblProj.y += Math.max(180, (rec.span || 30) * SIZE_MULT * 0.55);
+  _lblProj.y += Math.max(120, (rec.span || 30) * SIZE_MULT * 0.45);
   const dist = _lblProj.distanceTo(cam.position);
   _lblProj.project(cam);
   const behind = _lblProj.z > 1;
@@ -1294,9 +1395,7 @@ function disposeAircraft(rec) {
   if (rec.label && rec.label.parentNode) rec.label.parentNode.removeChild(rec.label);
 }
 
-// Shared centerline scratch (x,y,z per sample) — avoids GC in updateTrail
 const _trailCtr = new Float32Array(TRAIL_MAX_PTS * 3);
-const _tXAxis = new THREE.Vector3(1, 0, 0);
 
 function fillTrailCenter(rec, tp, i, n, out, o) {
   if (i === n - 1 && rec.display) {
@@ -1311,19 +1410,44 @@ function fillTrailCenter(rec, tp, i, n, out, o) {
   }
 }
 
+function trailHalfWidthForAlt(altM, u) {
+  // u: 0 = oldest (tip), 1 = aircraft (base)
+  const low = Math.max(0, Math.min(1, 1 - (altM || 0) / 180)); // < ~600 ft → squeeze
+  const base = TRAIL_HALF_W * (1 - 0.72 * low) + TRAIL_HALF_W_LOW * low;
+  // taper toward oldest tip; slightly fuller near aircraft
+  return base * (0.22 + 0.78 * u);
+}
+
 function updateTrail(rec) {
   const pts = rec.trailPts;
-  const n = Math.min(pts.length, settings.trailLen);
+  let n = Math.min(pts.length, settings.trailLen);
+  // At very low alt / ground: shorten trail so taxi isn't a glass shard field
+  const tipAlt = pts.length ? (pts[pts.length - 1].altM || 0) : 0;
+  if (tipAlt < 50 || rec.onGround) {
+    n = Math.min(n, Math.max(8, Math.floor(settings.trailLen * 0.35)));
+  } else if (tipAlt < 150) {
+    n = Math.min(n, Math.max(14, Math.floor(settings.trailLen * 0.55)));
+  }
   if (n < 2) {
     rec.trail.visible = false;
     rec.trailGeo.setDrawRange(0, 0);
     return;
   }
   rec.trail.visible = true;
+
+  // Opacity: softer on ground
+  const mat = rec.trail.material;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.22;
+  else if (tipAlt < 120) mat.opacity = 0.34;
+  else mat.opacity = 0.48;
+
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
     fillTrailCenter(rec, pts[start + i], i, n, _trailCtr, i * 3);
   }
+
+  // Stable side: world-up bias + continuity with previous side (no screen-facing flips)
+  let side = rec.trailSide || _tPrevSide;
   for (let i = 0; i < n; i++) {
     const o = i * 3;
     const cx = _trailCtr[o], cy = _trailCtr[o + 1], cz = _trailCtr[o + 2];
@@ -1334,14 +1458,24 @@ function updateTrail(rec) {
     }
     if (_tTan.lengthSq() < 1e-6) _tTan.set(1, 0, 0);
     _tTan.normalize();
+
     _tSide.crossVectors(_tTan, _tUp);
-    if (_tSide.lengthSq() < 1e-8) _tSide.crossVectors(_tTan, _tXAxis);
+    if (_tSide.lengthSq() < 1e-6) {
+      // nearly vertical — reuse previous horizontal side
+      _tSide.copy(side);
+      _tSide.y = 0;
+      if (_tSide.lengthSq() < 1e-8) _tSide.crossVectors(_tTan, _tXAxis);
+    }
     _tSide.normalize();
+    // Keep continuity: flip if we'd reverse vs previous
+    if (side && _tSide.dot(side) < 0) _tSide.negate();
+    side = _tSide.clone();
 
     const u = i / Math.max(1, n - 1);
-    const halfW = TRAIL_HALF_W * (0.35 + 0.65 * u);
-    const fade = Math.pow(u, 1.15);
-    const c = altColor(pts[start + i].altM);
+    const altM = pts[start + i].altM || 0;
+    const halfW = trailHalfWidthForAlt(altM, u);
+    const fade = Math.pow(u, 1.05) * (tipAlt < 50 ? 0.55 : 1);
+    const c = altColor(altM);
     const cr = c.r * fade, cg = c.g * fade, cb = c.b * fade;
     const lo = i * 6;
     rec.trailPos[lo]     = cx + _tSide.x * halfW;
@@ -1353,16 +1487,26 @@ function updateTrail(rec) {
     rec.trailCol[lo] = cr; rec.trailCol[lo + 1] = cg; rec.trailCol[lo + 2] = cb;
     rec.trailCol[lo + 3] = cr; rec.trailCol[lo + 4] = cg; rec.trailCol[lo + 5] = cb;
   }
+  if (side) {
+    if (!rec.trailSide) rec.trailSide = new THREE.Vector3();
+    rec.trailSide.copy(side);
+  }
   rec.trailGeo.attributes.position.needsUpdate = true;
   rec.trailGeo.attributes.color.needsUpdate = true;
   rec.trailGeo.setDrawRange(0, (n - 1) * 6);
   rec.trailGeo.computeBoundingSphere();
 }
 
-/** Fast per-frame tip attach: move last ribbon ring to aircraft without full rebuild. */
+/** Fast per-frame tip attach: move last ribbon ring to aircraft. */
 function snugTrailTip(rec) {
   const pts = rec.trailPts;
-  const n = Math.min(pts.length, settings.trailLen);
+  let n = Math.min(pts.length, settings.trailLen);
+  const tipAlt = pts.length ? (pts[pts.length - 1].altM || 0) : 0;
+  if (tipAlt < 50 || rec.onGround) {
+    n = Math.min(n, Math.max(8, Math.floor(settings.trailLen * 0.35)));
+  } else if (tipAlt < 150) {
+    n = Math.min(n, Math.max(14, Math.floor(settings.trailLen * 0.55)));
+  }
   if (n < 2 || !rec.display) return;
   const start = pts.length - n;
   const i = n - 1;
@@ -1378,9 +1522,14 @@ function snugTrailTip(rec) {
   if (_tTan.lengthSq() < 1e-6) _tTan.set(1, 0, 0);
   _tTan.normalize();
   _tSide.crossVectors(_tTan, _tUp);
-  if (_tSide.lengthSq() < 1e-8) _tSide.set(0, 0, 1);
-  else _tSide.normalize();
-  const halfW = TRAIL_HALF_W;
+  if (_tSide.lengthSq() < 1e-8) {
+    if (rec.trailSide) _tSide.copy(rec.trailSide);
+    else _tSide.set(1, 0, 0);
+  } else {
+    _tSide.normalize();
+    if (rec.trailSide && _tSide.dot(rec.trailSide) < 0) _tSide.negate();
+  }
+  const halfW = trailHalfWidthForAlt(rec.altM || tipAlt, 1);
   const lo = i * 6;
   rec.trailPos[lo]     = rec.display.x + _tSide.x * halfW;
   rec.trailPos[lo + 1] = rec.display.y + _tSide.y * halfW;
@@ -1398,8 +1547,10 @@ function applyPose(rec) {
   if (rec.display.lengthSq() === 0) rec.display.copy(rec.target);
 
   const col = altColor(rec.altM || 0);
-  tintModel(rec.model, col);
+  tintModel(rec.model, col); // fin accent only — body stays aluminum
+  // subtle altitude hint on glow sprite (not the whole airframe)
   rec.glow.material.color.copy(col);
+  rec.glow.material.opacity = 0.22;
 
   // stick: ground → aircraft (subtle; default hidden)
   rec.stick.visible = !!settings.showAltSticks;
