@@ -6,7 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#0a0e14" />
-<title>AirLoom — KSFO</title>
+<meta name="application-name" content="AirLoom SFO" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0e14'/%3E%3Cpath fill='%234ecdc4' d='M54 30.5L38 28l-8-14h-4l5 14H16l-6-5H8l3 8-3 8h2l6-5h15l-5 14h4l8-14 16-2.5z'/%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0e14'/%3E%3Cpath fill='%234ecdc4' d='M54 30.5L38 28l-8-14h-4l5 14H16l-6-5H8l3 8-3 8h2l6-5h15l-5 14h4l8-14 16-2.5z'/%3E%3C/svg%3E" />
+<title>🛩️ AirLoom — KSFO</title>
 <style>
   :root {
     --bg: #0a0e14;
@@ -35,6 +38,7 @@
     line-height: 1.2; text-decoration: none;
   }
   #hud h1 .sep { color: var(--muted); font-weight: 400; margin: 0 0.15em; }
+  #hud h1 .brand-emoji { font-size: 0.95em; margin-right: 0.12em; }
   #hud h1 #hudAirport { color: var(--cyan); font-weight: 600; letter-spacing: 0.04em; }
   #hud .sub {
     margin-top: 3px; font-size: 11px; color: var(--muted);
@@ -322,7 +326,7 @@
 
 <div id="hud">
   <div class="brand">
-    <h1>AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
+    <h1><span class="brand-emoji" aria-hidden="true">🛩️</span> AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
     <div class="sub" id="hudSub">San Francisco Bay · private &amp; GA ADS-B</div>
     <div class="note" id="hudNote" style="display:none"></div>
   </div>
@@ -347,7 +351,7 @@
 
     <div class="section">
       <h3>Traffic mode</h3>
-      <button type="button" class="mode-btn active" id="btnGa">Private / GA</button>
+      <button type="button" class="mode-btn active" id="btnGa">🛩️ Private / GA</button>
       <button type="button" class="mode-btn ghost" id="btnArrivals" style="margin-top:6px">Arrivals</button>
       <button type="button" class="mode-btn ghost" id="btnAllTraffic" style="margin-top:6px">All traffic</button>
       <div class="row" style="margin-top:8px"><label>Mode</label><span class="val" id="uiMode">private/GA</span></div>
@@ -449,7 +453,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'follow-v3'; // served-code marker for deploy verify
+const BUILD_MARK = 'follow-v4'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -862,33 +866,126 @@ function loadGltfPath(url) {
   return p;
 }
 
-/** Center, lightly auto-orient, apply family offsets, scale to target length. */
+/** Score nose vs tail mesh names → approximate nose direction in object space. */
+function gltfNoseHint(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  if (box.isEmpty()) return null;
+  const center = box.getCenter(new THREE.Vector3());
+  const noseAcc = new THREE.Vector3();
+  const tailAcc = new THREE.Vector3();
+  let nNose = 0, nTail = 0;
+  root.traverse((ch) => {
+    if (!ch.isMesh) return;
+    const n = ch.name || '';
+    const c = new THREE.Box3().setFromObject(ch).getCenter(new THREE.Vector3()).sub(center);
+    const isNose = /nose|cockpit|prop|spinner|radome|pilot|front(?!.*aft)/i.test(n)
+      && !/aft|rear|tail|rudder|elevator|hstab|vstab/i.test(n);
+    const isTail = /\baft\b|tail|rudder|elevator|hstab|vstab|\bfin\b|exhaust|nozzle|baggagecomp/i.test(n)
+      && !/front|nose|cockpit|prop/i.test(n);
+    if (isNose) { noseAcc.add(c); nNose++; }
+    if (isTail) { tailAcc.add(c); nTail++; }
+  });
+  if (!nNose && !nTail) return null;
+  if (nNose) noseAcc.multiplyScalar(1 / nNose);
+  if (nTail) tailAcc.multiplyScalar(1 / nTail);
+  // Nose direction: from tail toward nose (or nose offset from center)
+  const dir = nNose && nTail ? noseAcc.sub(tailAcc) : (nNose ? noseAcc : tailAcc.multiplyScalar(-1));
+  dir.y = 0; // horizontal only
+  if (dir.lengthSq() < 1e-6) return null;
+  dir.normalize();
+  return dir;
+}
+
+/** Tip cross-section proxy: smaller tip ≈ nose along fuse axis. */
+function gltfFuseAxisFromGeometry(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  // Prefer horizontal axis that is NOT obviously the short one when span>>length
+  // Sample tip "areas" on X and Z
+  function tipArea(axis, atMin) {
+    const len = size[axis];
+    const eps = Math.max(0.15, len * 0.08);
+    const lim = atMin ? box.min[axis] + eps : box.max[axis] - eps;
+    let minY = Infinity, maxY = -Infinity, minO = Infinity, maxO = -Infinity, n = 0;
+    const other = axis === 'x' ? 'z' : 'x';
+    const v = new THREE.Vector3();
+    root.traverse((ch) => {
+      if (!ch.isMesh || !ch.geometry?.attributes?.position) return;
+      const pos = ch.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(ch.matrixWorld);
+        if (atMin ? v[axis] > lim : v[axis] < lim) continue;
+        n++;
+        minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+        minO = Math.min(minO, v[other]); maxO = Math.max(maxO, v[other]);
+      }
+    });
+    if (!n || !Number.isFinite(minY)) return Infinity;
+    return Math.max(0.01, (maxY - minY) * (maxO - minO));
+  }
+  const xMin = tipArea('x', true), xMax = tipArea('x', false);
+  const zMin = tipArea('z', true), zMax = tipArea('z', false);
+  const xRatio = Math.max(xMin, xMax) / Math.min(xMin, xMax);
+  const zRatio = Math.max(zMin, zMax) / Math.min(zMin, zMax);
+  // Fuselage tips differ more in area than wing tips
+  if (zRatio >= xRatio * 0.9) {
+    return { axis: 'z', sign: zMin < zMax ? -1 : 1 };
+  }
+  return { axis: 'x', sign: xMin < xMax ? -1 : 1 };
+}
+
+/**
+ * Center, orient nose → +Z (Y up), apply family offsets, scale to target length.
+ * Mesh-name hints beat span/length heuristics (GA wings often longer than fuselage).
+ */
 function prepareGltfTemplate(scene, famMeta, targetLen) {
   const root = new THREE.Group();
   root.name = 'gltf_' + (famMeta.file || 'ac');
   const raw = scene.clone(true);
   root.add(raw);
 
-  // Family Euler offsets (degrees) — nose should end up +Z, Y up
-  const yaw = (famMeta.yaw || 0) * Math.PI / 180;
-  const pitch = (famMeta.pitch || 0) * Math.PI / 180;
-  const roll = (famMeta.roll || 0) * Math.PI / 180;
-  raw.rotation.set(pitch, yaw, roll);
+  // Family Euler offsets (degrees) — applied before auto nose align
+  const yaw0 = (famMeta.yaw || 0) * Math.PI / 180;
+  const pitch0 = (famMeta.pitch || 0) * Math.PI / 180;
+  const roll0 = (famMeta.roll || 0) * Math.PI / 180;
+  raw.rotation.set(pitch0, yaw0, roll0);
   raw.updateMatrixWorld(true);
 
   let box = new THREE.Box3().setFromObject(root);
   let size = box.getSize(new THREE.Vector3());
-  // Auto-orient if a non-Y axis is clearly not length: prefer Y = smallest (height)
-  // If Y is the longest axis, pitch -90° so former Y becomes Z (nose)
+  // If Y is longest (model exported Z-up), pitch -90° so Y → Z
   if (size.y > size.x * 1.05 && size.y > size.z * 1.05) {
     raw.rotation.x += -Math.PI / 2;
     raw.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(root);
     size = box.getSize(new THREE.Vector3());
   }
-  // If length appears on X (X >> Z) and Y is height, yaw so X → Z
-  if (size.x > size.z * 1.2 && size.y < Math.min(size.x, size.z) * 0.75) {
-    raw.rotation.y += Math.PI / 2;
+
+  // Resolve nose direction: name hints first, else tip geometry
+  let noseDir = gltfNoseHint(root);
+  if (!noseDir) {
+    const fuse = gltfFuseAxisFromGeometry(root);
+    noseDir = new THREE.Vector3(
+      fuse.axis === 'x' ? fuse.sign : 0,
+      0,
+      fuse.axis === 'z' ? fuse.sign : 0
+    );
+  }
+  // Rotate about Y so noseDir → +Z (keep Y up)
+  // yaw aligns (nx,nz) onto (0,1) in XZ: target angle for +Z is 0 in atan2(x,z) sense
+  const noseYaw = Math.atan2(noseDir.x, noseDir.z); // angle of nose from +Z toward +X
+  if (Math.abs(noseYaw) > 1e-3) {
+    raw.rotation.y += -noseYaw; // bring nose onto +Z
+    raw.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(root);
+    size = box.getSize(new THREE.Vector3());
+  }
+
+  // Optional family noseFlip: 180° if a specific asset is still backwards
+  if (famMeta.noseFlip) {
+    raw.rotation.y += Math.PI;
     raw.updateMatrixWorld(true);
     box = new THREE.Box3().setFromObject(root);
     size = box.getSize(new THREE.Vector3());
@@ -901,10 +998,11 @@ function prepareGltfTemplate(scene, famMeta, targetLen) {
   box = new THREE.Box3().setFromObject(root);
   size = box.getSize(new THREE.Vector3());
 
-  const modelLen = Math.max(size.z, 0.001);
+  // Length along +Z after align (fall back to longest horizontal if degenerate)
+  const modelLen = Math.max(size.z, size.x * 0.5, 0.001);
   const refLen = famMeta.refLen || targetLen || modelLen;
   // Normalize template to refLen meters (unit scale); per-aircraft scale applied later
-  const s = refLen / modelLen;
+  const s = refLen / Math.max(size.z, 0.001);
   root.scale.setScalar(s);
 
   // Night-readable materials: slight emissive, keep albedo (no altitude paint)
@@ -1001,6 +1099,7 @@ function attachGltfToRec(rec, template) {
   rec.modelKey = info.key;
   rec.span = info.span;
   rec.len = info.len;
+  orientAircraftModel(rec);
 }
 
 function requestGltfForRec(rec) {
@@ -2533,6 +2632,24 @@ function snugTrailTip(rec) {
   rec.trailGeo.attributes.position.needsUpdate = true;
 }
 
+/** Apply heading/pitch to rec.model so nose follows track; trails stay behind. */
+function orientAircraftModel(rec, trackOverride) {
+  if (!rec?.model) return;
+  const track = trackOverride != null ? trackOverride : rec.track;
+  if (track == null || !Number.isFinite(track)) return;
+  const rad = THREE.MathUtils.degToRad(track);
+  rec.model.rotation.order = 'YXZ';
+  // +Z nose → ENU forward (sin, 0, −cos)
+  rec.model.rotation.y = Math.PI - rad;
+  let pitch = 0;
+  if (rec.vr != null && rec.vel != null && rec.vel > 5) {
+    pitch = Math.atan2(rec.vr, rec.vel);
+    pitch = Math.max(-0.35, Math.min(0.35, pitch));
+  }
+  rec.model.rotation.x = -pitch; // negate: Three YXZ +X pitches nose down
+  rec.model.rotation.z = 0;
+}
+
 function applyPose(rec) {
   const altVis = (rec.altM || 0) * settings.altScale;
   const p = enu(rec.lat, rec.lon, altVis);
@@ -2559,27 +2676,12 @@ function applyPose(rec) {
     rec.stick.geometry.attributes.color.needsUpdate = true;
   }
 
-  // Orient: track (yaw) + slight pitch from vertical rate
-  // Local +Z is nose/forward. ENU: +X east, +Y up, +Z south (−north).
-  // Heading 0° (north) → nose toward −Z world ⇒ rotation.y = 0 with model +Z?
-  // Model nose +Z (south in ENU). Track 0 (north) needs nose → −Z ⇒ yaw = π.
-  // rotation.y = π − trackRad  (or equivalently -track with model nose −Z).
-  // Using: yaw so +Z local maps toward track direction in XZ.
-  // Track deg clockwise from north; north = −Z, east = +X.
-  // Forward world = (sin(track), 0, -cos(track))
-  if (rec.track != null) {
-    const rad = THREE.MathUtils.degToRad(rec.track);
-    // Model nose is +Z. ENU: north = −Z, east = +X.
-    // Track 0° (north) ⇒ forward (0,0,−1) ⇒ yaw = π.
-    rec.model.rotation.order = 'YXZ';
-    rec.model.rotation.y = Math.PI - rad;
-    let pitch = 0;
-    if (rec.vr != null && rec.vel != null && rec.vel > 5) {
-      pitch = Math.atan2(rec.vr, rec.vel);
-      pitch = Math.max(-0.35, Math.min(0.35, pitch));
-    }
-    rec.model.rotation.x = pitch;
-  }
+  // Orient mesh to ground track (true track from ADS-B / OpenSky).
+  // Model / procedural nose is +Z. ENU: +X east, +Y up, +Z south (−north).
+  // Forward world for track θ° CW from north: (sin θ, 0, −cos θ).
+  // With Three Y-up, yaw = π − θ maps local +Z → that forward.
+  // Pitch: climb (vr>0) must raise the nose; YXZ +rot.x pitches nose down, so negate.
+  orientAircraftModel(rec);
 
   // velocity vector (short)
   const vpos = rec.velLine.geometry.attributes.position.array;
@@ -2840,6 +2942,8 @@ function animate() {
     rec.display.lerp(rec.target, 1 - Math.exp(-3.5 * dt));
     if (!Number.isFinite(rec.display.x)) rec.display.copy(rec.target);
     rec.group.position.copy(rec.display);
+    // Keep nose aligned with the same track used for dead-reckon (trails stay aft)
+    orientAircraftModel(rec);
 
     // Sample trail along dead-reckoned path (~every 2.5s or 400m) so trails
     // follow the track between ADS-B polls instead of long straight gaps.
