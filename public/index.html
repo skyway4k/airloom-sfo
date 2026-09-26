@@ -449,7 +449,7 @@ const MAX_AIRCRAFT = 400;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'follow-v2'; // served-code marker for deploy verify
+const BUILD_MARK = 'follow-v3'; // served-code marker for deploy verify
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1329,6 +1329,8 @@ try {
     alpha: false,
     powerPreference: 'high-performance',
     failIfMajorPerformanceCaveat: false,
+    // Follow chase sees distant bay tiles + near airframe; log depth stops z-fight flicker
+    logarithmicDepthBuffer: true,
   });
 } catch (err) {
   const toast = document.getElementById('toast');
@@ -1559,8 +1561,8 @@ let settings = {
 let lastArrivals = [];
 
 // ─── Follow (chase-above) camera state ───────────────────────────────────────
-const cockpitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 5, 5e6);
-const cockpitCamB = new THREE.PerspectiveCamera(60, innerWidth / (innerHeight * 0.5), 5, 5e6);
+const cockpitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 4e5);
+const cockpitCamB = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 4e5);
 const _ckPos = new THREE.Vector3();
 const _ckLook = new THREE.Vector3();
 const _ckPosSm = new THREE.Vector3();
@@ -1826,14 +1828,19 @@ function pickCockpitTargets(fromList) {
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
   // Third-person chase from above: elevated behind the aircraft, looking down at
   // the mesh + along-track toward the field (not a nose/cockpit POV).
-  const track = rec.track != null ? rec.track : 0;
+  if (!rec || !rec.display ||
+      !Number.isFinite(rec.display.x) || !Number.isFinite(rec.display.y) || !Number.isFinite(rec.display.z)) {
+    return false;
+  }
+  const track = (rec.track != null && Number.isFinite(rec.track)) ? rec.track : 0;
   const rad = THREE.MathUtils.degToRad(track);
   // Forward in ENU: east=sin, north=-z ⇒ (sin, 0, -cos)
   _ckFwd.set(Math.sin(rad), 0, -Math.cos(rad));
+  if (!_ckFwd.lengthSq()) _ckFwd.set(0, 0, -1);
 
   const body = Math.max(18, (rec.len || 12) * SIZE_MULT); // visual length (m)
   const lag = lagScale || 1;
-  const back = Math.max(200, body * 4.4) * lag;   // behind along track (follow-v2 pullback)
+  const back = Math.max(200, body * 4.4) * lag;   // behind along track (follow-v2+ pullback)
   const up = Math.max(170, body * 3.6) * lag;     // elevated bird's-eye chase
   const lookAhead = Math.max(45, body * 0.7);     // slight forward bias on look target
 
@@ -1844,6 +1851,16 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
   outLook.copy(rec.display)
     .addScaledVector(_ckFwd, lookAhead)
     .addScaledVector(_ckUp, body * 0.08);
+  // Guard: identical eye/look → lookAt NaNs the matrix and freezes the scene
+  if (outPos.distanceToSquared(outLook) < 1e-4) {
+    outLook.addScaledVector(_ckFwd, 50);
+  }
+  return Number.isFinite(outPos.x) && Number.isFinite(outLook.x);
+}
+
+function camPosFinite(cam) {
+  const p = cam.position;
+  return Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z);
 }
 
 function updateCockpitCameras(dt) {
@@ -1855,37 +1872,67 @@ function updateCockpitCameras(dt) {
     let best = null, bestD = Infinity;
     for (const r of aircraft.values()) {
       if (r.onGround || !r.isPrivateGa) continue;
+      if (!Number.isFinite(r.display?.x) || !Number.isFinite(r.display?.y)) continue;
       if (r.dist < bestD) { bestD = r.dist; best = r; }
     }
-    if (!best) return false;
+    if (!best) {
+      cockpitDual = false;
+      _ckSmoothInit = false;
+      _ckSmoothInitB = false;
+      return false;
+    }
     cockpitPrimaryId = best.icao;
     return updateCockpitCameras(dt);
   }
 
-  cockpitEyeFor(prim, _ckPos, _ckLook, 1);
+  if (!cockpitEyeFor(prim, _ckPos, _ckLook, 1)) {
+    _ckSmoothInit = false;
+    return false;
+  }
   const alpha = 1 - Math.exp(-3.2 * dt);
-  if (!_ckSmoothInit) {
+  if (!_ckSmoothInit || !Number.isFinite(_ckPosSm.x)) {
     _ckPosSm.copy(_ckPos); _ckLookSm.copy(_ckLook); _ckSmoothInit = true;
   } else {
     _ckPosSm.lerp(_ckPos, alpha);
     _ckLookSm.lerp(_ckLook, alpha);
   }
+  if (!Number.isFinite(_ckPosSm.x) || !Number.isFinite(_ckLookSm.x)) {
+    _ckSmoothInit = false;
+    return false;
+  }
   cockpitCam.position.copy(_ckPosSm);
   cockpitCam.up.set(0, 1, 0);
   cockpitCam.lookAt(_ckLookSm);
+  if (!camPosFinite(cockpitCam)) {
+    _ckSmoothInit = false;
+    return false;
+  }
 
   if (sec && sec.alive) {
-    cockpitEyeFor(sec, _ckPosB, _ckLookB, 1);
-    const alphaB = 1 - Math.exp(-3.2 * dt);
-    if (!_ckSmoothInitB) {
-      _ckPosBSm.copy(_ckPosB); _ckLookBSm.copy(_ckLookB); _ckSmoothInitB = true;
+    if (!cockpitEyeFor(sec, _ckPosB, _ckLookB, 1)) {
+      cockpitDual = false;
+      _ckSmoothInitB = false;
     } else {
-      _ckPosBSm.lerp(_ckPosB, alphaB);
-      _ckLookBSm.lerp(_ckLookB, alphaB);
+      const alphaB = 1 - Math.exp(-3.2 * dt);
+      if (!_ckSmoothInitB || !Number.isFinite(_ckPosBSm.x)) {
+        _ckPosBSm.copy(_ckPosB); _ckLookBSm.copy(_ckLookB); _ckSmoothInitB = true;
+      } else {
+        _ckPosBSm.lerp(_ckPosB, alphaB);
+        _ckLookBSm.lerp(_ckLookB, alphaB);
+      }
+      if (!Number.isFinite(_ckPosBSm.x) || !Number.isFinite(_ckLookBSm.x)) {
+        cockpitDual = false;
+        _ckSmoothInitB = false;
+      } else {
+        cockpitCamB.position.copy(_ckPosBSm);
+        cockpitCamB.up.set(0, 1, 0);
+        cockpitCamB.lookAt(_ckLookBSm);
+        if (!camPosFinite(cockpitCamB)) {
+          cockpitDual = false;
+          _ckSmoothInitB = false;
+        }
+      }
     }
-    cockpitCamB.position.copy(_ckPosBSm);
-    cockpitCamB.up.set(0, 1, 0);
-    cockpitCamB.lookAt(_ckLookBSm);
   } else {
     cockpitDual = false;
     _ckSmoothInitB = false;
@@ -2274,13 +2321,26 @@ function setLabelInfo(rec) {
   el.querySelector('.meta').textContent = line2;
 }
 
-function updateLabelScreen(rec, cam) {
+function updateLabelScreen(rec, cam, view) {
   const el = rec.label;
   if (!el) return;
+  if (!cam || !camPosFinite(cam) ||
+      !Number.isFinite(rec.display?.x) || !Number.isFinite(rec.display?.y) || !Number.isFinite(rec.display?.z)) {
+    el.classList.add('hidden');
+    return;
+  }
   _lblProj.copy(rec.display);
   _lblProj.y += Math.max(120, (rec.span || 30) * SIZE_MULT * 0.45);
   const dist = _lblProj.distanceTo(cam.position);
+  if (!Number.isFinite(dist)) {
+    el.classList.add('hidden');
+    return;
+  }
   _lblProj.project(cam);
+  if (!Number.isFinite(_lblProj.x) || !Number.isFinite(_lblProj.y) || !Number.isFinite(_lblProj.z)) {
+    el.classList.add('hidden');
+    return;
+  }
   const behind = _lblProj.z > 1;
   const offscreen = Math.abs(_lblProj.x) > 1.15 || Math.abs(_lblProj.y) > 1.2;
   const tooFar = dist > LABEL_MAX_DIST;
@@ -2291,8 +2351,17 @@ function updateLabelScreen(rec, cam) {
   }
   el.classList.remove('hidden');
   el.classList.toggle('dim', dist > LABEL_MAX_DIST * 0.55);
-  const x = (_lblProj.x * 0.5 + 0.5) * innerWidth;
-  const y = (-_lblProj.y * 0.5 + 0.5) * innerHeight;
+  // view = {x,y,w,h} in CSS px (y from top). Defaults to full window.
+  const vx = view ? view.x : 0;
+  const vy = view ? view.y : 0;
+  const vw = view ? view.w : innerWidth;
+  const vh = view ? view.h : innerHeight;
+  const x = vx + (_lblProj.x * 0.5 + 0.5) * vw;
+  const y = vy + (-_lblProj.y * 0.5 + 0.5) * vh;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    el.classList.add('hidden');
+    return;
+  }
   el.style.transform = 'translate(' + (x) + 'px,' + (y) + 'px) translate(-50%, calc(-100% - 8px))';
   setLabelInfo(rec);
 }
@@ -2746,7 +2815,7 @@ function animate() {
     // dead-reckon using ground speed
     let estLat = rec.lat, estLon = rec.lon, estAlt = rec.altM || 0;
     const spd = rec.vel != null ? rec.vel : (rec.gsKt != null ? rec.gsKt * KT_MS : 0);
-    if (spd > 1 && rec.track != null && !rec.onGround) {
+    if (spd > 1 && rec.track != null && Number.isFinite(rec.track) && !rec.onGround) {
       const age = (t - rec.lastPoll) / 1000;
       if (age > 0 && age < POLL_MS / 1000 * 2.5) {
         const distM = spd * age;
@@ -2759,12 +2828,17 @@ function animate() {
         estLat = rec.lat + dLat;
         estLon = rec.lon + dLon;
         estAlt = Math.max(0, (rec.altM || 0) + dAlt);
-        const altVis = estAlt * settings.altScale;
-        const p = enu(estLat, estLon, altVis);
-        rec.target.set(p.x, p.y, p.z);
+        if (Number.isFinite(estLat) && Number.isFinite(estLon) && Number.isFinite(estAlt)) {
+          const altVis = estAlt * settings.altScale;
+          const p = enu(estLat, estLon, altVis);
+          if (Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) {
+            rec.target.set(p.x, p.y, p.z);
+          }
+        }
       }
     }
     rec.display.lerp(rec.target, 1 - Math.exp(-3.5 * dt));
+    if (!Number.isFinite(rec.display.x)) rec.display.copy(rec.target);
     rec.group.position.copy(rec.display);
 
     // Sample trail along dead-reckoned path (~every 2.5s or 400m) so trails
@@ -2797,17 +2871,49 @@ function animate() {
       pos[3] = 0; pos[4] = 0; pos[5] = 0;
       rec.stick.geometry.attributes.position.needsUpdate = true;
     }
-    // Labels use active camera (follow primary when in Follow mode)
-    const labelCam = (settings.cameraMode === 'follow') ? cockpitCam : camera;
-    updateLabelScreen(rec, labelCam);
+  }
+
+  // Update Follow cameras BEFORE labels so projection never uses a stale/NaN eye
+  let followOk = false;
+  let followDual = false;
+  const w = innerWidth, h = innerHeight;
+  if (settings.cameraMode === 'follow') {
+    followOk = updateCockpitCameras(dt);
+    followDual = followOk && cockpitDual && cockpitSecondaryId && aircraft.has(cockpitSecondaryId);
+    syncDualChrome();
+  }
+
+  // Labels: orbit cam, or follow cam (with correct dual viewport mapping)
+  for (const rec of aircraft.values()) {
+    if (settings.cameraMode === 'follow') {
+      if (!followOk) {
+        // No inbound GA — match the orbit fallback render so labels don't explode
+        updateLabelScreen(rec, camera);
+      } else if (followDual && cockpitDualLayout === 'split') {
+        // Only annotate the two chased targets, each in its pane (avoids full-width NDC stretch)
+        if (rec.icao === cockpitPrimaryId) {
+          updateLabelScreen(rec, cockpitCam, { x: 0, y: 0, w: w * 0.5, h });
+        } else if (rec.icao === cockpitSecondaryId) {
+          updateLabelScreen(rec, cockpitCamB, { x: w * 0.5, y: 0, w: w * 0.5, h });
+        } else if (rec.label) {
+          rec.label.classList.add('hidden');
+        }
+      } else {
+        updateLabelScreen(rec, cockpitCam);
+      }
+    } else {
+      updateLabelScreen(rec, camera);
+    }
   }
 
   if (settings.cameraMode === 'follow') {
-    const ok = updateCockpitCameras(dt);
-    const w = innerWidth, h = innerHeight;
-    const dual = ok && cockpitDual && cockpitSecondaryId && aircraft.has(cockpitSecondaryId);
-    syncDualChrome();
-    if (dual && cockpitDualLayout === 'split') {
+    if (followDual && cockpitDualLayout === 'split') {
+      // Proper multi-view clear: clear once, then draw each scissor without wiping the other
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, w, h);
+      renderer.autoClear = true;
+      renderer.clear();
+      renderer.autoClear = false;
       renderer.setScissorTest(true);
       // Left — primary
       cockpitCam.aspect = (w * 0.5) / h;
@@ -2822,7 +2928,10 @@ function animate() {
       renderer.setScissor(w * 0.5, 0, w * 0.5, h);
       renderer.render(scene, cockpitCamB);
       renderer.setScissorTest(false);
-    } else if (dual && cockpitDualLayout === 'pip') {
+      renderer.setViewport(0, 0, w, h);
+      renderer.autoClear = true;
+    } else if (followDual && cockpitDualLayout === 'pip') {
+      renderer.autoClear = true;
       cockpitCam.aspect = w / h;
       cockpitCam.updateProjectionMatrix();
       renderer.setViewport(0, 0, w, h);
@@ -2833,6 +2942,7 @@ function animate() {
       const pipH = Math.min(h * 0.28, 200);
       const pipX = w - pipW - 14;
       const pipY = Math.max(56, 14); // from bottom in GL coords
+      renderer.autoClear = false;
       renderer.clearDepth();
       renderer.setScissorTest(true);
       cockpitCamB.aspect = pipW / pipH;
@@ -2841,12 +2951,15 @@ function animate() {
       renderer.setScissor(pipX, pipY, pipW, pipH);
       renderer.render(scene, cockpitCamB);
       renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, w, h);
+      renderer.autoClear = true;
     } else {
+      renderer.autoClear = true;
       cockpitCam.aspect = w / h;
       cockpitCam.updateProjectionMatrix();
       renderer.setViewport(0, 0, w, h);
       renderer.setScissorTest(false);
-      if (ok) renderer.render(scene, cockpitCam);
+      if (followOk) renderer.render(scene, cockpitCam);
       else {
         controls.update();
         renderer.render(scene, camera);
@@ -2859,6 +2972,7 @@ function animate() {
     }
   } else {
     controls.update();
+    renderer.autoClear = true;
     renderer.setViewport(0, 0, innerWidth, innerHeight);
     renderer.setScissorTest(false);
     renderer.render(scene, camera);
