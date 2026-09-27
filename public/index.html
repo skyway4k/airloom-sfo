@@ -400,7 +400,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'follow-v6'; // compact HUD, single chase, ~250 mi map
+const BUILD_MARK = 'follow-v7'; // ground-under-follow + thin trail + compact single chase
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1395,17 +1395,16 @@ const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
 // HD: sharper on desktop/retina; keep iPhone under ~2× for Safari GPU budget
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isIOS ? 2 : 2.5));
 renderer.setSize(innerWidth, innerHeight, false);
-renderer.setClearColor(0x87b5d9); // daytime bay sky
+renderer.setClearColor(0x9bb8d0); // soft sky — not saturated void-blue
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
 if ('toneMapping' in renderer) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.35;
+  renderer.toneMappingExposure = 1.28;
 }
 
 const scene = new THREE.Scene();
-// Soft haze — light enough to read the Bay, not night-crush
-// Thin haze so ~250 mi ground remains readable from high orbit
-scene.fog = new THREE.FogExp2(0xb7d0e8, 0.00000115);
+// Light earth-tinted haze so Follow chase still reads ground (not blue void)
+scene.fog = new THREE.FogExp2(0xc2d4c8, 0.00000085);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 50, 8e6);
 // Default framing pulls back to show ~250 statute mi around KSFO
@@ -1507,55 +1506,71 @@ function tileToLatLon(x, y, z) {
   return { lat, lon };
 }
 
-async function loadSatGround() {
-  makeGridFallback();
-  // z=8 + 7×7 tiles ≈ 230+ nm radius around KSFO (~250 statute mi) without huge downloads
-  const z = 8;
+/** Always-present earth disc so Follow never sits in a blue void if tiles lag. */
+function makeEarthBase() {
+  const r = GROUND_M * 0.55;
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(r, 96),
+    new THREE.MeshBasicMaterial({ color: 0x3d5a42, depthWrite: true })
+  );
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = -2;
+  groundGroup.add(disc);
+  const water = new THREE.Mesh(
+    new THREE.CircleGeometry(r * 0.42, 64),
+    new THREE.MeshBasicMaterial({ color: 0x2f5f78, transparent: true, opacity: 0.55, depthWrite: false })
+  );
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = -1.5;
+  groundGroup.add(water);
+}
+
+async function fetchTileLayer(z, span, fillCss, brighten) {
   const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
-  const span = 3;
-  const size = 256 * (span * 2 + 1);
+  const n = span * 2 + 1;
+  const size = 256 * n;
   const cvs = document.createElement('canvas');
   cvs.width = size; cvs.height = size;
   const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#6a90b0';
+  // Earth fill — never blue (blue fill read as "void" when tiles fail)
+  ctx.fillStyle = fillCss;
   ctx.fillRect(0, 0, size, size);
 
   let loaded = 0;
-  const total = (span * 2 + 1) ** 2;
-  const urls = [];
+  const total = n * n;
+  const jobs = [];
   for (let dy = -span; dy <= span; dy++) {
     for (let dx = -span; dx <= span; dx++) {
       const tx = center.x + dx;
       const ty = center.y + dy;
       const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
-      urls.push({ url, px: (dx + span) * 256, py: (dy + span) * 256 });
+      const px = (dx + span) * 256;
+      const py = (dy + span) * 256;
+      jobs.push(new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const t = setTimeout(() => resolve(), 10000);
+        img.onload = () => { clearTimeout(t); try { ctx.drawImage(img, px, py); loaded++; } catch (_) {} resolve(); };
+        img.onerror = () => { clearTimeout(t); resolve(); };
+        img.src = url;
+      }));
     }
   }
+  await Promise.all(jobs);
+  if (loaded < total * 0.15) return null;
 
-  const tilePromise = Promise.all(urls.map(({ url, px, py }) => new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    const done = () => resolve();
-    const t = setTimeout(done, 8000);
-    img.onload = () => { clearTimeout(t); ctx.drawImage(img, px, py); loaded++; resolve(); };
-    img.onerror = () => { clearTimeout(t); resolve(); };
-    img.src = url;
-  })));
-  await Promise.race([
-    tilePromise,
-    new Promise((r) => setTimeout(r, 12000)),
-  ]);
-
-  if (loaded < total * 0.3) return;
-
-  while (groundGroup.children.length) {
-    const ch = groundGroup.children[0];
-    groundGroup.remove(ch);
-    if (ch.geometry) ch.geometry.dispose?.();
-    if (ch.material) {
-      if (Array.isArray(ch.material)) ch.material.forEach((m) => m.dispose?.());
-      else ch.material.dispose?.();
-    }
+  if (brighten) {
+    try {
+      const imgData = ctx.getImageData(0, 0, size, size);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // Mild lift — keep greens/browns; avoid blue wash that turns land into void
+        d[i] = Math.min(255, d[i] * 1.08 + 8);
+        d[i + 1] = Math.min(255, d[i + 1] * 1.10 + 10);
+        d[i + 2] = Math.min(255, d[i + 2] * 1.04 + 6);
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch (_) { /* tainted — leave as drawn */ }
   }
 
   const nw = tileToLatLon(center.x - span, center.y - span, z);
@@ -1566,42 +1581,54 @@ async function loadSatGround() {
   const height = Math.abs(seE.z - nwE.z);
   const cx = (nwE.x + seE.x) / 2;
   const cz = (nwE.z + seE.z) / 2;
-
-  // Daytime lift: nudge imagery toward readable midtones without washing color
-  try {
-    const imgData = ctx.getImageData(0, 0, size, size);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = Math.min(255, d[i] * 1.18 + 18);
-      d[i + 1] = Math.min(255, d[i + 1] * 1.18 + 18);
-      d[i + 2] = Math.min(255, d[i + 2] * 1.12 + 22);
-    }
-    ctx.putImageData(imgData, 0, 0);
-  } catch (_) { /* tainted canvas — leave as drawn */ }
-
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  try { tex.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy() || 1); } catch (_) {}
-  // Unlit so tile colors stay true (Standard + dark night lights crushed the Bay)
-  const mat = new THREE.MeshBasicMaterial({ map: tex });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  try { tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy() || 1); } catch (_) {}
+  const mat = new THREE.MeshBasicMaterial({ map: tex, depthWrite: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(cx, 0, cz);
-  groundGroup.add(mesh);
-
-  const grid = new THREE.GridHelper(Math.max(width, height) * 0.9, 40, 0xffffff, 0xffffff);
-  grid.material.transparent = true;
-  grid.material.opacity = 0.06;
-  grid.position.y = 2;
-  groundGroup.add(grid);
-  groundGroup.add(makeRunwaySketch());
-  groundReady = true;
+  return { mesh, width, height, loaded, total };
 }
 
-loadSatGround().catch(() => makeGridFallback());
+async function loadSatGround() {
+  // Clear any prior children then lay earth base first (anti blue-void)
+  while (groundGroup.children.length) {
+    const ch = groundGroup.children[0];
+    groundGroup.remove(ch);
+  }
+  makeEarthBase();
+  groundGroup.add(makeRunwaySketch());
+  groundReady = true;
+
+  // Wide ~250 mi coverage (z=8, 7×7) + sharper Bay inset (z=11, 5×5) under chase
+  const wide = await fetchTileLayer(8, 3, '#3f5c45', true);
+  if (wide) {
+    wide.mesh.position.y = 0;
+    groundGroup.add(wide.mesh);
+  }
+  const inset = await fetchTileLayer(11, 2, '#456448', true);
+  if (inset) {
+    inset.mesh.position.y = 0.4;
+    groundGroup.add(inset.mesh);
+  }
+
+  if (wide) {
+    const grid = new THREE.GridHelper(Math.max(wide.width, wide.height) * 0.85, 36, 0xffffff, 0xffffff);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.04;
+    grid.position.y = 2;
+    groundGroup.add(grid);
+  }
+}
+
+loadSatGround().catch(() => {
+  try { makeEarthBase(); groundGroup.add(makeRunwaySketch()); groundReady = true; }
+  catch (_) { makeGridFallback(); }
+});
 
 // ─── Aircraft resources ──────────────────────────────────────────────────────
 function makeGlowSprite() {
@@ -1636,7 +1663,7 @@ let settings = {
 let lastArrivals = [];
 
 // ─── Follow (chase-above) camera state ───────────────────────────────────────
-const cockpitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 1.6e6);
+const cockpitCam = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 8, 2.2e6);
 const _ckPos = new THREE.Vector3();
 const _ckLook = new THREE.Vector3();
 const _ckPosSm = new THREE.Vector3();
@@ -1867,8 +1894,7 @@ function pickCockpitTargets(fromList) {
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
-  // Third-person chase from above: elevated behind the aircraft, looking down at
-  // the mesh + along-track toward the field (not a nose/cockpit POV).
+  // Elevated chase: steep enough that sat ground fills the lower frame (no blue void).
   if (!rec || !rec.display ||
       !Number.isFinite(rec.display.x) || !Number.isFinite(rec.display.y) || !Number.isFinite(rec.display.z)) {
     return false;
@@ -1881,11 +1907,11 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
 
   const body = Math.max(18, (rec.len || 12) * SIZE_MULT); // visual length (m)
   const lag = lagScale || 1;
-  // Pull further back so live wake between cam and aircraft is visible (not clipped)
-  const back = Math.max(480, body * 9.0) * lag;
-  const up = Math.max(220, body * 4.2) * lag;
-  const side = Math.max(90, body * 1.8) * lag; // slight lateral offset — trail not under the lens
-  const lookAhead = Math.max(45, body * 0.7);
+  // Closer + higher → ~35–45° look-down so terrain sits under the aircraft
+  const back = Math.max(260, body * 5.2) * lag;
+  const up = Math.max(240, body * 5.0) * lag;
+  const side = Math.max(36, body * 0.85) * lag;
+  const lookAhead = Math.max(6, body * 0.12);
 
   // Lateral offset: fwd × worldUp = (-fwd.z, 0, fwd.x)
   const rx = -_ckFwd.z, rz = _ckFwd.x;
@@ -1895,13 +1921,16 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
     .addScaledVector(_ckUp, up);
   outPos.x += rx * side;
   outPos.z += rz * side;
-  // Look at the aircraft (slightly ahead) so the plane + trails frame well
+  // Aim at the airframe / slightly below so ground fills under the chase
   outLook.copy(rec.display)
     .addScaledVector(_ckFwd, lookAhead)
-    .addScaledVector(_ckUp, body * 0.08);
+    .addScaledVector(_ckUp, -Math.max(12, body * 0.22));
+  // Never aim above the eye (would sky-fill the frame)
+  if (outLook.y > outPos.y - 20) outLook.y = outPos.y - 20;
   // Guard: identical eye/look → lookAt NaNs the matrix and freezes the scene
   if (outPos.distanceToSquared(outLook) < 1e-4) {
-    outLook.addScaledVector(_ckFwd, 50);
+    outLook.addScaledVector(_ckFwd, 40);
+    outLook.y -= 30;
   }
   return Number.isFinite(outPos.x) && Number.isFinite(outLook.x);
 }
@@ -2098,8 +2127,8 @@ function isArrival(p) {
 
 // ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 200;
-const TRAIL_HALF_W = 32;      // meters — readable wake (7 was invisible from orbit; 110 shattered)
-const TRAIL_HALF_W_LOW = 6;   // taxi / very low alt
+const TRAIL_HALF_W = 5.5;     // meters — thin altitude ribbon (was 32: fat white slab in Follow)
+const TRAIL_HALF_W_LOW = 1.8; // taxi / very low alt
 const TRAIL_SAMPLE_MS = 650;  // live stream cadence between ADS-B polls
 const TRAIL_SAMPLE_M = 90;    // or when DR tip has moved this far
 const _tA = new THREE.Vector3();
@@ -2172,16 +2201,18 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.62,
       depthWrite: false,
-      // follow-v3 log-depth + airframe otherwise eat the ribbon in chase view
-      depthTest: false,
+      depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending, // additive made a glowing white rectangle
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     })
   );
   trail.frustumCulled = false;
-  trail.renderOrder = 3;
+  trail.renderOrder = 2;
   scene.add(trail);
 
   scene.add(group);
@@ -2385,9 +2416,9 @@ function updateTrail(rec) {
 
   // Opacity: softer on ground
   const mat = rec.trail.material;
-  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.35;
-  else if (tipAlt < 120) mat.opacity = 0.55;
-  else mat.opacity = 0.78;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.28;
+  else if (tipAlt < 120) mat.opacity = 0.45;
+  else mat.opacity = 0.58;
 
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
