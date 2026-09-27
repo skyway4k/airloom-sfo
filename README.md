@@ -35,11 +35,14 @@ Default **Private / GA** filters to light aircraft, turboprops, bizjets, and hel
 
 - **Follow** (default): elevated chase on the nearest inbound private/GA toward
   KSFO / SQL / HAF / PAO / SJC. Wheel/pinch zoom + drag orbit around the target.
-  Basemap is **USGS ImageryOnly** (keyless, CORS-ok NAIP-class raster for the Bay;
-  no Mapbox/Google API key). Template:
+  Basemap is **USGS ImageryOnly** ultra-HD (keyless, CORS-ok NAIP-class; ESRI World
+  Imagery fallback). Static stack **z8 / z11 / z13 / z15 / z16** around KSFO plus a
+  denser **z14–z16 chase inset** that tracks the aircraft so tiles stay sharp under
+  Follow (USGS max useful zoom ≈ **z16** over CONUS). Template:
   `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`
-- **Air Loom** (Orbit): dark high-contrast **Carto dark_all** basemap, translucent
-  Class B / Bay airspace shells, altitude-colored glow dots + thin trails, vertical
-  drop-lines, and large floating city labels — modeled after the original Air Loom look.
+- **Air Loom** (Orbit): dark high-contrast **Carto dark_all** basemap (z8 + denser
+  z12), translucent Class B / Bay airspace shells, altitude-colored glow dots +
+  thin trails, vertical drop-lines, and large floating city labels — modeled after
+  the original Air Loom look. (Orbit is stylized dark, not satellite.)
 
 Single chase only (no dual / PiP). Coverage ≈ 250 mi around KSFO.

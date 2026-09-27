@@ -422,7 +422,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v3'; // Follow USGS ImageryOnly (keyless hi-res); Orbit dark Carto
+const BUILD_MARK = 'airloom-v4'; // Ultra-HD Follow: denser USGS z8–z16 + chase-tracking inset
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1483,8 +1483,8 @@ if (!renderer.getContext()) {
 }
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-// HD: sharper on desktop/retina; keep iPhone under ~2× for Safari GPU budget
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isIOS ? 2 : 2.5));
+// Ultra HD: near-native DPR (cap 3 desktop / 2.5 iOS for Safari GPU budget)
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isIOS ? 2.5 : 3));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.setClearColor(0x9bb8d0); // soft sky — not saturated void-blue
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1651,7 +1651,9 @@ window.__AIRLOOM_FOLLOW_TILE = FOLLOW_TILE_TMPL;
 async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   opts = opts || {};
   const tileUrlFn = opts.tileUrl || FOLLOW_TILE_URL;
-  const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
+  const cLat = Number.isFinite(opts.lat) ? opts.lat : ORIGIN.lat;
+  const cLon = Number.isFinite(opts.lon) ? opts.lon : ORIGIN.lon;
+  const center = latLonToTile(cLat, cLon, z);
   const n = span * 2 + 1;
   const size = 256 * n;
   const cvs = document.createElement('canvas');
@@ -1724,12 +1726,16 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  try { tex.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy() || 1); } catch (_) {}
+  // Full GPU anisotropy (often 16) — keeps ground sharp at chase look-down angles
+  try { tex.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1; } catch (_) {}
   const mat = new THREE.MeshBasicMaterial({ map: tex, depthWrite: true });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(cx, 0, cz);
-  return { mesh, width, height, loaded, total };
+  mesh.userData.tileZ = z;
+  mesh.userData.tileSpan = span;
+  mesh.userData.tileCenter = { x: center.x, y: center.y, z };
+  return { mesh, width, height, loaded, total, z, span };
 }
 
 const satGroundGroup = new THREE.Group();
@@ -1740,32 +1746,109 @@ const airspaceGroup = new THREE.Group();
 airspaceGroup.name = 'airspace';
 const cityLabelGroup = new THREE.Group();
 cityLabelGroup.name = 'cityLabels';
+/** Local ultra-HD mosaic that tracks the Follow chase aircraft (z14–z16). */
+const chaseHiZGroup = new THREE.Group();
+chaseHiZGroup.name = 'chaseHiZ';
 groundGroup.add(satGroundGroup);
 groundGroup.add(darkGroundGroup);
 groundGroup.add(airspaceGroup);
 groundGroup.add(cityLabelGroup);
 
-/** Photoreal USGS ImageryOnly (NAIP-class Bay Area) — Follow chase. Keyless / CORS-*. */
+window.__AIRLOOM_TILE_LEVELS = {
+  followStatic: [8, 11, 13, 15, 16],
+  followChase: [14, 15, 16],
+  orbitDark: [8, 12],
+  source: FOLLOW_TILE_TMPL,
+  fallback: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  maxUsgsZ: 16,
+};
+
+function disposeMeshTree(root) {
+  while (root.children.length) {
+    const ch = root.children[0];
+    root.remove(ch);
+    try {
+      ch.material?.map?.dispose?.();
+      ch.material?.dispose?.();
+      ch.geometry?.dispose?.();
+    } catch (_) {}
+  }
+}
+
+async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon) {
+  const base = { lat, lon };
+  let layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_URL });
+  if (!layer) layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_FALLBACK_URL });
+  return layer;
+}
+
+let chaseInsetGen = 0;
+let chaseInsetTileKey = '';
+let chaseInsetBusy = false;
+let chaseInsetLastTry = 0;
+
+/** Ultra-HD inset centered on chase aircraft — refreshes when z15 tile cell changes. */
+async function refreshChaseInset(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  if (settings.cameraMode !== 'follow') return;
+  const now = performance.now();
+  if (chaseInsetBusy) return;
+  // Coalesce bursts; tile-key gate does the real skip
+  if (now - chaseInsetLastTry < 400) return;
+  chaseInsetLastTry = now;
+  const t15 = latLonToTile(lat, lon, 15);
+  const key = `15:${t15.x}:${t15.y}`;
+  if (key === chaseInsetTileKey) return;
+  chaseInsetBusy = true;
+  const gen = ++chaseInsetGen;
+  try {
+    // Dense grid under chase: mid context + sharp + runway-scale detail
+    const mid = await fetchLayerWithFallback(14, 3, '#3a5848', true, lat, lon);
+    if (gen !== chaseInsetGen) return;
+    const sharp = await fetchLayerWithFallback(15, 3, '#426848', true, lat, lon);
+    if (gen !== chaseInsetGen) return;
+    const detail = await fetchLayerWithFallback(16, 2, '#4a6e50', true, lat, lon);
+    if (gen !== chaseInsetGen) return;
+    disposeMeshTree(chaseHiZGroup);
+    if (mid) { mid.mesh.position.y = 1.0; chaseHiZGroup.add(mid.mesh); }
+    if (sharp) { sharp.mesh.position.y = 1.15; chaseHiZGroup.add(sharp.mesh); }
+    if (detail) { detail.mesh.position.y = 1.3; chaseHiZGroup.add(detail.mesh); }
+    chaseInsetTileKey = key;
+    window.__AIRLOOM_CHASE_TILE = { z: [14, 15, 16], key, lat, lon, at: Date.now() };
+  } catch (e) {
+    console.warn('chase inset', e);
+  } finally {
+    chaseInsetBusy = false;
+  }
+}
+
+/** Photoreal USGS ImageryOnly (NAIP-class) — Follow chase. Keyless / CORS-*. */
 async function loadSatBasemap() {
-  while (satGroundGroup.children.length) satGroundGroup.remove(satGroundGroup.children[0]);
+  // Reset chase inset before rebuilding static stack
+  chaseInsetGen++;
+  chaseInsetTileKey = '';
+  disposeMeshTree(chaseHiZGroup);
+  disposeMeshTree(satGroundGroup);
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
-  // Wide ~250 mi + mid Bay + sharp chase inset (USGS max useful ~z16 over CONUS)
-  const usgs = { tileUrl: FOLLOW_TILE_URL };
-  const esriFb = { tileUrl: FOLLOW_TILE_FALLBACK_URL };
-  let wide = await fetchTileLayer(8, 4, '#2f4a55', true, usgs);
-  if (!wide) wide = await fetchTileLayer(8, 4, '#2f4a55', true, esriFb);
-  if (wide) { wide.mesh.position.y = 0; satGroundGroup.add(wide.mesh); }
-  let mid = await fetchTileLayer(12, 3, '#3d5c48', true, usgs);
-  if (!mid) mid = await fetchTileLayer(12, 3, '#3d5c48', true, esriFb);
-  if (mid) { mid.mesh.position.y = 0.3; satGroundGroup.add(mid.mesh); }
-  let inset = await fetchTileLayer(15, 2, '#456a4c', true, usgs);
-  if (!inset) inset = await fetchTileLayer(15, 2, '#456a4c', true, esriFb);
-  if (inset) { inset.mesh.position.y = 0.6; satGroundGroup.add(inset.mesh); }
-  // Extra-sharp runway/terminal detail under chase (USGS z16)
-  let detail = await fetchTileLayer(16, 1, '#4a6e50', true, usgs);
-  if (!detail) detail = await fetchTileLayer(16, 1, '#4a6e50', true, esriFb);
-  if (detail) { detail.mesh.position.y = 0.85; satGroundGroup.add(detail.mesh); }
+  satGroundGroup.add(chaseHiZGroup);
+  // Wide z8 keeps ~250 mi coverage; denser z11/z13/z15/z16 so Follow is never stuck on z8-only
+  const layers = [
+    { z: 8,  span: 4, y: 0,    fill: '#2f4a55' }, // regional ~250 mi disc
+    { z: 11, span: 4, y: 0.2,  fill: '#355548' }, // Bay Area metro (denser than old z11-only)
+    { z: 13, span: 3, y: 0.35, fill: '#3d5c48' }, // peninsula / approaches
+    { z: 15, span: 3, y: 0.55, fill: '#456a4c' }, // KSFO / terminals
+    { z: 16, span: 2, y: 0.75, fill: '#4a6e50' }, // runway / apron (USGS max useful)
+  ];
+  for (const L of layers) {
+    const layer = await fetchLayerWithFallback(L.z, L.span, L.fill, true, ORIGIN.lat, ORIGIN.lon);
+    if (layer) {
+      layer.mesh.position.y = L.y;
+      satGroundGroup.add(layer.mesh);
+    }
+  }
+  // Seed chase inset at KSFO so Follow is sharp before first aircraft lock
+  refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
   groundReady = true;
 }
 
@@ -1783,7 +1866,8 @@ async function loadDarkBasemap() {
     const fb = await fetchTileLayer(8, 3, '#05070c', false, { tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true });
     if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
   }
-  const inset = await fetchTileLayer(11, 2, '#080c14', false, { tileUrl: carto });
+  // Denser Orbit overview (was z11 span2) — still Carto dark, not sat
+  const inset = await fetchTileLayer(12, 3, '#080c14', false, { tileUrl: carto });
   if (inset) { inset.mesh.position.y = 0.35; darkGroundGroup.add(inset.mesh); }
 
   // Subtle grid ribs over dark map
@@ -2463,6 +2547,10 @@ function updateCockpitCameras(dt) {
   if (!camPosFinite(cockpitCam)) {
     _ckSmoothInit = false;
     return false;
+  }
+  // Keep ultra-HD USGS mosaic under the chase aircraft (z14–z16)
+  if (Number.isFinite(prim.lat) && Number.isFinite(prim.lon)) {
+    refreshChaseInset(prim.lat, prim.lon);
   }
   return true;
 }
