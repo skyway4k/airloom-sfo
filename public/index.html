@@ -294,12 +294,12 @@
 <div id="hud">
   <div class="brand">
     <h1><span class="brand-emoji" aria-hidden="true">🛩️</span> AirLoom<span class="sep">·</span><span id="hudAirport">KSFO</span></h1>
-    <div class="sub" id="hudSub">San Francisco Bay · private &amp; GA ADS-B</div>
+    <div class="sub" id="hudSub">KSFO only · private &amp; GA · finals</div>
     <div class="note" id="hudNote" style="display:none"></div>
   </div>
   <div id="stats" class="compact-hud">
     <div class="stat-main">
-      <span class="arr" id="gaCount">—</span><span class="lbl"> private/GA</span>
+      <span class="arr" id="gaCount">—</span><span class="lbl"> KSFO GA</span>
       <span class="n" id="acCount">—</span><span class="lbl"> shown</span>
     </div>
     <div class="meta" id="srcLine">—</div>
@@ -313,6 +313,7 @@
     <div class="row"><label>Shown</label><span class="val" id="uiCount">0</span></div>
     <div class="row"><label>Private/GA</label><span class="val" id="uiGaCount" style="color:var(--accent)">0</span></div>
     <div class="row"><label>Arrivals</label><span class="val" id="uiArrCount" style="color:var(--muted)">0</span></div>
+    <div class="row"><label>On final</label><span class="val" id="uiFinalCount" style="color:var(--accent)">0</span></div>
     <div class="row"><label>Recording</label><span class="val" style="color:var(--muted)">inactive</span></div>
     <div class="row"><label>Memory</label><span class="val" id="uiMem" style="color:var(--muted)">—</span></div>
 
@@ -325,8 +326,8 @@
     </div>
 
     <div class="section">
-      <h3>Nearby private / GA</h3>
-      <div id="arrivalsList"><div class="arr-empty">Waiting for private/GA ADS-B…</div></div>
+      <h3>KSFO private / GA</h3>
+      <div id="arrivalsList"><div class="arr-empty">Waiting for KSFO private/GA…</div></div>
     </div>
 
     <div class="section">
@@ -405,7 +406,7 @@ const ORIGIN = known || AIRPORTS.KSFO;
 const UNKNOWN_APT = !known && params.get('airport');
 
 document.getElementById('hudAirport').textContent = ORIGIN.icao;
-document.getElementById('hudSub').textContent = 'KSFO · ~250 mi · private & GA ADS-B';
+document.getElementById('hudSub').textContent = 'KSFO only · private & GA · approach/final';
 if (UNKNOWN_APT) {
   const n = document.getElementById('hudNote');
   n.style.display = 'block';
@@ -422,7 +423,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v4'; // Ultra-HD Follow: denser USGS z8–z16 + chase-tracking inset
+const BUILD_MARK = 'airloom-v5'; // KSFO-only traffic + dual-final wide Orbit
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -526,6 +527,142 @@ function nearestBayField(lat, lon) {
     if (d < bestD) { bestD = d; best = f; }
   }
   return { field: best, distNm: bestD };
+}
+
+/**
+ * KSFO runway thresholds + inbound landing headings (approx public geometry).
+ * Used for extended-centerline final detection — not SQL/HAF/PAO.
+ */
+const KSFO_FINALS = [
+  { name: '28L', thrLat: 37.6125, thrLon: -122.3580, hdg: 284 },
+  { name: '28R', thrLat: 37.6278, thrLon: -122.3665, hdg: 284 },
+  { name: '10L', thrLat: 37.6210, thrLon: -122.3935, hdg: 104 },
+  { name: '10R', thrLat: 37.6058, thrLon: -122.3850, hdg: 104 },
+  { name: '19L', thrLat: 37.6310, thrLon: -122.3845, hdg: 192 },
+  { name: '19R', thrLat: 37.6305, thrLon: -122.3785, hdg: 192 },
+  { name: '01L', thrLat: 37.6075, thrLon: -122.3715, hdg: 12 },
+  { name: '01R', thrLat: 37.6080, thrLon: -122.3775, hdg: 12 },
+];
+
+/** Cross/along-track nm from a runway threshold along its landing heading. */
+function rwyTrackOffsets(lat, lon, thrLat, thrLon, hdg) {
+  const d = haversineNm(thrLat, thrLon, lat, lon);
+  const brg = bearingDeg(thrLat, thrLon, lat, lon);
+  const ang = angDiff(brg, hdg) * Math.PI / 180;
+  return {
+    distNm: d,
+    xtkNm: d * Math.sin(ang),
+    atkNm: d * Math.cos(ang), // + past thr along landing hdg; approach sits at negative atk
+  };
+}
+
+/** Soft Class B shelf containment (approx wedding cake). */
+function inSfoClassB(lat, lon, altFt) {
+  const distNm = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
+  if (altFt > 10500 || distNm > 32) return false;
+  for (let i = SFO_CLASS_B_SHELVES.length - 1; i >= 0; i--) {
+    const s = SFO_CLASS_B_SHELVES[i];
+    if (distNm <= s.rNm && altFt >= s.floorFt - 200 && altFt <= s.ceilFt + 200) return true;
+  }
+  // Core surface area always counts as pattern
+  if (distNm <= 7 && altFt <= 10000) return true;
+  return false;
+}
+
+/**
+ * Real KSFO final: extended centerline, track aligned, descending / toward field.
+ * Returns best match { rwy, xtkNm, atkNm, score } or null.
+ */
+function detectKsfoFinal(p) {
+  if (!p || p.onGround) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  if (altFt < 40 || altFt > 9000) return null;
+  const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  if (distKsfo > 18) return null;
+
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  const descending = vrFpm < -80;
+  const notClimbing = vrFpm < 400;
+  if (!notClimbing && altFt > 1500) return null;
+
+  let best = null;
+  for (const rw of KSFO_FINALS) {
+    const off = rwyTrackOffsets(p.lat, p.lon, rw.thrLat, rw.thrLon, rw.hdg);
+    // On approach: behind threshold along reciprocal, within ~12 nm final
+    if (off.atkNm > 0.6 || off.atkNm < -12.5) continue;
+    if (Math.abs(off.xtkNm) > 1.35) continue;
+
+    let trackOk = true;
+    if (p.track != null && Number.isFinite(p.track)) {
+      const td = Math.abs(angDiff(p.track, rw.hdg));
+      trackOk = td <= 28;
+      if (!trackOk) continue;
+    }
+    // Glideslope soft band: ~300 ft/nm + cushion
+    const along = Math.max(0.3, -off.atkNm);
+    const gsMax = 800 + along * 380;
+    if (altFt > gsMax) continue;
+
+    // Prefer descending + tight centerline + closer-in
+    let score = Math.abs(off.xtkNm) * 4 + along * 0.35;
+    if (descending) score *= 0.72;
+    if (p.track != null) score *= 0.85;
+    if (along < 6) score *= 0.9;
+
+    const cand = { rwy: rw.name, xtkNm: off.xtkNm, atkNm: off.atkNm, alongNm: along, score, descending };
+    if (!best || cand.score < best.score) best = cand;
+  }
+  return best;
+}
+
+function isOnKsfoFinal(p) {
+  return !!detectKsfoFinal(p);
+}
+
+/**
+ * Aircraft clearly associated with KSFO (not SQL/HAF/PAO/SJC-primary Bay GA).
+ * Include: on KSFO final / approach, inbound to KSFO, or inside SFO Class B pattern.
+ */
+function isKsfoAssociated(p) {
+  if (!p) return false;
+  const altFt = (p.altM || 0) / FT_M;
+  const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+
+  if (p.onGround) return distKsfo < 2.8; // KSFO surface only
+
+  if (detectKsfoFinal(p)) return true;
+  if (inSfoClassB(p.lat, p.lon, altFt)) return true;
+
+  // Satellite-field primary: near SQL/HAF/PAO/SJC and clearly not KSFO-bound
+  const near = nearestBayField(p.lat, p.lon);
+  if (near.field.icao !== 'KSFO' && near.distNm < 7 && distKsfo > near.distNm + 2.5) {
+    const brgK = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+    const tdK = p.track != null ? Math.abs(angDiff(p.track, brgK)) : 180;
+    const towardKsfo = tdK <= 55;
+    const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+    if (!(towardKsfo && vrFpm < -100 && distKsfo < 25)) return false;
+  }
+
+  if (distKsfo > 45) return false;
+
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+  const trackDiff = p.track != null ? Math.abs(angDiff(p.track, brg)) : 70;
+  const toward = trackDiff <= 95;
+  const descending = vrFpm < -50;
+  const climbingHard = vrFpm > 900 && altFt > 3500;
+  if (climbingHard && distKsfo > 12) return false;
+
+  // Closing distance to KSFO
+  let closing = false;
+  if (p._distKsfo != null && distKsfo < p._distKsfo - 0.15) closing = true;
+  if (p._prevDistKsfo != null && p._prevDistKsfo - distKsfo > 0.15) closing = true;
+
+  if (toward && (descending || closing || (altFt < 12000 && distKsfo < 32))) return true;
+  if (p.isArrival || isArrival(p)) return toward || distKsfo < 18;
+  // Tight local pattern / Class-B vicinity
+  if (distKsfo < 12 && altFt < 10000 && !climbingHard) return true;
+  return false;
 }
 
 /** Closing-speed ETA (minutes) toward a field; null if diverging / too slow. */
@@ -2190,6 +2327,9 @@ const _ckUp = new THREE.Vector3(0, 1, 0);
 let cockpitPrimaryId = null;
 let _ckSmoothInit = false;
 let inboundCache = []; // scored inbound GA from last ingest
+let finalCache = []; // KSFO-final aircraft
+let dualFinalActive = false;
+let camUserOverrideUntil = 0; // manual Follow/Orbit click lock (ms)
 
 
 // ─── UI wiring ───────────────────────────────────────────────────────────────
@@ -2337,16 +2477,21 @@ function frameOrbitOverview() {
   controls.update();
 }
 
-function setCameraMode(mode) {
+function setCameraMode(mode, opts) {
+  opts = opts || {};
   const next = mode === 'orbit' ? 'orbit' : 'follow';
   const prev = settings.cameraMode;
   settings.cameraMode = next;
   const isFollow = next === 'follow';
+  const isDual = !isFollow && dualFinalActive && finalCache.length >= 2;
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
-  if ($('uiCamMode')) $('uiCamMode').textContent = isFollow ? 'follow' : 'air loom';
-  controls.enabled = !isFollow;
-  controls.autoRotate = !isFollow && $('sAuto').checked;
+  if ($('uiCamMode')) {
+    $('uiCamMode').textContent = isFollow ? 'follow'
+      : (isDual ? 'dual final orbit' : 'air loom');
+  }
+  controls.enabled = !isFollow && !isDual; // dual drives its own framing
+  controls.autoRotate = !isFollow && !isDual && $('sAuto').checked;
   // Always clear any leftover multi-view scissor from older dual-follow builds
   renderer.setViewport(0, 0, innerWidth, innerHeight);
   renderer.setScissorTest(false);
@@ -2356,25 +2501,38 @@ function setCameraMode(mode) {
   if (isFollow) {
     // Keep prior offsets unless switching targets later
   } else if (prev === 'follow') {
-    frameOrbitOverview();
+    if (isDual) {
+      try { frameDualFinalOrbit(finalCache, true); } catch (_) { frameOrbitOverview(); }
+    } else {
+      frameOrbitOverview();
+    }
   }
   updateInfoPanel();
 }
-$('btnFollow').onclick = () => setCameraMode('follow');
-$('btnOrbit').onclick = () => setCameraMode('orbit');
+$('btnFollow').onclick = () => {
+  camUserOverrideUntil = performance.now() + 90000;
+  dualFinalActive = false;
+  setCameraMode('follow');
+};
+$('btnOrbit').onclick = () => {
+  camUserOverrideUntil = performance.now() + 90000;
+  setCameraMode('orbit');
+};
 $('sAuto').onchange = (e) => {
   if (settings.cameraMode === 'orbit') controls.autoRotate = e.target.checked;
 };
 setCameraMode(settings.cameraMode);
 
-/** Score whether private/GA is inbound to the Bay Area. */
+/** Score whether private/GA is inbound to KSFO (not Bay satellite fields). */
 function scoreInboundGa(p) {
   if (!p || p.onGround) return null;
   if (!(p.isPrivateGa || isPrivateOrGa(p))) return null;
+  if (!(p.isKsfo || isKsfoAssociated(p))) return null;
   const altFt = (p.altM || 0) / FT_M;
-  if (altFt < 50) return null; // essentially on deck
-  const { field, distNm } = nearestBayField(p.lat, p.lon);
-  if (distNm > 120) return null;
+  if (altFt < 50) return null;
+  const field = BAY_FIELDS[0]; // KSFO only
+  const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  if (distNm > 50) return null;
 
   const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
     : (p.vel != null ? p.vel / KT_MS : null);
@@ -2385,29 +2543,26 @@ function scoreInboundGa(p) {
   const descending = vrFpm < -40;
   const low = altFt < 14000;
   const close = distNm < 35;
+  const finalHit = p.finalInfo || detectKsfoFinal(p);
 
-  // Decreasing distance to nearest Bay field (from prior poll on this aircraft)
   let closingDist = false;
-  const prevD = (p._prevDistField != null) ? p._prevDistField
-    : (p._distField != null && distNm < p._distField - 0.15 ? p._distField : null);
-  if (p._distField != null && distNm < p._distField - 0.15) closingDist = true;
-  if (prevD != null && prevD - distNm > 0.15) closingDist = true;
+  if (p._distKsfo != null && distNm < p._distKsfo - 0.15) closingDist = true;
+  if (p._prevDistKsfo != null && p._prevDistKsfo - distNm > 0.15) closingDist = true;
 
-  const inbound = toward && (descending || low || close || closingDist);
-  // Also accept classic KSFO arrival heuristic for GA
+  const inbound = toward && (descending || low || close || closingDist || !!finalHit);
   const arr = p.isArrival || isArrival(p);
-  if (!inbound && !arr) return null;
+  if (!inbound && !arr && !finalHit) return null;
 
   const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
   const tca = timeToClosestApproachMin(p.lat, p.lon, p.track, gs, field.lat, field.lon);
   const etaUse = eta != null ? eta : (tca != null ? tca : distNm * 1.2);
 
-  // Prefer closer / sooner ETA / descending
   let score = etaUse;
   score += distNm * 0.15;
   if (descending) score *= 0.88;
   if (toward) score *= 0.92;
   if (arr) score *= 0.9;
+  if (finalHit) score *= 0.55; // strongly prefer aircraft on KSFO final
   if (!toward && arr) score *= 1.05;
 
   return {
@@ -2420,6 +2575,8 @@ function scoreInboundGa(p) {
     distNm,
     toward,
     descending,
+    onFinal: !!finalHit,
+    finalRwy: finalHit ? finalHit.rwy : null,
     gsKt: gs,
     altFt,
   };
@@ -2435,15 +2592,112 @@ function pickCockpitTargets(fromList) {
   scored.sort((a, b) => a.score - b.score);
   inboundCache = scored;
 
+  // Refresh on-final set (prefer tagged recs, fall back to detect)
+  const onFinal = [];
+  for (const p of src) {
+    const info = p.finalInfo || detectKsfoFinal(p);
+    if (info) {
+      p.finalInfo = info;
+      p.isOnFinal = true;
+      onFinal.push(p);
+    } else if (p.isOnFinal) {
+      p.isOnFinal = false;
+      p.finalInfo = null;
+    }
+  }
+  onFinal.sort((a, b) => (a.finalInfo?.score ?? 99) - (b.finalInfo?.score ?? 99));
+  finalCache = onFinal;
+
   if (!scored.length) {
     cockpitPrimaryId = null;
-    return;
+  } else {
+    // Single chase primary: prefer best on-final, else best inbound
+    const finalScored = scored.filter((s) => s.onFinal);
+    const nextId = (finalScored[0] || scored[0]).icao;
+    if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
+    cockpitPrimaryId = nextId;
   }
 
-  // Single chase: best inbound GA only (no secondary / dual / PiP)
-  const nextId = scored[0].icao;
-  if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
-  cockpitPrimaryId = nextId;
+  updateDualFinalCameraMode();
+}
+
+/** Auto wide Orbit when 2+ on KSFO final; else Follow (unless user overrode). */
+function updateDualFinalCameraMode() {
+  const nFinal = finalCache.length;
+  const now = performance.now();
+  const userLocked = now < camUserOverrideUntil;
+
+  if (nFinal >= 2) {
+    if (!userLocked) {
+      if (settings.cameraMode !== 'orbit') {
+        setCameraMode('orbit', { auto: true });
+      }
+      dualFinalActive = true;
+      // Frame immediately so first dual frame isn't overview
+      try { frameDualFinalOrbit(finalCache, true); } catch (_) {}
+    }
+  } else if (dualFinalActive) {
+    dualFinalActive = false;
+    if (!userLocked && settings.cameraMode === 'orbit') {
+      // Drop back to Follow for single / none
+      setCameraMode('follow', { auto: true });
+    }
+  }
+}
+
+/**
+ * Wide Air Loom Orbit framing both (or all) aircraft on KSFO final.
+ * Keeps airport in frame with generous padding — "wide view orbit".
+ */
+function frameDualFinalOrbit(recs, snap) {
+  const list = (recs && recs.length) ? recs : finalCache;
+  if (!list.length) return;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let n = 0;
+  for (const r of list) {
+    const p = r.display || r.target;
+    if (!p || !Number.isFinite(p.x)) continue;
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    n++;
+  }
+  // Always include KSFO origin so finals read relative to the field
+  minX = Math.min(minX, -2500); maxX = Math.max(maxX, 2500);
+  minZ = Math.min(minZ, -2500); maxZ = Math.max(maxZ, 2500);
+  minY = Math.min(minY, 0); maxY = Math.max(maxY, 800);
+  if (!n) return;
+
+  const cx = (minX + maxX) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
+  const cy = (minY + maxY) * 0.35;
+  const spanX = Math.max(4000, maxX - minX);
+  const spanZ = Math.max(4000, maxZ - minZ);
+  const span = Math.max(spanX, spanZ) * 1.85; // wide padding
+  const dist = Math.max(12000, span * 1.25);
+  const height = Math.max(6500, (maxY - minY) * 1.8 + span * 0.55);
+
+  const tgt = new THREE.Vector3(cx, Math.max(400, cy), cz);
+  // Slow orbital angle (dual-final dedicated motion; OrbitControls autoRotate off while dual)
+  const ang = (performance.now() / 1000) * 0.07;
+  const desired = new THREE.Vector3(
+    cx + Math.sin(ang) * dist,
+    height,
+    cz + Math.cos(ang) * dist
+  );
+
+  if (snap) {
+    controls.target.copy(tgt);
+    camera.position.copy(desired);
+  } else {
+    controls.target.lerp(tgt, 0.08);
+    camera.position.lerp(desired, 0.06);
+  }
+  camera.near = 20;
+  camera.far = 8e6;
+  camera.updateProjectionMatrix();
+  controls.update();
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
@@ -2514,7 +2768,7 @@ function updateCockpitCameras(dt) {
     // fallback: any closest airborne GA
     let best = null, bestD = Infinity;
     for (const r of aircraft.values()) {
-      if (r.onGround || !r.isPrivateGa) continue;
+      if (r.onGround || !r.isPrivateGa || r.isKsfo === false) continue;
       if (!Number.isFinite(r.display?.x) || !Number.isFinite(r.display?.y)) continue;
       if (r.dist < bestD) { bestD = r.dist; best = r; }
     }
@@ -2555,13 +2809,15 @@ function updateCockpitCameras(dt) {
   return true;
 }
 
-function buildIgCardHtml(rec) {
-  if (!rec) return '<div class="ig-empty">No inbound GA</div>';
+function buildIgCardHtml(rec, badge) {
+  if (!rec) return '<div class="ig-empty">No KSFO inbound</div>';
   const cs = (rec.callsign && rec.callsign.trim()) || rec.reg || rec.icao || '—';
   const altFt = Math.round((rec.altM || 0) / FT_M);
   const kt = spdKt(rec);
+  const b = badge || (rec.isOnFinal ? 'FINAL' : 'FOLLOW');
+  const rwy = rec.finalRwy || rec.finalInfo?.rwy;
   return (
-    `<div class="ig-head"><div class="ig-cs">${cs}</div><div class="ig-badge">FOLLOW</div></div>` +
+    `<div class="ig-head"><div class="ig-cs">${cs}${rwy ? ' · ' + rwy : ''}</div><div class="ig-badge">${b}</div></div>` +
     `<div class="ig-metrics">` +
       `<div><div class="k">Alt</div><div class="v">${altFt.toLocaleString()} ft</div></div>` +
       `<div><div class="k">GS</div><div class="v">${kt != null ? kt + ' kt' : '—'}</div></div>` +
@@ -2572,13 +2828,29 @@ function buildIgCardHtml(rec) {
 function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
-  if (settings.cameraMode !== 'follow') {
-    panel.classList.add('hidden');
+  // Show compact HUD in Follow, or dual-final Orbit summary
+  if (settings.cameraMode === 'follow') {
+    panel.classList.remove('hidden');
+    const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
+    igP.innerHTML = buildIgCardHtml(prim);
     return;
   }
-  panel.classList.remove('hidden');
-  const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
-  igP.innerHTML = buildIgCardHtml(prim);
+  if (dualFinalActive && finalCache.length >= 2) {
+    panel.classList.remove('hidden');
+    const a = finalCache[0], b = finalCache[1];
+    const csA = (a.callsign && a.callsign.trim()) || a.icao;
+    const csB = (b.callsign && b.callsign.trim()) || b.icao;
+    const rA = a.finalRwy || a.finalInfo?.rwy || '';
+    const rB = b.finalRwy || b.finalInfo?.rwy || '';
+    igP.innerHTML =
+      `<div class="ig-head"><div class="ig-cs">${csA} + ${csB}</div><div class="ig-badge">DUAL FINAL</div></div>` +
+      `<div class="ig-metrics">` +
+        `<div><div class="k">A</div><div class="v">${rA || 'final'}</div></div>` +
+        `<div><div class="k">B</div><div class="v">${rB || 'final'}</div></div>` +
+      `</div>`;
+    return;
+  }
+  panel.classList.add('hidden');
 }
 
 function showToast(msg, ms = 4000) {
@@ -2623,6 +2895,8 @@ function updateSelPanel(rec) {
     `<span>track</span><b>${track}</b>` +
     `<span>dist</span><b>${dist}</b>` +
     `<span>arr</span><b>${rec.isArrival ? 'yes' : 'no'}</b>` +
+    `<span>final</span><b>${rec.isOnFinal ? (rec.finalRwy || 'yes') : 'no'}</b>` +
+    `<span>KSFO</span><b>${rec.isKsfo ? 'yes' : 'no'}</b>` +
     `<span>src</span><b>${rec.source || '—'}</b>`;
   bar.classList.add('visible');
   none.style.display = 'none';
@@ -2636,7 +2910,7 @@ function renderArrivalsList(arrs) {
   lastArrivals = arrs;
   const el = $('arrivalsList');
   if (!arrs.length) {
-    el.innerHTML = '<div class="arr-empty">No private/GA in range</div>';
+    el.innerHTML = '<div class="arr-empty">No KSFO private/GA in range</div>';
     return;
   }
   const sorted = arrs.slice().sort((a, b) => a.dist - b.dist);
@@ -2644,9 +2918,10 @@ function renderArrivalsList(arrs) {
     const kt = spdKt(a);
     const altFt = Math.round((a.altM || 0) / FT_M);
     const sel = selectedId === a.icao ? ' selected' : '';
+    const finalTag = a.isOnFinal ? ` · FINAL ${a.finalInfo?.rwy || a.finalRwy || ''}`.trim() : '';
     return `<div class="arr-row${sel}" data-icao="${a.icao}">` +
-      `<div><div class="cs">${a.callsign || a.icao}</div>` +
-      `<div class="meta">${a.type || '????'} · ${a.cat || ''}</div></div>` +
+      `<div><div class="cs">${a.callsign || a.icao}${a.isOnFinal ? ' ✈' : ''}</div>` +
+      `<div class="meta">${a.type || '????'} · ${a.cat || ''}${finalTag}</div></div>` +
       `<div class="nums">${altFt.toLocaleString()} ft<br>${kt != null ? kt + ' kt' : '—'} · ${a.dist.toFixed(1)} nm</div>` +
       `</div>`;
   }).join('');
@@ -2799,7 +3074,7 @@ function createAircraft(icao, typeHint) {
     trailSide: new THREE.Vector3(1, 0, 0),
     lat: 0, lon: 0, altM: 0, track: 0, vel: 0, vr: 0, onGround: false, callsign: '',
     type: typeHint || null, reg: null, gsKt: null, squawk: null, cat: info.cat, modelKey: info.key,
-    span: info.span, len: info.len, dist: 0, isArrival: false, isPrivateGa: false,
+    span: info.span, len: info.len, dist: 0, isArrival: false, isPrivateGa: false, isKsfo: false, isOnFinal: false, finalInfo: null, finalRwy: null,
     source: '', _distField: null, _prevDistField: null,
     target: new THREE.Vector3(),
     display: new THREE.Vector3(),
@@ -3236,14 +3511,26 @@ function ingest(data) {
 
   const arrivals = parsed.filter((p) => p.isArrival);
 
-  // Tag private/GA on every parsed aircraft (used by filter + stats)
-  for (const p of parsed) p.isPrivateGa = isPrivateOrGa(p);
+  // Tag private/GA + KSFO association / final on every parsed aircraft
+  for (const p of parsed) {
+    p.isPrivateGa = isPrivateOrGa(p);
+    p.finalInfo = detectKsfoFinal(p);
+    p.isOnFinal = !!p.finalInfo;
+    p.isKsfo = isKsfoAssociated(p);
+  }
   const privateGa = parsed.filter((p) => p.isPrivateGa);
+  const ksfoGa = parsed.filter((p) => p.isPrivateGa && p.isKsfo);
+  const onFinalAll = parsed.filter((p) => p.isOnFinal);
 
   let list = parsed.filter((p) => {
     if (!settings.showGround && p.onGround) return false;
-    if (settings.trafficMode === 'ga' && !p.isPrivateGa) return false;
+    if (settings.trafficMode === 'ga') {
+      // Default product: ONLY KSFO-associated private/GA (not SQL/HAF/PAO Bay GA)
+      if (!p.isPrivateGa || !p.isKsfo) return false;
+    }
     if (settings.trafficMode === 'arrivals' && !p.isArrival) return false;
+    // Arrivals / all still prefer KSFO association for shown traffic unless filter set
+    if (settings.trafficMode === 'arrivals' && !p.isKsfo) return false;
     if (settings.filter) {
       const f = settings.filter;
       if (!(p.callsign.includes(f) || p.icao.toUpperCase().includes(f) || (p.type || '').includes(f))) return false;
@@ -3253,6 +3540,10 @@ function ingest(data) {
 
   if (list.length > MAX_AIRCRAFT) {
     list.sort((a, b) => {
+      const fA = a.isOnFinal ? 0 : 1, fB = b.isOnFinal ? 0 : 1;
+      if (fA !== fB) return fA - fB;
+      const kA = a.isKsfo ? 0 : 1, kB = b.isKsfo ? 0 : 1;
+      if (kA !== kB) return kA - kB;
       const agA = a.isPrivateGa ? 0 : 1, agB = b.isPrivateGa ? 0 : 1;
       if (agA !== agB) return agA - agB;
       const aa = a.isArrival ? 0 : 1, ba = b.isArrival ? 0 : 1;
@@ -3275,8 +3566,12 @@ function ingest(data) {
     const near = nearestBayField(p.lat, p.lon);
     rec._prevDistField = rec._distField;
     rec._distField = near.distNm;
+    rec._prevDistKsfo = rec._distKsfo;
+    rec._distKsfo = p.dist;
     p._prevDistField = rec._prevDistField;
     p._distField = near.distNm;
+    p._prevDistKsfo = rec._prevDistKsfo;
+    p._distKsfo = p.dist;
     Object.assign(rec, {
       callsign: p.callsign, lat: p.lat, lon: p.lon, altM: p.altM,
       onGround: p.onGround, vel: p.vel, track: p.track, vr: p.vr,
@@ -3285,6 +3580,8 @@ function ingest(data) {
       dist: p.dist, isArrival: p.isArrival, isPrivateGa: !!p.isPrivateGa, cat: p.cat || rec.cat,
       squawk: p.squawk || rec.squawk || null,
       nearestField: near.field.short, nearestFieldNm: near.distNm,
+      isKsfo: !!p.isKsfo, isOnFinal: !!p.isOnFinal, finalInfo: p.finalInfo || null,
+      finalRwy: p.finalInfo ? p.finalInfo.rwy : null,
     });
     // feed closing-distance into score via parsed proxy fields
     p._prevDistField = p._prevDistField;
@@ -3325,19 +3622,27 @@ function ingest(data) {
   $('acCount').textContent = String(aircraft.size);
   $('uiCount').textContent = String(aircraft.size);
   const gaShown = [...aircraft.values()].filter((r) => r.isPrivateGa).length;
-  const gaTotal = privateGa.length;
+  const gaTotal = ksfoGa.length; // KSFO-associated private/GA only
+  const finalN = [...aircraft.values()].filter((r) => r.isOnFinal).length;
   if ($('gaCount')) $('gaCount').textContent = String(settings.trafficMode === 'ga' ? aircraft.size : gaTotal);
   if ($('uiGaCount')) $('uiGaCount').textContent = String(gaTotal);
-  $('uiArrCount').textContent = String(arrivals.length);
-  // List panel: private/GA in default mode, arrivals otherwise
+  $('uiArrCount').textContent = String(arrivals.filter((a) => a.isKsfo).length);
+  if ($('uiFinalCount')) $('uiFinalCount').textContent = String(finalN || onFinalAll.length);
+  // List panel: KSFO private/GA in default mode, KSFO arrivals otherwise
   const listForPanel = settings.trafficMode === 'ga'
-    ? privateGa.slice().sort((a, b) => a.dist - b.dist).slice(0, 40)
-    : arrivals;
+    ? ksfoGa.slice().sort((a, b) => {
+        const fa = a.isOnFinal ? 0 : 1, fb = b.isOnFinal ? 0 : 1;
+        if (fa !== fb) return fa - fb;
+        return a.dist - b.dist;
+      }).slice(0, 40)
+    : arrivals.filter((a) => a.isKsfo);
   renderArrivalsList(listForPanel);
   if (selectedId && aircraft.has(selectedId)) updateSelPanel(aircraft.get(selectedId));
 
-  // Follow-target selection from live private/GA (prefer inbound)
-  const cockpitPool = [...aircraft.values()].filter((r) => r.isPrivateGa || settings.trafficMode !== 'ga');
+  // Follow-target selection from live KSFO private/GA (prefer final / inbound)
+  const cockpitPool = [...aircraft.values()].filter((r) =>
+    (r.isPrivateGa || settings.trafficMode !== 'ga') && (r.isKsfo || settings.trafficMode === 'all')
+  );
   // Attach prev dist onto pool objects for scoring
   for (const r of cockpitPool) {
     r._prevDistField = r._prevDistField;
@@ -3509,7 +3814,12 @@ function animate() {
       updateInfoPanel();
     }
   } else {
-    controls.update();
+    // Dual-final wide Orbit: continuously re-frame both aircraft
+    if (dualFinalActive && finalCache.length >= 2 && settings.cameraMode === 'orbit') {
+      try { frameDualFinalOrbit(finalCache, false); } catch (_) { controls.update(); }
+    } else {
+      controls.update();
+    }
     renderer.autoClear = true;
     renderer.setViewport(0, 0, innerWidth, innerHeight);
     renderer.setScissorTest(false);

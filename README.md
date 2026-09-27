@@ -1,10 +1,11 @@
 # AirLoom SFO
 
-Standalone browser 3D ADS-B view of KSFO airspace — **defaults to private / GA traffic** (inspired by [Air Loom](https://objectiveunclear.com/airloom)).
+Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-associated private / GA** (inspired by [Air Loom](https://objectiveunclear.com/airloom)).
 
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v5)
 
 ## Local
 
@@ -25,16 +26,18 @@ Detailed GLB airframes live in `public/models/` (see `ATTRIBUTION.md` + `icao-ma
 ICAO type codes map to family models (e.g. B752 → 757 family, B738 → 737, E75L → E-Jet).
 Licenses: amvlab CC BY 4.0 + Flightradar24/FlightGear GPLv2. No payware.
 
-
 ## Traffic modes
 
-Default **Private / GA** filters to light aircraft, turboprops, bizjets, and helicopters
-(airliners hidden). Switch to **Arrivals** or **All traffic** in the drawer.
+Default **Private / GA** shows only aircraft **clearly associated with KSFO**:
+inbound to KSFO, on approach/final (runway extended centerline + descending + toward field),
+or inside the SFO Class B pattern. SQL / HAF / PAO / SJC-primary Bay GA is hidden.
+
+Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
 
 ## Camera & visual modes
 
-- **Follow** (default): elevated chase on the nearest inbound private/GA toward
-  KSFO / SQL / HAF / PAO / SJC. Wheel/pinch zoom + drag orbit around the target.
+- **Follow** (default when ≤1 on final): elevated chase on the best KSFO inbound /
+  final private/GA. Wheel/pinch zoom + drag orbit around the target.
   Basemap is **USGS ImageryOnly** ultra-HD (keyless, CORS-ok NAIP-class; ESRI World
   Imagery fallback). Static stack **z8 / z11 / z13 / z15 / z16** around KSFO plus a
   denser **z14–z16 chase inset** that tracks the aircraft so tiles stay sharp under
@@ -44,5 +47,9 @@ Default **Private / GA** filters to light aircraft, turboprops, bizjets, and hel
   z12), translucent Class B / Bay airspace shells, altitude-colored glow dots +
   thin trails, vertical drop-lines, and large floating city labels — modeled after
   the original Air Loom look. (Orbit is stylized dark, not satellite.)
+- **Dual-final Orbit** (auto): when **2+** aircraft are on a KSFO final, camera
+  switches to a **wide Orbit** framing both (airport kept in view). Drops back to
+  Follow when fewer than two remain on final. Manual Follow/Orbit clicks lock out
+  auto-switch for ~90s.
 
-Single chase only (no dual / PiP). Coverage ≈ 250 mi around KSFO.
+Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated only.
