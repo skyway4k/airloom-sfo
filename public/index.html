@@ -422,7 +422,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v2'; // upscale polish: glass HUD, refined glow, luxury Orbit
+const BUILD_MARK = 'airloom-v3'; // Follow USGS ImageryOnly (keyless hi-res); Orbit dark Carto
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1639,10 +1639,18 @@ function makeEarthBase(parent, dark) {
   }
 }
 
+/** Keyless, CORS-* World Imagery-class tiles (USGS / The National Map). No API key. */
+const FOLLOW_TILE_TMPL = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';
+const FOLLOW_TILE_URL = (zz, ty, tx) =>
+  `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zz}/${ty}/${tx}`;
+/** ESRI fallback if USGS mosaic fails (also keyless / CORS-*). */
+const FOLLOW_TILE_FALLBACK_URL = (zz, ty, tx) =>
+  `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`;
+window.__AIRLOOM_FOLLOW_TILE = FOLLOW_TILE_TMPL;
+
 async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   opts = opts || {};
-  const tileUrlFn = opts.tileUrl || ((zz, ty, tx) =>
-    `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`);
+  const tileUrlFn = opts.tileUrl || FOLLOW_TILE_URL;
   const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
   const n = span * 2 + 1;
   const size = 256 * n;
@@ -1737,18 +1745,27 @@ groundGroup.add(darkGroundGroup);
 groundGroup.add(airspaceGroup);
 groundGroup.add(cityLabelGroup);
 
-/** Photoreal ESRI World Imagery — used under Follow chase. */
+/** Photoreal USGS ImageryOnly (NAIP-class Bay Area) — Follow chase. Keyless / CORS-*. */
 async function loadSatBasemap() {
   while (satGroundGroup.children.length) satGroundGroup.remove(satGroundGroup.children[0]);
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
-  // Wide ~250 mi + mid Bay + sharp chase inset
-  const wide = await fetchTileLayer(8, 4, '#3f5c45', true);
+  // Wide ~250 mi + mid Bay + sharp chase inset (USGS max useful ~z16 over CONUS)
+  const usgs = { tileUrl: FOLLOW_TILE_URL };
+  const esriFb = { tileUrl: FOLLOW_TILE_FALLBACK_URL };
+  let wide = await fetchTileLayer(8, 4, '#2f4a55', true, usgs);
+  if (!wide) wide = await fetchTileLayer(8, 4, '#2f4a55', true, esriFb);
   if (wide) { wide.mesh.position.y = 0; satGroundGroup.add(wide.mesh); }
-  const mid = await fetchTileLayer(11, 3, '#456448', true);
+  let mid = await fetchTileLayer(12, 3, '#3d5c48', true, usgs);
+  if (!mid) mid = await fetchTileLayer(12, 3, '#3d5c48', true, esriFb);
   if (mid) { mid.mesh.position.y = 0.3; satGroundGroup.add(mid.mesh); }
-  const inset = await fetchTileLayer(13, 2, '#4a6a4c', true);
+  let inset = await fetchTileLayer(15, 2, '#456a4c', true, usgs);
+  if (!inset) inset = await fetchTileLayer(15, 2, '#456a4c', true, esriFb);
   if (inset) { inset.mesh.position.y = 0.6; satGroundGroup.add(inset.mesh); }
+  // Extra-sharp runway/terminal detail under chase (USGS z16)
+  let detail = await fetchTileLayer(16, 1, '#4a6e50', true, usgs);
+  if (!detail) detail = await fetchTileLayer(16, 1, '#4a6e50', true, esriFb);
+  if (detail) { detail.mesh.position.y = 0.85; satGroundGroup.add(detail.mesh); }
   groundReady = true;
 }
 
@@ -1762,8 +1779,8 @@ async function loadDarkBasemap() {
     wide.mesh.position.y = 0;
     darkGroundGroup.add(wide.mesh);
   } else {
-    // Fallback: darken ESRI imagery
-    const fb = await fetchTileLayer(8, 3, '#05070c', false, { darkStylize: true });
+    // Fallback: darken World Imagery (keyless)
+    const fb = await fetchTileLayer(8, 3, '#05070c', false, { tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true });
     if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
   }
   const inset = await fetchTileLayer(11, 2, '#080c14', false, { tileUrl: carto });
