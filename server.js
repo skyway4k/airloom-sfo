@@ -16,7 +16,7 @@ const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
 const UA = 'AirLoomSFO/1.2 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
 
-const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 50 };
+const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 217 }; // ≈250 statute mi
 const ADSB_CACHE_FRESH_MS = 22000;
 const ADSB_CACHE_STALE_MS = 10 * 60 * 1000;
 const BG_REFRESH_MS = 20000;
@@ -253,7 +253,7 @@ function orderedSources() {
 }
 
 async function fetchAdsbMulti(lat, lon, distNm) {
-  const dist = Math.max(1, Math.min(250, Math.round(Number(distNm) || 50)));
+  const dist = Math.max(1, Math.min(250, Math.round(Number(distNm) || 217)));
   const key = adsbCacheKey(lat, lon, dist);
   const now = Date.now();
   let entry = cacheByKey.get(key);
@@ -372,7 +372,7 @@ async function handleAdsbStates(query, res) {
   if (query.lat != null && query.lon != null) {
     lat = parseFloat(query.lat);
     lon = parseFloat(query.lon);
-    dist = parseFloat(query.dist != null ? query.dist : 50);
+    dist = parseFloat(query.dist != null ? query.dist : 217);
     if ([lat, lon, dist].some(Number.isNaN)) {
       sendJSON(res, 400, { error: 'invalid lat/lon/dist' });
       return;

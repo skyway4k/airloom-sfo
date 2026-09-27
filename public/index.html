@@ -178,90 +178,43 @@
   }
   #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
 
-  /* Follow-mode infographic (top-right glass) */
+  /* Follow-mode compact HUD (top-right glass) — essentials only */
   #infoPanel {
     position: absolute; top: max(14px, env(safe-area-inset-top)); right: 10px;
-    z-index: 12; pointer-events: none; width: min(220px, calc(100vw - 24px));
-    display: flex; flex-direction: column; gap: 5px;
+    z-index: 12; pointer-events: none; width: auto; max-width: min(168px, calc(100vw - 24px));
   }
   #infoPanel .ig-card {
-    background: linear-gradient(145deg, rgba(14,22,34,0.88), rgba(8,12,20,0.82));
+    background: linear-gradient(145deg, rgba(14,22,34,0.86), rgba(8,12,20,0.78));
     border: 1px solid rgba(100, 170, 230, 0.28);
-    border-radius: 8px;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 6px 22px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
-    padding: 7px 9px 6px;
+    border-radius: 7px;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    padding: 5px 8px 5px;
     font-family: var(--mono); color: var(--text);
     pointer-events: auto;
   }
-  #infoPanel .ig-card.secondary {
-    opacity: 0.92; border-color: rgba(78, 205, 196, 0.35);
-  }
   #infoPanel .ig-head {
     display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
-    margin-bottom: 3px;
+    margin-bottom: 2px;
   }
   #infoPanel .ig-cs {
-    font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #f0f7ff;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: #f0f7ff;
   }
   #infoPanel .ig-badge {
-    font-size: 7px; letter-spacing: 0.1em; text-transform: uppercase;
+    font-size: 6px; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--accent); background: rgba(62,207,142,0.12);
     border: 1px solid rgba(62,207,142,0.35); border-radius: 999px;
-    padding: 1px 5px; white-space: nowrap;
+    padding: 1px 4px; white-space: nowrap;
   }
-  #infoPanel .ig-badge.sec { color: var(--cyan); background: rgba(78,205,196,0.1); border-color: rgba(78,205,196,0.35); }
-  #infoPanel .ig-type {
-    font-size: 9px; color: #a8c0d4; margin-bottom: 5px; line-height: 1.25;
+  #infoPanel .ig-metrics {
+    display: flex; gap: 8px; font-size: 9px; line-height: 1.2;
   }
-  #infoPanel .ig-type b { color: #e0eef8; font-weight: 600; }
-  #infoPanel .ig-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px;
-    font-size: 9px;
-  }
-  #infoPanel .ig-grid .k { color: #6a849a; font-size: 7px; letter-spacing: 0.05em; text-transform: uppercase; }
-  #infoPanel .ig-grid .v { color: #e8f4ff; font-weight: 600; font-size: 10px; }
-  #infoPanel .ig-foot {
-    margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(80,140,200,0.18);
-    font-size: 8px; color: #8aa0b4; display: flex; justify-content: space-between; gap: 6px;
-  }
-  #infoPanel .ig-foot strong { color: var(--cyan); font-weight: 600; }
+  #infoPanel .ig-metrics .k { color: #6a849a; font-size: 6.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+  #infoPanel .ig-metrics .v { color: #e8f4ff; font-weight: 600; font-size: 10px; }
   #infoPanel .ig-empty {
-    color: var(--muted); font-size: 9px; padding: 2px 0;
+    color: var(--muted); font-size: 9px; padding: 1px 0;
   }
   #infoPanel.hidden, #infoPanel .ig-card.hidden { display: none; }
-
-  #dualFrame {
-    position: absolute; inset: 0; z-index: 3; pointer-events: none;
-    display: none;
-  }
-  #dualFrame.on { display: block; }
-  #dualFrame .split-line {
-    position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
-    background: linear-gradient(180deg, transparent, rgba(78,205,196,0.55), transparent);
-    transform: translateX(-50%);
-  }
-  #dualFrame .pip-frame {
-    position: absolute; right: 14px; bottom: max(56px, env(safe-area-inset-bottom));
-    width: min(34vw, 280px); height: min(28vh, 200px);
-    border: 1px solid rgba(78,205,196,0.5); border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.55);
-    display: none;
-  }
-  #dualFrame.pip .pip-frame { display: block; }
-  #dualFrame.pip .split-line { display: none; }
-  #dualFrame .tag {
-    position: absolute; top: 8px; left: 10px;
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
-    color: #cfe8ff; text-shadow: 0 1px 6px #000; background: rgba(0,0,0,0.45);
-    padding: 3px 8px; border-radius: 4px;
-  }
-  #dualFrame .tag.b { left: auto; right: 10px; }
-  #dualFrame.pip .tag.a { display: none; }
-  #dualFrame.pip .tag.b {
-    right: 22px; bottom: calc(max(56px, env(safe-area-inset-bottom)) + min(28vh, 200px) - 28px);
-    top: auto; left: auto;
-  }
 
   #stats.compact-hud { opacity: 0.85; }
 
@@ -273,10 +226,10 @@
     #camBar button { padding: 9px 14px; font-size: 12px; }
     #infoPanel {
       top: max(52px, calc(env(safe-area-inset-top) + 44px));
-      right: 8px; width: min(200px, calc(100vw - 56px));
+      right: 8px; max-width: min(150px, calc(100vw - 56px));
     }
-    #infoPanel .ig-cs { font-size: 11px; }
-    #infoPanel .ig-grid .v { font-size: 9px; }
+    #infoPanel .ig-cs { font-size: 10px; }
+    #infoPanel .ig-metrics .v { font-size: 9px; }
     #hud #stats { display: none; }
   }
 
@@ -312,16 +265,8 @@
   <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
-<div id="dualFrame" aria-hidden="true">
-  <div class="split-line"></div>
-  <div class="pip-frame"></div>
-  <div class="tag a">PRIMARY</div>
-  <div class="tag b">SECONDARY</div>
-</div>
-
 <div id="infoPanel" class="hidden">
   <div class="ig-card" id="igPrimary"></div>
-  <div class="ig-card secondary hidden" id="igSecondary"></div>
 </div>
 
 <div id="hud">
@@ -371,8 +316,8 @@
     <div class="section">
       <h3>View</h3>
       <div class="row"><label>Camera</label><span class="val" id="uiCamMode">follow</span></div>
-      <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">50</span></div>
-      <input type="range" id="sRadius" min="15" max="120" value="50" step="5" />
+      <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">217</span></div>
+      <input type="range" id="sRadius" min="30" max="250" value="217" step="1" />
       <div class="row"><label>Trail length</label><span class="val" id="vTrail">80</span></div>
       <input type="range" id="sTrail" min="5" max="200" value="80" step="5" />
       <div class="row"><label>Altitude scale</label><span class="val" id="vAltScale">1.2</span></div>
@@ -438,7 +383,7 @@ const ORIGIN = known || AIRPORTS.KSFO;
 const UNKNOWN_APT = !known && params.get('airport');
 
 document.getElementById('hudAirport').textContent = ORIGIN.icao;
-document.getElementById('hudSub').textContent = 'San Francisco Bay · private & GA ADS-B';
+document.getElementById('hudSub').textContent = 'KSFO · ~250 mi · private & GA ADS-B';
 if (UNKNOWN_APT) {
   const n = document.getElementById('hudNote');
   n.style.display = 'block';
@@ -449,11 +394,13 @@ const R_EARTH = 6378137;
 const NM_M = 1852;
 const FT_M = 0.3048;
 const KT_MS = 0.514444;
-const MAX_AIRCRAFT = 400;
+const MAX_AIRCRAFT = 500;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
+/** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
+const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'follow-v5'; // trails-live + brighter HD map
+const BUILD_MARK = 'follow-v6'; // compact HUD, single chase, ~250 mi map
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1457,17 +1404,19 @@ if ('toneMapping' in renderer) {
 
 const scene = new THREE.Scene();
 // Soft haze — light enough to read the Bay, not night-crush
-scene.fog = new THREE.FogExp2(0xb7d0e8, 0.0000045);
+// Thin haze so ~250 mi ground remains readable from high orbit
+scene.fog = new THREE.FogExp2(0xb7d0e8, 0.00000115);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 50, 5e6);
-camera.position.set(18000, 14000, 22000);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 50, 8e6);
+// Default framing pulls back to show ~250 statute mi around KSFO
+camera.position.set(160000, 130000, 190000);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.maxPolarAngle = Math.PI * 0.48;
 controls.minDistance = 800;
-controls.maxDistance = 280000;
+controls.maxDistance = 1.35e6;
 controls.target.set(0, 0, 0);
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.35;
@@ -1486,7 +1435,8 @@ scene.add(hemi);
 const groundGroup = new THREE.Group();
 scene.add(groundGroup);
 
-const GROUND_M = 220000;
+// ~250 statute mi radius → ~800 km diameter fallback plane
+const GROUND_M = Math.round(DEFAULT_RADIUS_NM * 2 * NM_M * 1.05);
 let groundReady = false;
 
 function makeRunwaySketch() {
@@ -1559,10 +1509,10 @@ function tileToLatLon(x, y, z) {
 
 async function loadSatGround() {
   makeGridFallback();
-  // z=13 ≈ 2× linear vs z=11; 5×5 tiles keep Bay Area covered without huge downloads
-  const z = 13;
+  // z=8 + 7×7 tiles ≈ 230+ nm radius around KSFO (~250 statute mi) without huge downloads
+  const z = 8;
   const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
-  const span = 2;
+  const span = 3;
   const size = 256 * (span * 2 + 1);
   const cvs = document.createElement('canvas');
   cvs.width = size; cvs.height = size;
@@ -1586,14 +1536,14 @@ async function loadSatGround() {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     const done = () => resolve();
-    const t = setTimeout(done, 4000);
+    const t = setTimeout(done, 8000);
     img.onload = () => { clearTimeout(t); ctx.drawImage(img, px, py); loaded++; resolve(); };
     img.onerror = () => { clearTimeout(t); resolve(); };
     img.src = url;
   })));
   await Promise.race([
     tilePromise,
-    new Promise((r) => setTimeout(r, 5000)),
+    new Promise((r) => setTimeout(r, 12000)),
   ]);
 
   if (loaded < total * 0.3) return;
@@ -1672,7 +1622,7 @@ const glowTex = makeGlowSprite();
 const aircraft = new Map();
 let selectedId = null;
 let settings = {
-  radiusNm: 50,
+  radiusNm: DEFAULT_RADIUS_NM,
   trailLen: 80,
   altScale: 1.2,
   showGround: false,
@@ -1686,24 +1636,15 @@ let settings = {
 let lastArrivals = [];
 
 // ─── Follow (chase-above) camera state ───────────────────────────────────────
-const cockpitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 4e5);
-const cockpitCamB = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 4e5);
+const cockpitCam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 20, 1.6e6);
 const _ckPos = new THREE.Vector3();
 const _ckLook = new THREE.Vector3();
 const _ckPosSm = new THREE.Vector3();
 const _ckLookSm = new THREE.Vector3();
-const _ckPosB = new THREE.Vector3();
-const _ckLookB = new THREE.Vector3();
-const _ckPosBSm = new THREE.Vector3();
-const _ckLookBSm = new THREE.Vector3();
 const _ckFwd = new THREE.Vector3();
 const _ckUp = new THREE.Vector3(0, 1, 0);
 let cockpitPrimaryId = null;
-let cockpitSecondaryId = null;
-let cockpitDual = false;
-let cockpitDualLayout = 'split'; // 'split' | 'pip'
 let _ckSmoothInit = false;
-let _ckSmoothInitB = false;
 let inboundCache = []; // scored inbound GA from last ingest
 
 
@@ -1837,15 +1778,8 @@ function setCameraMode(mode) {
   if ($('uiCamMode')) $('uiCamMode').textContent = settings.cameraMode;
   controls.enabled = !isFollow;
   controls.autoRotate = !isFollow && $('sAuto').checked;
-  if (!isFollow) {
-    $('dualFrame').classList.remove('on', 'pip');
-    _ckSmoothInit = false;
-    _ckSmoothInitB = false;
-  } else {
-    // snap smooth state on next frame
-    _ckSmoothInit = false;
-    _ckSmoothInitB = false;
-  }
+  // snap smooth state on next frame when (re)entering follow
+  _ckSmoothInit = false;
   updateInfoPanel();
 }
 $('btnFollow').onclick = () => setCameraMode('follow');
@@ -1862,7 +1796,7 @@ function scoreInboundGa(p) {
   const altFt = (p.altM || 0) / FT_M;
   if (altFt < 50) return null; // essentially on deck
   const { field, distNm } = nearestBayField(p.lat, p.lon);
-  if (distNm > 90) return null;
+  if (distNm > 120) return null;
 
   const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
     : (p.vel != null ? p.vel / KT_MS : null);
@@ -1925,29 +1859,11 @@ function pickCockpitTargets(fromList) {
 
   if (!scored.length) {
     cockpitPrimaryId = null;
-    cockpitSecondaryId = null;
-    cockpitDual = false;
     return;
   }
 
-  const primary = scored[0];
-  cockpitPrimaryId = primary.icao;
-  cockpitSecondaryId = null;
-  cockpitDual = false;
-
-  if (scored.length >= 2) {
-    const secondary = scored[1];
-    const etaDiff = Math.abs((primary.etaMin || 0) - (secondary.etaMin || 0));
-    // Dual when ETAs within ~5 minutes, or along-track / score separation is tight
-    const closeInTime = etaDiff <= 5.0;
-    const bothSoon = (primary.etaMin || 99) <= 25 && (secondary.etaMin || 99) <= 25 && etaDiff <= 5.5;
-    const scoreNear = Math.abs(primary.score - secondary.score) < 4 && etaDiff <= 6;
-    if (closeInTime || bothSoon || scoreNear) {
-      cockpitSecondaryId = secondary.icao;
-      cockpitDual = true;
-      cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
-    }
-  }
+  // Single chase: best inbound GA only (no secondary / dual / PiP)
+  cockpitPrimaryId = scored[0].icao;
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
@@ -1997,7 +1913,6 @@ function camPosFinite(cam) {
 
 function updateCockpitCameras(dt) {
   const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
-  const sec = (cockpitDual && cockpitSecondaryId) ? aircraft.get(cockpitSecondaryId) : null;
 
   if (!prim || !prim.alive) {
     // fallback: any closest airborne GA
@@ -2008,9 +1923,7 @@ function updateCockpitCameras(dt) {
       if (r.dist < bestD) { bestD = r.dist; best = r; }
     }
     if (!best) {
-      cockpitDual = false;
       _ckSmoothInit = false;
-      _ckSmoothInitB = false;
       return false;
     }
     cockpitPrimaryId = best.icao;
@@ -2039,114 +1952,33 @@ function updateCockpitCameras(dt) {
     _ckSmoothInit = false;
     return false;
   }
-
-  if (sec && sec.alive) {
-    if (!cockpitEyeFor(sec, _ckPosB, _ckLookB, 1)) {
-      cockpitDual = false;
-      _ckSmoothInitB = false;
-    } else {
-      const alphaB = 1 - Math.exp(-3.2 * dt);
-      if (!_ckSmoothInitB || !Number.isFinite(_ckPosBSm.x)) {
-        _ckPosBSm.copy(_ckPosB); _ckLookBSm.copy(_ckLookB); _ckSmoothInitB = true;
-      } else {
-        _ckPosBSm.lerp(_ckPosB, alphaB);
-        _ckLookBSm.lerp(_ckLookB, alphaB);
-      }
-      if (!Number.isFinite(_ckPosBSm.x) || !Number.isFinite(_ckLookBSm.x)) {
-        cockpitDual = false;
-        _ckSmoothInitB = false;
-      } else {
-        cockpitCamB.position.copy(_ckPosBSm);
-        cockpitCamB.up.set(0, 1, 0);
-        cockpitCamB.lookAt(_ckLookBSm);
-        if (!camPosFinite(cockpitCamB)) {
-          cockpitDual = false;
-          _ckSmoothInitB = false;
-        }
-      }
-    }
-  } else {
-    cockpitDual = false;
-    _ckSmoothInitB = false;
-  }
   return true;
 }
 
-function fmtEta(min) {
-  if (min == null || !isFinite(min)) return '—';
-  if (min < 1) return '<1 min';
-  if (min >= 90) return Math.round(min / 60) + ' h';
-  return Math.round(min) + ' min';
-}
-
-function fmtVr(rec) {
-  if (rec.vr == null || isNaN(rec.vr)) return '—';
-  const fpm = Math.round(rec.vr / 0.00508);
-  const sign = fpm > 0 ? '+' : '';
-  return sign + fpm.toLocaleString() + ' fpm';
-}
-
-function buildIgCardHtml(rec, scored, role) {
+function buildIgCardHtml(rec) {
   if (!rec) return '<div class="ig-empty">No inbound GA</div>';
   const cs = (rec.callsign && rec.callsign.trim()) || rec.reg || rec.icao || '—';
-  const typ = rec.type || '—';
-  const plain = plainTypeName(rec.type);
   const altFt = Math.round((rec.altM || 0) / FT_M);
   const kt = spdKt(rec);
-  const hdg = rec.track != null ? Math.round(rec.track) : null;
-  const field = scored?.field || nearestBayField(rec.lat, rec.lon).field;
-  const distNm = scored?.distNm != null ? scored.distNm : nearestBayField(rec.lat, rec.lon).distNm;
-  const eta = scored?.etaExact != null ? scored.etaExact : scored?.etaMin;
-  const reg = rec.reg && rec.reg !== cs ? rec.reg : null;
-  const sq = rec.squawk || null;
-  const badge = role === 'secondary' ? 'SECONDARY' : (cockpitDual ? 'PRIMARY' : 'FOLLOW');
-  const badgeCls = role === 'secondary' ? 'ig-badge sec' : 'ig-badge';
   return (
-    `<div class="ig-head"><div class="ig-cs">${cs}</div><div class="${badgeCls}">${badge}</div></div>` +
-    `<div class="ig-type"><b>${typ}</b>${plain ? ' · ' + plain : ''}${reg ? ' · ' + reg : ''}</div>` +
-    `<div class="ig-grid">` +
-      `<div><div class="k">Altitude</div><div class="v">${altFt.toLocaleString()} ft</div></div>` +
-      `<div><div class="k">Groundspeed</div><div class="v">${kt != null ? kt + ' kt' : '—'}</div></div>` +
-      `<div><div class="k">Heading</div><div class="v">${hdg != null ? hdg + '°' : '—'}</div></div>` +
-      `<div><div class="k">Vert rate</div><div class="v">${fmtVr(rec)}</div></div>` +
-      `<div><div class="k">To ${field.short}</div><div class="v">${distNm.toFixed(1)} nm</div></div>` +
-      `<div><div class="k">ETA</div><div class="v">${fmtEta(eta)}</div></div>` +
-    `</div>` +
-    `<div class="ig-foot"><span>hex <strong>${rec.icao}</strong></span>` +
-      `<span>${sq ? 'sqk <strong>' + sq + '</strong>' : (scored?.descending ? 'descending' : 'inbound')}</span></div>`
+    `<div class="ig-head"><div class="ig-cs">${cs}</div><div class="ig-badge">FOLLOW</div></div>` +
+    `<div class="ig-metrics">` +
+      `<div><div class="k">Alt</div><div class="v">${altFt.toLocaleString()} ft</div></div>` +
+      `<div><div class="k">GS</div><div class="v">${kt != null ? kt + ' kt' : '—'}</div></div>` +
+    `</div>`
   );
 }
 
 function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
-  const igS = $('igSecondary');
   if (settings.cameraMode !== 'follow') {
     panel.classList.add('hidden');
     return;
   }
   panel.classList.remove('hidden');
   const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
-  const scoredP = inboundCache.find((s) => s.icao === cockpitPrimaryId) || null;
-  igP.innerHTML = buildIgCardHtml(prim, scoredP, 'primary');
-  if (cockpitDual && cockpitSecondaryId) {
-    const sec = aircraft.get(cockpitSecondaryId);
-    const scoredS = inboundCache.find((s) => s.icao === cockpitSecondaryId) || null;
-    igS.innerHTML = buildIgCardHtml(sec, scoredS, 'secondary');
-    igS.classList.remove('hidden');
-  } else {
-    igS.classList.add('hidden');
-  }
-}
-
-function syncDualChrome() {
-  const fr = $('dualFrame');
-  if (settings.cameraMode === 'follow' && cockpitDual && cockpitSecondaryId) {
-    fr.classList.add('on');
-    fr.classList.toggle('pip', cockpitDualLayout === 'pip');
-  } else {
-    fr.classList.remove('on', 'pip');
-  }
+  igP.innerHTML = buildIgCardHtml(prim);
 }
 
 function showToast(msg, ms = 4000) {
@@ -2228,19 +2060,6 @@ function renderArrivalsList(arrs) {
         if (settings.cameraMode === 'follow' && !rec.onGround) {
           cockpitPrimaryId = id;
           _ckSmoothInit = false;
-          const scored = scoreInboundGa(rec);
-          if (scored) {
-            const others = inboundCache.filter((s) => s.icao !== id);
-            if (others.length && Math.abs((scored.etaMin || 0) - (others[0].etaMin || 0)) <= 5) {
-              cockpitSecondaryId = others[0].icao;
-              cockpitDual = true;
-              cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
-            } else {
-              cockpitSecondaryId = null;
-              cockpitDual = false;
-            }
-          }
-          syncDualChrome();
           updateInfoPanel();
         } else {
           controls.target.lerp(rec.display, 0.6);
@@ -2921,34 +2740,14 @@ function ingest(data) {
     r._prevDistField = r._prevDistField;
   }
   pickCockpitTargets(cockpitPool);
-  // If selected aircraft is inbound GA, prefer it as primary
+  // If selected aircraft is inbound GA, prefer it as the single chase target
   if (selectedId && aircraft.has(selectedId)) {
     const sel = aircraft.get(selectedId);
     if (sel && (sel.isPrivateGa || isPrivateOrGa(sel)) && !sel.onGround) {
       const scored = scoreInboundGa(sel);
-      if (scored) {
-        cockpitPrimaryId = sel.icao;
-        // keep dual partner if still valid & within 5 min
-        if (cockpitDual && cockpitSecondaryId && cockpitSecondaryId !== sel.icao) {
-          const sec = inboundCache.find((s) => s.icao === cockpitSecondaryId);
-          if (sec && Math.abs((scored.etaMin || 0) - (sec.etaMin || 0)) <= 5.5) {
-            /* keep */
-          } else {
-            // re-evaluate dual vs new primary
-            const others = inboundCache.filter((s) => s.icao !== sel.icao);
-            if (others.length && Math.abs((scored.etaMin || 0) - (others[0].etaMin || 0)) <= 5) {
-              cockpitSecondaryId = others[0].icao;
-              cockpitDual = true;
-            } else {
-              cockpitSecondaryId = null;
-              cockpitDual = false;
-            }
-          }
-        }
-      }
+      if (scored) cockpitPrimaryId = sel.icao;
     }
   }
-  syncDualChrome();
   updateInfoPanel();
 }
 
@@ -3039,31 +2838,19 @@ function animate() {
     }
   }
 
-  // Update Follow cameras BEFORE labels so projection never uses a stale/NaN eye
+  // Update Follow camera BEFORE labels so projection never uses a stale/NaN eye
   let followOk = false;
-  let followDual = false;
   const w = innerWidth, h = innerHeight;
   if (settings.cameraMode === 'follow') {
     followOk = updateCockpitCameras(dt);
-    followDual = followOk && cockpitDual && cockpitSecondaryId && aircraft.has(cockpitSecondaryId);
-    syncDualChrome();
   }
 
-  // Labels: orbit cam, or follow cam (with correct dual viewport mapping)
+  // Labels: orbit cam, or single follow chase cam
   for (const rec of aircraft.values()) {
     if (settings.cameraMode === 'follow') {
       if (!followOk) {
         // No inbound GA — match the orbit fallback render so labels don't explode
         updateLabelScreen(rec, camera);
-      } else if (followDual && cockpitDualLayout === 'split') {
-        // Only annotate the two chased targets, each in its pane (avoids full-width NDC stretch)
-        if (rec.icao === cockpitPrimaryId) {
-          updateLabelScreen(rec, cockpitCam, { x: 0, y: 0, w: w * 0.5, h });
-        } else if (rec.icao === cockpitSecondaryId) {
-          updateLabelScreen(rec, cockpitCamB, { x: w * 0.5, y: 0, w: w * 0.5, h });
-        } else if (rec.label) {
-          rec.label.classList.add('hidden');
-        }
       } else {
         updateLabelScreen(rec, cockpitCam);
       }
@@ -3073,65 +2860,17 @@ function animate() {
   }
 
   if (settings.cameraMode === 'follow') {
-    if (followDual && cockpitDualLayout === 'split') {
-      // Proper multi-view clear: clear once, then draw each scissor without wiping the other
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, w, h);
-      renderer.autoClear = true;
-      renderer.clear();
-      renderer.autoClear = false;
-      renderer.setScissorTest(true);
-      // Left — primary
-      cockpitCam.aspect = (w * 0.5) / h;
-      cockpitCam.updateProjectionMatrix();
-      renderer.setViewport(0, 0, w * 0.5, h);
-      renderer.setScissor(0, 0, w * 0.5, h);
-      renderer.render(scene, cockpitCam);
-      // Right — secondary
-      cockpitCamB.aspect = (w * 0.5) / h;
-      cockpitCamB.updateProjectionMatrix();
-      renderer.setViewport(w * 0.5, 0, w * 0.5, h);
-      renderer.setScissor(w * 0.5, 0, w * 0.5, h);
-      renderer.render(scene, cockpitCamB);
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, w, h);
-      renderer.autoClear = true;
-    } else if (followDual && cockpitDualLayout === 'pip') {
-      renderer.autoClear = true;
-      cockpitCam.aspect = w / h;
-      cockpitCam.updateProjectionMatrix();
-      renderer.setViewport(0, 0, w, h);
-      renderer.setScissorTest(false);
-      renderer.render(scene, cockpitCam);
-      // PiP bottom-right
-      const pipW = Math.min(w * 0.34, 280);
-      const pipH = Math.min(h * 0.28, 200);
-      const pipX = w - pipW - 14;
-      const pipY = Math.max(56, 14); // from bottom in GL coords
-      renderer.autoClear = false;
-      renderer.clearDepth();
-      renderer.setScissorTest(true);
-      cockpitCamB.aspect = pipW / pipH;
-      cockpitCamB.updateProjectionMatrix();
-      renderer.setViewport(pipX, pipY, pipW, pipH);
-      renderer.setScissor(pipX, pipY, pipW, pipH);
-      renderer.render(scene, cockpitCamB);
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, w, h);
-      renderer.autoClear = true;
-    } else {
-      renderer.autoClear = true;
-      cockpitCam.aspect = w / h;
-      cockpitCam.updateProjectionMatrix();
-      renderer.setViewport(0, 0, w, h);
-      renderer.setScissorTest(false);
-      if (followOk) renderer.render(scene, cockpitCam);
-      else {
-        controls.update();
-        renderer.render(scene, camera);
-      }
+    renderer.autoClear = true;
+    cockpitCam.aspect = w / h;
+    cockpitCam.updateProjectionMatrix();
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissorTest(false);
+    if (followOk) renderer.render(scene, cockpitCam);
+    else {
+      controls.update();
+      renderer.render(scene, camera);
     }
-    // Refresh infographic occasionally (every ~0.5s via frame counter)
+    // Refresh compact HUD occasionally
     if (!updateInfoPanel._t || performance.now() - updateInfoPanel._t > 400) {
       updateInfoPanel._t = performance.now();
       updateInfoPanel();
@@ -3167,16 +2906,6 @@ canvas.addEventListener('pointerdown', (ev) => {
     if (settings.cameraMode === 'follow' && rec && !rec.onGround) {
       cockpitPrimaryId = id;
       _ckSmoothInit = false;
-      // Keep dual if the other inbound is within 5 min
-      const scored = scoreInboundGa(rec);
-      if (scored && cockpitSecondaryId && cockpitSecondaryId !== id) {
-        const sec = inboundCache.find((s) => s.icao === cockpitSecondaryId);
-        if (!(sec && Math.abs((scored.etaMin || 0) - (sec.etaMin || 0)) <= 5.5)) {
-          cockpitSecondaryId = null;
-          cockpitDual = false;
-        }
-      }
-      syncDualChrome();
       updateInfoPanel();
     } else if (settings.cameraMode === 'orbit' && rec) {
       controls.target.lerp(rec.display, 0.7);
@@ -3189,13 +2918,7 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   cockpitCam.aspect = innerWidth / innerHeight;
   cockpitCam.updateProjectionMatrix();
-  cockpitCamB.aspect = innerWidth / innerHeight;
-  cockpitCamB.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  if (settings.cameraMode === 'follow' && cockpitDual) {
-    cockpitDualLayout = matchMedia('(max-width: 720px)').matches ? 'pip' : 'split';
-    syncDualChrome();
-  }
 });
 
 poll();
