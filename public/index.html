@@ -32,8 +32,8 @@
     text-shadow: 0 1px 3px rgba(0,0,0,0.9);
     display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
     padding: 10px 14px;
-    background: rgba(8, 12, 20, 0.92);
-    border: 1px solid rgba(80, 140, 200, 0.32);
+    background: rgba(6, 10, 16, 0.98);
+    border: 1px solid rgba(80, 140, 200, 0.38);
     border-radius: 10px;
     backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
     box-shadow: 0 8px 28px rgba(0,0,0,0.55);
@@ -268,7 +268,7 @@
 <div id="acLabels" aria-hidden="true"></div>
 
 <div id="camBar" role="group" aria-label="Camera mode">
-  <button type="button" id="btnOrbit" class="ghost">Orbit</button>
+  <button type="button" id="btnOrbit" class="ghost" title="Dark Air Loom overview">Air Loom</button>
   <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
@@ -343,7 +343,7 @@
       </div>
       <div class="row">
         <label for="sAltSticks">Altitude sticks</label>
-        <input type="checkbox" id="sAltSticks" />
+        <input type="checkbox" id="sAltSticks" checked />
       </div>
     </div>
 
@@ -407,7 +407,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'follow-v8'; // smaller planes + photoreal mats + orbit fix + follow zoom
+const BUILD_MARK = 'airloom-v1'; // Air Loom Orbit (dark+shells) + photoreal Follow sat
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1484,8 +1484,8 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0xc2d4c8, 0.00000085);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 20, 8e6);
-// Orbit default: close enough that GA meshes read as planes (follow-v6's 160km eye made them sub-pixel)
-camera.position.set(38000, 26000, 46000);
+// Air Loom Orbit framing (Follow uses cockpitCam)
+camera.position.set(78000, 48000, 92000);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -1605,32 +1605,36 @@ function tileToLatLon(x, y, z) {
 }
 
 /** Always-present earth disc so Follow never sits in a blue void if tiles lag. */
-function makeEarthBase() {
+function makeEarthBase(parent, dark) {
   const r = GROUND_M * 0.55;
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(r, 96),
-    new THREE.MeshBasicMaterial({ color: 0x3d5a42, depthWrite: true })
+    new THREE.MeshBasicMaterial({ color: dark ? 0x0a0e14 : 0x3d5a42, depthWrite: true })
   );
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = -2;
-  groundGroup.add(disc);
-  const water = new THREE.Mesh(
-    new THREE.CircleGeometry(r * 0.42, 64),
-    new THREE.MeshBasicMaterial({ color: 0x2f5f78, transparent: true, opacity: 0.55, depthWrite: false })
-  );
-  water.rotation.x = -Math.PI / 2;
-  water.position.y = -1.5;
-  groundGroup.add(water);
+  parent.add(disc);
+  if (!dark) {
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(r * 0.42, 64),
+      new THREE.MeshBasicMaterial({ color: 0x2f5f78, transparent: true, opacity: 0.55, depthWrite: false })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = -1.5;
+    parent.add(water);
+  }
 }
 
-async function fetchTileLayer(z, span, fillCss, brighten) {
+async function fetchTileLayer(z, span, fillCss, brighten, opts) {
+  opts = opts || {};
+  const tileUrlFn = opts.tileUrl || ((zz, ty, tx) =>
+    `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`);
   const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
   const n = span * 2 + 1;
   const size = 256 * n;
   const cvs = document.createElement('canvas');
   cvs.width = size; cvs.height = size;
   const ctx = cvs.getContext('2d');
-  // Earth fill — never blue (blue fill read as "void" when tiles fail)
   ctx.fillStyle = fillCss;
   ctx.fillRect(0, 0, size, size);
 
@@ -1641,7 +1645,7 @@ async function fetchTileLayer(z, span, fillCss, brighten) {
     for (let dx = -span; dx <= span; dx++) {
       const tx = center.x + dx;
       const ty = center.y + dy;
-      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}`;
+      const url = tileUrlFn(z, ty, tx);
       const px = (dx + span) * 256;
       const py = (dy + span) * 256;
       jobs.push(new Promise((resolve) => {
@@ -1662,13 +1666,27 @@ async function fetchTileLayer(z, span, fillCss, brighten) {
       const imgData = ctx.getImageData(0, 0, size, size);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
-        // Mild lift — keep greens/browns; avoid blue wash that turns land into void
-        d[i] = Math.min(255, d[i] * 1.08 + 8);
-        d[i + 1] = Math.min(255, d[i + 1] * 1.10 + 10);
-        d[i + 2] = Math.min(255, d[i + 2] * 1.04 + 6);
+        d[i] = Math.min(255, d[i] * 1.10 + 10);
+        d[i + 1] = Math.min(255, d[i + 1] * 1.12 + 12);
+        d[i + 2] = Math.min(255, d[i + 2] * 1.06 + 6);
       }
       ctx.putImageData(imgData, 0, 0);
-    } catch (_) { /* tainted — leave as drawn */ }
+    } catch (_) { /* tainted */ }
+  }
+  if (opts.darkStylize) {
+    try {
+      const imgData = ctx.getImageData(0, 0, size, size);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // High-contrast dark basemap (keep roads/labels as light filaments)
+        const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+        const v = Math.min(255, Math.pow(lum / 255, 0.72) * 255 * 0.55 + 8);
+        d[i] = v * 0.55 + 6;
+        d[i + 1] = v * 0.62 + 10;
+        d[i + 2] = v * 0.78 + 18;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch (_) {}
   }
 
   const nw = tileToLatLon(center.x - span, center.y - span, z);
@@ -1684,7 +1702,7 @@ async function fetchTileLayer(z, span, fillCss, brighten) {
   tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  try { tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy() || 1); } catch (_) {}
+  try { tex.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy() || 1); } catch (_) {}
   const mat = new THREE.MeshBasicMaterial({ map: tex, depthWrite: true });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
@@ -1692,41 +1710,278 @@ async function fetchTileLayer(z, span, fillCss, brighten) {
   return { mesh, width, height, loaded, total };
 }
 
-async function loadSatGround() {
-  // Clear any prior children then lay earth base first (anti blue-void)
-  while (groundGroup.children.length) {
-    const ch = groundGroup.children[0];
-    groundGroup.remove(ch);
-  }
-  makeEarthBase();
-  groundGroup.add(makeRunwaySketch());
-  groundReady = true;
+const satGroundGroup = new THREE.Group();
+satGroundGroup.name = 'satGround';
+const darkGroundGroup = new THREE.Group();
+darkGroundGroup.name = 'darkGround';
+const airspaceGroup = new THREE.Group();
+airspaceGroup.name = 'airspace';
+const cityLabelGroup = new THREE.Group();
+cityLabelGroup.name = 'cityLabels';
+groundGroup.add(satGroundGroup);
+groundGroup.add(darkGroundGroup);
+groundGroup.add(airspaceGroup);
+groundGroup.add(cityLabelGroup);
 
-  // Wide ~250 mi coverage (z=8, 7×7) + sharper Bay inset (z=11, 5×5) under chase
-  const wide = await fetchTileLayer(8, 3, '#3f5c45', true);
+/** Photoreal ESRI World Imagery — used under Follow chase. */
+async function loadSatBasemap() {
+  while (satGroundGroup.children.length) satGroundGroup.remove(satGroundGroup.children[0]);
+  makeEarthBase(satGroundGroup, false);
+  satGroundGroup.add(makeRunwaySketch());
+  // Wide ~250 mi + mid Bay + sharp chase inset
+  const wide = await fetchTileLayer(8, 4, '#3f5c45', true);
+  if (wide) { wide.mesh.position.y = 0; satGroundGroup.add(wide.mesh); }
+  const mid = await fetchTileLayer(11, 3, '#456448', true);
+  if (mid) { mid.mesh.position.y = 0.3; satGroundGroup.add(mid.mesh); }
+  const inset = await fetchTileLayer(13, 2, '#4a6a4c', true);
+  if (inset) { inset.mesh.position.y = 0.6; satGroundGroup.add(inset.mesh); }
+  groundReady = true;
+}
+
+/** Dark high-contrast stylized basemap — Air Loom Orbit overview. */
+async function loadDarkBasemap() {
+  while (darkGroundGroup.children.length) darkGroundGroup.remove(darkGroundGroup.children[0]);
+  makeEarthBase(darkGroundGroup, true);
+  const carto = (z, ty, tx) => `https://basemaps.cartocdn.com/dark_all/${z}/${tx}/${ty}.png`;
+  const wide = await fetchTileLayer(8, 4, '#05070c', false, { tileUrl: carto });
   if (wide) {
     wide.mesh.position.y = 0;
-    groundGroup.add(wide.mesh);
+    darkGroundGroup.add(wide.mesh);
+  } else {
+    // Fallback: darken ESRI imagery
+    const fb = await fetchTileLayer(8, 3, '#05070c', false, { darkStylize: true });
+    if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
   }
-  const inset = await fetchTileLayer(11, 2, '#456448', true);
-  if (inset) {
-    inset.mesh.position.y = 0.4;
-    groundGroup.add(inset.mesh);
-  }
+  const inset = await fetchTileLayer(11, 2, '#080c14', false, { tileUrl: carto });
+  if (inset) { inset.mesh.position.y = 0.35; darkGroundGroup.add(inset.mesh); }
 
-  if (wide) {
-    const grid = new THREE.GridHelper(Math.max(wide.width, wide.height) * 0.85, 36, 0xffffff, 0xffffff);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.04;
-    grid.position.y = 2;
-    groundGroup.add(grid);
+  // Subtle grid ribs over dark map
+  const grid = new THREE.GridHelper(GROUND_M * 0.9, 48, 0xffffff, 0xffffff);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.035;
+  grid.position.y = 2;
+  darkGroundGroup.add(grid);
+
+  // Minimal runway sketch (dim)
+  const rw = makeRunwaySketch();
+  rw.traverse((ch) => {
+    if (ch.material) {
+      if (ch.material.opacity != null) ch.material.opacity *= 0.55;
+      if (ch.material.color) ch.material.color.multiplyScalar(0.6);
+    }
+  });
+  darkGroundGroup.add(rw);
+}
+
+/** Simplified SFO Class B wedding-cake shelves (approx — free data only). */
+const SFO_CLASS_B_SHELVES = [
+  // rNm outer radius, floor/ceil feet MSL — nested cake approximation
+  { rNm: 7,  floorFt: 0,    ceilFt: 10000 },
+  { rNm: 11, floorFt: 1500, ceilFt: 10000 },
+  { rNm: 15, floorFt: 3000, ceilFt: 10000 },
+  { rNm: 20, floorFt: 4000, ceilFt: 10000 },
+  { rNm: 25, floorFt: 6000, ceilFt: 10000 },
+  { rNm: 30, floorFt: 8000, ceilFt: 10000 },
+];
+// Nearby Class C-ish volumes (simplified cylinders)
+const BAY_CLASS_C = [
+  { name: 'OAK', lat: 37.7213, lon: -122.2207, rNm: 5, floorFt: 0, ceilFt: 4000, color: 0x6a8cff },
+  { name: 'SJC', lat: 37.3626, lon: -121.9290, rNm: 5, floorFt: 0, ceilFt: 4000, color: 0x6a8cff },
+];
+
+function makeRibbedShelf(cx, cz, rM, floorM, ceilM, colorHex, opacity) {
+  const g = new THREE.Group();
+  const h = Math.max(40, (ceilM - floorM));
+  const yMid = (floorM + ceilM) * 0.5;
+  const geo = new THREE.CylinderGeometry(rM, rM, h, 64, 1, false);
+  const mat = new THREE.MeshBasicMaterial({
+    color: colorHex,
+    transparent: true,
+    opacity: opacity,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(cx, yMid, cz);
+  mesh.renderOrder = 0;
+  g.add(mesh);
+
+  // Outer wireframe ribs (subtle white grid)
+  const edges = new THREE.EdgesGeometry(geo, 18);
+  const rib = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
+    color: 0xd8ccff, transparent: true, opacity: 0.28, depthWrite: false,
+  }));
+  rib.position.copy(mesh.position);
+  g.add(rib);
+
+  // Vertical rib lines around circumference
+  const ribN = 24;
+  const ribPos = [];
+  for (let i = 0; i < ribN; i++) {
+    const a = (i / ribN) * Math.PI * 2;
+    const x = cx + Math.cos(a) * rM;
+    const z = cz + Math.sin(a) * rM;
+    ribPos.push(x, floorM, z, x, ceilM, z);
+  }
+  // Top ring
+  for (let i = 0; i < ribN; i++) {
+    const a0 = (i / ribN) * Math.PI * 2;
+    const a1 = ((i + 1) / ribN) * Math.PI * 2;
+    ribPos.push(
+      cx + Math.cos(a0) * rM, ceilM, cz + Math.sin(a0) * rM,
+      cx + Math.cos(a1) * rM, ceilM, cz + Math.sin(a1) * rM
+    );
+  }
+  const ribGeo = new THREE.BufferGeometry();
+  ribGeo.setAttribute('position', new THREE.Float32BufferAttribute(ribPos, 3));
+  const ribs = new THREE.LineSegments(ribGeo, new THREE.LineBasicMaterial({
+    color: 0xe8e0ff, transparent: true, opacity: 0.18, depthWrite: false,
+  }));
+  g.add(ribs);
+  return g;
+}
+
+function buildAirspaceVolumes() {
+  while (airspaceGroup.children.length) {
+    const ch = airspaceGroup.children[0];
+    airspaceGroup.remove(ch);
+    ch.traverse?.((o) => {
+      o.geometry?.dispose?.();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose?.());
+        else o.material.dispose?.();
+      }
+    });
+  }
+  const scale = (typeof settings !== 'undefined' && settings.altScale) || 1.2;
+  // SFO Class B wedding cake centered on KSFO origin
+  for (let i = 0; i < SFO_CLASS_B_SHELVES.length; i++) {
+    const s = SFO_CLASS_B_SHELVES[i];
+    const rM = s.rNm * NM_M;
+    const floorM = s.floorFt * FT_M * scale;
+    const ceilM = s.ceilFt * FT_M * scale;
+    const op = 0.06 + i * 0.012;
+    airspaceGroup.add(makeRibbedShelf(0, 0, rM, floorM, ceilM, 0x7b6cff, op));
+  }
+  for (const c of BAY_CLASS_C) {
+    const p = enu(c.lat, c.lon, 0);
+    const floorM = c.floorFt * FT_M * scale;
+    const ceilM = c.ceilFt * FT_M * scale;
+    airspaceGroup.add(makeRibbedShelf(p.x, p.z, c.rNm * NM_M, floorM, ceilM, c.color, 0.08));
   }
 }
 
-loadSatGround().catch(() => {
-  try { makeEarthBase(); groundGroup.add(makeRunwaySketch()); groundReady = true; }
-  catch (_) { makeGridFallback(); }
-});
+function makeCityLabelSprite(text, worldW) {
+  const cvs = document.createElement('canvas');
+  const pad = 48;
+  const ctx = cvs.getContext('2d');
+  const fontPx = 96;
+  ctx.font = `600 ${fontPx}px "IBM Plex Sans", system-ui, sans-serif`;
+  const tw = Math.ceil(ctx.measureText(text).width);
+  cvs.width = tw + pad * 2;
+  cvs.height = fontPx + pad * 2;
+  const g = cvs.getContext('2d');
+  g.font = `600 ${fontPx}px "IBM Plex Sans", system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,0.85)';
+  g.shadowBlur = 18;
+  g.fillStyle = 'rgba(255,255,255,0.92)';
+  g.fillText(text, cvs.width / 2, cvs.height / 2);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const aspect = cvs.width / cvs.height;
+  const h = worldW / aspect;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(worldW, h),
+    new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false, opacity: 0.88, side: THREE.DoubleSide,
+    })
+  );
+  // Lay nearly flat with slight lift — reads as large floating 3D city label
+  mesh.rotation.x = -Math.PI / 2.15;
+  mesh.renderOrder = 3;
+  return mesh;
+}
+
+const CITY_LABELS = [
+  { name: 'San Francisco', lat: 37.7749, lon: -122.4194, size: 9000 },
+  { name: 'Oakland', lat: 37.8044, lon: -122.2712, size: 5200 },
+  { name: 'San Jose', lat: 37.3382, lon: -121.8863, size: 6200 },
+  { name: 'Palo Alto', lat: 37.4419, lon: -122.1430, size: 3600 },
+  { name: 'Berkeley', lat: 37.8715, lon: -122.2730, size: 3400 },
+  { name: 'Half Moon Bay', lat: 37.4636, lon: -122.4286, size: 3200 },
+];
+
+function buildCityLabels() {
+  while (cityLabelGroup.children.length) {
+    const ch = cityLabelGroup.children[0];
+    cityLabelGroup.remove(ch);
+    ch.material?.map?.dispose?.();
+    ch.material?.dispose?.();
+    ch.geometry?.dispose?.();
+  }
+  for (const c of CITY_LABELS) {
+    const p = enu(c.lat, c.lon, 0);
+    const mesh = makeCityLabelSprite(c.name, c.size);
+    mesh.position.set(p.x, 80, p.z);
+    cityLabelGroup.add(mesh);
+  }
+}
+
+function applySceneTheme(mode) {
+  const follow = mode === 'follow';
+  satGroundGroup.visible = follow;
+  darkGroundGroup.visible = !follow;
+  airspaceGroup.visible = !follow;
+  cityLabelGroup.visible = !follow;
+  // Drop-lines always preferred in Air Loom Orbit; keep user toggle otherwise
+  if (!follow) {
+    settings.showAltSticks = true;
+    const cb = document.getElementById('sAltSticks');
+    if (cb) cb.checked = true;
+    for (const rec of aircraft.values()) {
+      if (rec.stick) rec.stick.visible = true;
+    }
+  }
+  if (follow) {
+    renderer.setClearColor(0x87a8c0);
+    scene.fog = new THREE.FogExp2(0xc2d4c8, 0.0000007);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.32;
+    sun.intensity = 1.55;
+    hemi.intensity = 0.85;
+  } else {
+    renderer.setClearColor(0x03050a);
+    scene.fog = new THREE.FogExp2(0x05070e, 0.00000105);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.02;
+    sun.intensity = 0.55;
+    hemi.intensity = 0.35;
+  }
+}
+
+async function loadGroundLayers() {
+  while (groundGroup.children.length) {
+    const ch = groundGroup.children[0];
+    // keep structural groups — re-add after clear
+    groundGroup.remove(ch);
+  }
+  groundGroup.add(satGroundGroup);
+  groundGroup.add(darkGroundGroup);
+  groundGroup.add(airspaceGroup);
+  groundGroup.add(cityLabelGroup);
+  makeEarthBase(satGroundGroup, false);
+  groundReady = true;
+  buildAirspaceVolumes();
+  buildCityLabels();
+  // Load both basemaps; theme picks which is visible
+  await Promise.all([
+    loadSatBasemap().catch((e) => console.warn('sat basemap', e)),
+    loadDarkBasemap().catch((e) => console.warn('dark basemap', e)),
+  ]);
+  applySceneTheme(settings.cameraMode || 'follow');
+}
+
+// loadGroundLayers deferred until settings/lights ready
 
 // ─── Aircraft resources ──────────────────────────────────────────────────────
 function makeGlowSprite() {
@@ -1735,8 +1990,10 @@ function makeGlowSprite() {
   cvs.width = s; cvs.height = s;
   const g = cvs.getContext('2d');
   const grd = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
-  grd.addColorStop(0, 'rgba(255,255,255,0.95)');
-  grd.addColorStop(0.35, 'rgba(180,230,255,0.35)');
+  // Air Loom: warm white core + orange/yellow halo
+  grd.addColorStop(0, 'rgba(255,248,220,1)');
+  grd.addColorStop(0.18, 'rgba(255,190,70,0.85)');
+  grd.addColorStop(0.45, 'rgba(255,140,40,0.35)');
   grd.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
@@ -1755,10 +2012,22 @@ let settings = {
   // Default product mode: private / general aviation (not airline arrivals).
   trafficMode: 'ga', // 'ga' | 'arrivals' | 'all'
   showVelVec: true,
-  showAltSticks: false,
-  cameraMode: 'follow', // 'orbit' | 'follow' — elevated chase default for GA focus
+  showAltSticks: true, // Air Loom vertical drop-lines
+  cameraMode: 'follow', // 'orbit' | 'follow' — Follow=photoreal sat; Orbit=Air Loom dark
 };
 let lastArrivals = [];
+
+loadGroundLayers().catch(() => {
+  try {
+    makeEarthBase(satGroundGroup, false);
+    satGroundGroup.add(makeRunwaySketch());
+    groundReady = true;
+    buildAirspaceVolumes();
+    buildCityLabels();
+    applySceneTheme(settings.cameraMode || 'follow');
+  } catch (_) { makeGridFallback(); }
+});
+
 
 // ─── Follow (chase-above) camera state ───────────────────────────────────────
 const cockpitCam = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 8, 2.2e6);
@@ -1788,6 +2057,7 @@ $('sAltScale').oninput = (e) => {
     applyPose(rec);
     updateTrail(rec);
   }
+  try { buildAirspaceVolumes(); } catch (_) {}
 };
 $('sGround').onchange = (e) => { settings.showGround = e.target.checked; };
 $('sVelVec').onchange = (e) => { settings.showVelVec = e.target.checked; };
@@ -1908,9 +2178,9 @@ function resetFollowViewOffsets() {
 }
 
 function frameOrbitOverview() {
-  // Close enough that SIZE_MULT-scaled GA reads as aircraft, not dust
-  camera.position.set(38000, 26000, 46000);
-  controls.target.set(0, 400, 0);
+  // Air Loom overview: wide enough to read Class B shelves + Bay labels
+  camera.position.set(78000, 48000, 92000);
+  controls.target.set(0, 1200, 0);
   camera.near = 20;
   camera.far = 8e6;
   camera.updateProjectionMatrix();
@@ -1924,7 +2194,7 @@ function setCameraMode(mode) {
   const isFollow = next === 'follow';
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
-  if ($('uiCamMode')) $('uiCamMode').textContent = settings.cameraMode;
+  if ($('uiCamMode')) $('uiCamMode').textContent = isFollow ? 'follow' : 'air loom';
   controls.enabled = !isFollow;
   controls.autoRotate = !isFollow && $('sAuto').checked;
   // Always clear any leftover multi-view scissor from older dual-follow builds
@@ -1932,6 +2202,7 @@ function setCameraMode(mode) {
   renderer.setScissorTest(false);
   renderer.autoClear = true;
   _ckSmoothInit = false;
+  try { applySceneTheme(next); } catch (_) {}
   if (isFollow) {
     // Keep prior offsets unless switching targets later
   } else if (prev === 'follow') {
@@ -2273,8 +2544,8 @@ function isArrival(p) {
 
 // ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 200;
-const TRAIL_HALF_W = 5.5;     // meters — thin altitude ribbon (was 32: fat white slab in Follow)
-const TRAIL_HALF_W_LOW = 1.8; // taxi / very low alt
+const TRAIL_HALF_W = 2.0;     // meters — Air Loom filament (not fat ribbon)
+const TRAIL_HALF_W_LOW = 0.7; // taxi / very low alt
 const TRAIL_SAMPLE_MS = 650;  // live stream cadence between ADS-B polls
 const TRAIL_SAMPLE_M = 90;    // or when DR tip has moved this far
 const _tA = new THREE.Vector3();
@@ -2300,7 +2571,7 @@ function createAircraft(icao, typeHint) {
   group.add(model);
 
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0xc5d0da, transparent: true, opacity: 0.34,
+    map: glowTex, color: 0xffb84a, transparent: true, opacity: 0.55,
     blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   const glowSize = Math.max(140, info.span * SIZE_MULT * 1.6);
@@ -2314,9 +2585,10 @@ function createAircraft(icao, typeHint) {
   stickGeo.setAttribute('position', new THREE.BufferAttribute(stickPos, 3));
   stickGeo.setAttribute('color', new THREE.BufferAttribute(stickCol, 3));
   const stick = new THREE.Line(stickGeo, new THREE.LineBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.28,
+    vertexColors: true, transparent: true, opacity: 0.55,
   }));
   stick.visible = settings.showAltSticks;
+  stick.renderOrder = 1;
   group.add(stick);
 
   const velGeo = new THREE.BufferGeometry();
@@ -2347,11 +2619,11 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.78,
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.NormalBlending, // additive made a glowing white rectangle
+      blending: THREE.AdditiveBlending, // thin filaments → soft Air Loom glow
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -2562,9 +2834,9 @@ function updateTrail(rec) {
 
   // Opacity: softer on ground
   const mat = rec.trail.material;
-  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.28;
-  else if (tipAlt < 120) mat.opacity = 0.45;
-  else mat.opacity = 0.58;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.35;
+  else if (tipAlt < 120) mat.opacity = 0.55;
+  else mat.opacity = 0.82;
 
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
@@ -2702,9 +2974,9 @@ function applyPose(rec) {
     const scol = rec.stick.geometry.attributes.color.array;
     pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
     pos[3] = 0; pos[4] = 0; pos[5] = 0;
-    const cLo = altColor(0);
-    scol[0] = cLo.r * 0.2; scol[1] = cLo.g * 0.2; scol[2] = cLo.b * 0.2;
-    scol[3] = col.r * 0.45; scol[4] = col.g * 0.45; scol[5] = col.b * 0.45;
+    // Soft white/altitude drop-line (Air Loom style)
+    scol[0] = 0.55; scol[1] = 0.6; scol[2] = 0.7;
+    scol[3] = col.r * 0.75; scol[4] = col.g * 0.75; scol[5] = col.b * 0.75;
     rec.stick.geometry.attributes.position.needsUpdate = true;
     rec.stick.geometry.attributes.color.needsUpdate = true;
   }
@@ -2969,16 +3241,35 @@ function animate() {
     rec.group.position.copy(rec.display);
     // Keep nose aligned with the same track used for dead-reckon (trails stay aft)
     orientAircraftModel(rec);
-    // Distance-adaptive halo so Orbit overview still reveals GA after SIZE_MULT shrink
-    if (rec.glow) {
+    // Air Loom LOD: glow dots at Orbit distance; white mesh + glow sphere when close/Follow
+    {
       const eye = (settings.cameraMode === 'follow' && camPosFinite(cockpitCam))
         ? cockpitCam.position : camera.position;
       const dist = rec.display.distanceTo(eye);
-      const base = Math.max(120, (rec.span || 12) * SIZE_MULT * 1.5);
-      const boost = THREE.MathUtils.clamp(dist * 0.011, 0, 2200);
-      const gs = Math.max(base, boost);
-      rec.glow.scale.set(gs, gs, 1);
-      rec.glow.material.opacity = THREE.MathUtils.clamp(0.22 + Math.min(dist, 80000) / 180000, 0.22, 0.55);
+      const isFollow = settings.cameraMode === 'follow';
+      const LOD_MESH_M = 14000; // show airframe inside ~14 km
+      const showMesh = isFollow || dist < LOD_MESH_M;
+      if (rec.model) rec.model.visible = showMesh;
+      if (rec.velLine) rec.velLine.visible = showMesh && settings.showVelVec;
+      if (rec.glow) {
+        const col = altColor(rec.altM || 0);
+        rec.glow.material.color.copy(col);
+        if (!showMesh) {
+          // Orbit far: bright altitude-colored glow dot (Air Loom)
+          const gs = THREE.MathUtils.clamp(180 + dist * 0.018, 220, 3200);
+          rec.glow.scale.set(gs, gs, 1);
+          rec.glow.material.opacity = THREE.MathUtils.clamp(0.55 + Math.min(dist, 90000) / 160000, 0.55, 0.95);
+          rec.glow.visible = true;
+        } else {
+          // Close / Follow: small halo around photoreal mesh
+          const base = Math.max(90, (rec.span || 12) * SIZE_MULT * 1.15);
+          const boost = isFollow ? base * 0.35 : THREE.MathUtils.clamp(dist * 0.004, 0, 400);
+          const gs = Math.max(base * 0.55, boost);
+          rec.glow.scale.set(gs, gs, 1);
+          rec.glow.material.opacity = isFollow ? 0.32 : 0.42;
+          rec.glow.visible = true;
+        }
+      }
     }
 
     // Live trail stream: tip tracks dead-reckon every frame; solidify samples

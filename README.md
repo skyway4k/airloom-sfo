@@ -31,10 +31,13 @@ Licenses: amvlab CC BY 4.0 + Flightradar24/FlightGear GPLv2. No payware.
 Default **Private / GA** filters to light aircraft, turboprops, bizjets, and helicopters
 (airliners hidden). Switch to **Arrivals** or **All traffic** in the drawer.
 
-## Camera
+## Camera & visual modes
 
-Default **Follow** is a third-person chase from above (elevated behind the aircraft,
-looking down at the mesh and along-track) on the nearest inbound private/GA toward
-KSFO / SQL / HAF / PAO / SJC. If two inbound GA share an ETA within ~5 minutes, dual
-Follow (split desktop / PiP mobile) shows both. Switch to **Orbit** anytime from the
-top control bar.
+- **Follow** (default): elevated chase on the nearest inbound private/GA toward
+  KSFO / SQL / HAF / PAO / SJC. Wheel/pinch zoom + drag orbit around the target.
+  Basemap is **hyper-realistic ESRI World Imagery** (sharp Bay inset under the plane).
+- **Air Loom** (Orbit): dark high-contrast basemap, translucent Class B / Bay airspace
+  shells, altitude-colored glow dots + thin trails, vertical drop-lines, and large
+  floating city labels — modeled after the original Air Loom look.
+
+Single chase only (no dual / PiP). Coverage ≈ 250 mi around KSFO.
