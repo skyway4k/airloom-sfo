@@ -12,56 +12,66 @@
 <title>🛩️ AirLoom — KSFO</title>
 <style>
   :root {
-    --bg: #0a0e14;
-    --panel: rgba(12, 18, 28, 0.92);
-    --border: rgba(80, 140, 200, 0.25);
-    --text: #d6e4f0;
-    --muted: #7a8fa3;
-    --accent: #3ecf8e;
-    --cyan: #4ecdc4;
-    --warn: #f0b429;
-    --danger: #ff6b6b;
-    --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --bg: #07090f;
+    --panel: rgba(10, 14, 22, 0.82);
+    --panel-solid: rgba(8, 11, 18, 0.96);
+    --border: rgba(180, 195, 220, 0.14);
+    --border-strong: rgba(210, 220, 240, 0.22);
+    --text: #e8eef6;
+    --muted: #8b9aaf;
+    --accent: #7dcea0;
+    --cyan: #9bb8d4;
+    --warn: #e0c07a;
+    --danger: #d98888;
+    --glow: #f0d5a0;
+    --font: "Outfit", "Segoe UI", system-ui, sans-serif;
+    --display: "Cormorant Garamond", "Times New Roman", Georgia, serif;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
-    position: absolute; top: 10px; left: 14px; right: 14px; z-index: 5; pointer-events: none;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
-    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
-    padding: 10px 14px;
-    background: rgba(6, 10, 16, 0.98);
-    border: 1px solid rgba(80, 140, 200, 0.38);
-    border-radius: 10px;
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+    position: absolute; top: 12px; left: 16px; right: 16px; z-index: 5; pointer-events: none;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+    padding: 12px 18px 13px;
+    background: linear-gradient(165deg, rgba(14,18,28,0.94), rgba(6,9,14,0.97));
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    backdrop-filter: blur(22px) saturate(1.15); -webkit-backdrop-filter: blur(22px) saturate(1.15);
+    box-shadow:
+      0 12px 40px rgba(0,0,0,0.55),
+      inset 0 1px 0 rgba(255,255,255,0.07),
+      inset 0 -1px 0 rgba(0,0,0,0.25);
   }
   #hud .brand { min-width: 0; flex: 1 1 auto; }
   #hud h1 {
-    font-size: 17px; letter-spacing: 0.01em; font-weight: 600; color: #e8f4ff;
-    line-height: 1.2; text-decoration: none;
+    font-family: var(--display); font-size: 22px; letter-spacing: 0.04em;
+    font-weight: 600; color: #f4f7fb; line-height: 1.15; text-decoration: none;
+    font-variant-ligatures: common-ligatures;
   }
-  #hud h1 .sep { color: var(--muted); font-weight: 400; margin: 0 0.15em; }
-  #hud h1 .brand-emoji { font-size: 0.95em; margin-right: 0.12em; }
-  #hud h1 #hudAirport { color: var(--cyan); font-weight: 600; letter-spacing: 0.04em; }
+  #hud h1 .sep { color: rgba(180,195,220,0.35); font-weight: 400; margin: 0 0.22em; font-family: var(--font); }
+  #hud h1 .brand-emoji { font-size: 0.72em; margin-right: 0.2em; opacity: 0.85; vertical-align: 0.05em; }
+  #hud h1 #hudAirport {
+    font-family: var(--mono); font-size: 0.62em; color: var(--cyan);
+    font-weight: 500; letter-spacing: 0.18em; vertical-align: 0.18em;
+  }
   #hud .sub {
-    margin-top: 3px; font-size: 11px; color: var(--muted);
-    letter-spacing: 0.01em; font-family: var(--mono); line-height: 1.35;
+    margin-top: 5px; font-size: 11px; color: var(--muted);
+    letter-spacing: 0.06em; font-family: var(--font); font-weight: 300; line-height: 1.4;
   }
-  #hud .note { margin-top: 2px; font-size: 11px; color: var(--warn); }
+  #hud .note { margin-top: 3px; font-size: 11px; color: var(--warn); letter-spacing: 0.02em; }
   #stats {
     flex: 0 0 auto; text-align: right;
     font-family: var(--mono); font-size: 10px; color: var(--muted);
-    line-height: 1.35; padding-top: 1px;
+    line-height: 1.45; padding-top: 3px;
   }
-  #stats .stat-main { white-space: nowrap; margin-bottom: 2px; }
-  #stats .n { color: var(--cyan); font-size: 13px; font-weight: 600; }
-  #stats .arr { color: var(--accent); font-size: 13px; font-weight: 600; }
-  #stats .lbl { color: var(--muted); font-size: 10px; margin-right: 8px; }
+  #stats .stat-main { white-space: nowrap; margin-bottom: 3px; }
+  #stats .n { color: var(--cyan); font-size: 14px; font-weight: 500; letter-spacing: 0.02em; }
+  #stats .arr { color: var(--accent); font-size: 14px; font-weight: 500; letter-spacing: 0.02em; }
+  #stats .lbl { color: var(--muted); font-size: 9px; margin-right: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font); font-weight: 400; }
   #stats .lbl:last-child { margin-right: 0; }
-  #stats .meta { font-size: 9px; color: #6a7f93; white-space: nowrap; }
+  #stats .meta { font-size: 9px; color: #6e7f94; white-space: nowrap; letter-spacing: 0.02em; opacity: 0.9; }
   #drawer {
     position: absolute; top: 0; left: 0; bottom: 0; width: 292px; z-index: 10;
     background: var(--panel); border-right: 1px solid var(--border);
@@ -71,8 +81,9 @@
   }
   #drawer.collapsed { transform: translateX(-100%); }
   #drawer header {
-    padding: 16px 16px 12px; border-bottom: 1px solid var(--border);
-    letter-spacing: 0.2em; font-size: 11px; color: var(--cyan);
+    padding: 18px 18px 14px; border-bottom: 1px solid var(--border);
+    letter-spacing: 0.22em; font-size: 10px; color: var(--glow);
+    font-family: var(--font); font-weight: 500;
   }
   #drawer .body { padding: 12px 16px 24px; overflow-y: auto; flex: 1; }
   .row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; gap: 8px; }
@@ -119,10 +130,11 @@
     display: none; max-width: 320px;
   }
   a.credits {
-    position: absolute; bottom: 10px; left: 18px; z-index: 5;
-    font-size: 10px; color: var(--muted); text-decoration: none; opacity: 0.7;
+    position: absolute; bottom: 12px; left: 20px; z-index: 5;
+    font-size: 10px; color: var(--muted); text-decoration: none; opacity: 0.45;
+    letter-spacing: 0.06em; font-weight: 300;
   }
-  a.credits:hover { opacity: 1; color: var(--cyan); }
+  a.credits:hover { opacity: 0.85; color: var(--glow); }
   #arrivalsList {
     max-height: 280px; overflow-y: auto; margin-top: 6px;
     font-family: var(--mono); font-size: 10px;
@@ -145,84 +157,87 @@
   }
   .ac-label {
     position: absolute; left: 0; top: 0;
-    transform: translate(-50%, calc(-100% - 6px));
-    background: rgba(8, 14, 22, 0.78);
-    border: 1px solid rgba(120, 180, 230, 0.35);
-    border-radius: 3px;
-    padding: 1px 4px 1px;
+    transform: translate(-50%, calc(-100% - 8px));
+    background: rgba(8, 11, 18, 0.88);
+    border: 1px solid rgba(200, 210, 230, 0.16);
+    border-radius: 5px;
+    padding: 3px 7px 3px;
     font-family: var(--mono);
     font-size: 8px;
-    line-height: 1.15;
-    color: #e8f4ff;
+    line-height: 1.2;
+    color: #eef3f9;
     white-space: nowrap;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     will-change: transform, opacity;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
   }
-  .ac-label .cs { font-weight: 600; letter-spacing: 0.03em; font-size: 9px; }
-  .ac-label .meta { color: #9bb4c8; font-size: 7px; margin-top: 0; }
-  .ac-label.dim { opacity: 0.35; }
+  .ac-label .cs { font-weight: 500; letter-spacing: 0.08em; font-size: 9px; color: #f5f8fc; }
+  .ac-label .meta { color: #9aa8ba; font-size: 7px; margin-top: 1px; letter-spacing: 0.02em; }
+  .ac-label.dim { opacity: 0.32; }
   .ac-label.hidden { display: none; }
 
   /* Camera mode control */
   #camBar {
-    position: absolute; top: max(14px, env(safe-area-inset-top)); left: 50%;
+    position: absolute; top: max(16px, env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); z-index: 12; pointer-events: auto;
-    display: flex; gap: 0; border-radius: 8px; overflow: hidden;
-    background: rgba(8, 12, 20, 0.94); border: 1px solid rgba(80,140,200,0.45);
-    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+    display: flex; gap: 0; border-radius: 999px; overflow: hidden;
+    background: rgba(8, 11, 18, 0.9); border: 1px solid var(--border-strong);
+    backdrop-filter: blur(20px) saturate(1.1); -webkit-backdrop-filter: blur(20px) saturate(1.1);
+    box-shadow: 0 10px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
   }
   #camBar button {
     width: auto; margin: 0; border: none; border-radius: 0;
-    padding: 8px 16px; letter-spacing: 0.1em; font-size: 11px; font-weight: 600;
+    padding: 9px 20px; letter-spacing: 0.14em; font-size: 10px; font-weight: 500;
+    font-family: var(--font); text-transform: uppercase;
     background: transparent; color: var(--muted); cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
   }
-  #camBar button + button { border-left: 1px solid rgba(80,140,200,0.25); }
+  #camBar button + button { border-left: 1px solid rgba(180,195,220,0.12); }
   #camBar button.active {
-    background: rgba(62, 207, 142, 0.22); color: #e8fff4;
+    background: rgba(240, 213, 160, 0.12); color: #f5e6c8;
   }
-  #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.04); }
+  #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.03); }
 
   /* Follow-mode compact HUD (top-right glass) — essentials only */
   #infoPanel {
-    position: absolute; top: max(14px, env(safe-area-inset-top)); right: 10px;
-    z-index: 12; pointer-events: none; width: auto; max-width: min(168px, calc(100vw - 24px));
+    position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
+    z-index: 12; pointer-events: none; width: auto; max-width: min(180px, calc(100vw - 28px));
   }
   #infoPanel .ig-card {
-    background: linear-gradient(145deg, rgba(14,22,34,0.86), rgba(8,12,20,0.78));
-    border: 1px solid rgba(100, 170, 230, 0.28);
-    border-radius: 7px;
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
-    padding: 5px 8px 5px;
+    background: linear-gradient(160deg, rgba(16,20,30,0.9), rgba(7,10,16,0.92));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    padding: 8px 11px 8px;
     font-family: var(--mono); color: var(--text);
     pointer-events: auto;
   }
   #infoPanel .ig-head {
-    display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
-    margin-bottom: 2px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
   }
   #infoPanel .ig-cs {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: #f0f7ff;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.1em; color: #f4f7fb;
   }
   #infoPanel .ig-badge {
-    font-size: 6px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--accent); background: rgba(62,207,142,0.12);
-    border: 1px solid rgba(62,207,142,0.35); border-radius: 999px;
-    padding: 1px 4px; white-space: nowrap;
+    font-size: 7px; letter-spacing: 0.14em; text-transform: uppercase;
+    font-family: var(--font); font-weight: 500;
+    color: var(--glow); background: rgba(240,213,160,0.1);
+    border: 1px solid rgba(240,213,160,0.28); border-radius: 999px;
+    padding: 2px 6px; white-space: nowrap;
   }
   #infoPanel .ig-metrics {
-    display: flex; gap: 8px; font-size: 9px; line-height: 1.2;
+    display: flex; gap: 10px; font-size: 9px; line-height: 1.25;
   }
-  #infoPanel .ig-metrics .k { color: #6a849a; font-size: 6.5px; letter-spacing: 0.04em; text-transform: uppercase; }
-  #infoPanel .ig-metrics .v { color: #e8f4ff; font-weight: 600; font-size: 10px; }
+  #infoPanel .ig-metrics .k { color: #7a8a9e; font-size: 7px; letter-spacing: 0.1em; text-transform: uppercase; font-family: var(--font); }
+  #infoPanel .ig-metrics .v { color: #eef3f9; font-weight: 500; font-size: 11px; letter-spacing: 0.02em; }
   #infoPanel .ig-empty {
-    color: var(--muted); font-size: 9px; padding: 1px 0;
+    color: var(--muted); font-size: 9px; padding: 2px 0; letter-spacing: 0.04em;
   }
   #infoPanel.hidden, #infoPanel .ig-card.hidden { display: none; }
 
-  #stats.compact-hud { opacity: 0.85; }
+  #stats.compact-hud { opacity: 0.92; }
 
   @media (max-width: 720px) {
     #camBar {
@@ -251,8 +266,8 @@
       left: 52px; right: 10px; gap: 8px;
       padding: 8px 10px;
     }
-    #hud h1 { font-size: 15px; }
-    #hud .sub { font-size: 10px; }
+    #hud h1 { font-size: 18px; }
+    #hud .sub { font-size: 10px; letter-spacing: 0.04em; }
     #stats { font-size: 9px; }
     #stats .n, #stats .arr { font-size: 12px; }
     #stats .meta { font-size: 8px; }
@@ -261,7 +276,7 @@
   }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -407,7 +422,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v1'; // Air Loom Orbit (dark+shells) + photoreal Follow sat
+const BUILD_MARK = 'airloom-v2'; // upscale polish: glass HUD, refined glow, luxury Orbit
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -543,12 +558,11 @@ function timeToClosestApproachMin(lat, lon, track, gsKt, fieldLat, fieldLon) {
 
 
 function altColor(altM) {
-  // Full vivid rainbow by altitude (0–12000 m):
-  // low red → orange → yellow → green → cyan → blue → violet (high)
+  // Refined altitude palette (champagne → gold → jade → steel → violet)
   const t = Math.max(0, Math.min(1, (altM || 0) / 12000));
-  const hue = t * 0.78; // 0 → ~280° (stop before wrapping to red)
+  const hue = 0.06 + t * 0.70; // warm gold through cool violet
   const c = new THREE.Color();
-  c.setHSL(hue, 1.0, 0.52);
+  c.setHSL(hue, 0.62, 0.58); // restrained saturation
   return c;
 }
 
@@ -1806,10 +1820,10 @@ function makeRibbedShelf(cx, cz, rM, floorM, ceilM, colorHex, opacity) {
   mesh.renderOrder = 0;
   g.add(mesh);
 
-  // Outer wireframe ribs (subtle white grid)
-  const edges = new THREE.EdgesGeometry(geo, 18);
+  // Soft structural ribs (champagne-lilac, not neon grid)
+  const edges = new THREE.EdgesGeometry(geo, 22);
   const rib = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
-    color: 0xd8ccff, transparent: true, opacity: 0.28, depthWrite: false,
+    color: 0xc8c0e8, transparent: true, opacity: 0.16, depthWrite: false,
   }));
   rib.position.copy(mesh.position);
   g.add(rib);
@@ -1835,7 +1849,7 @@ function makeRibbedShelf(cx, cz, rM, floorM, ceilM, colorHex, opacity) {
   const ribGeo = new THREE.BufferGeometry();
   ribGeo.setAttribute('position', new THREE.Float32BufferAttribute(ribPos, 3));
   const ribs = new THREE.LineSegments(ribGeo, new THREE.LineBasicMaterial({
-    color: 0xe8e0ff, transparent: true, opacity: 0.18, depthWrite: false,
+    color: 0xd4cce8, transparent: true, opacity: 0.11, depthWrite: false,
   }));
   g.add(ribs);
   return g;
@@ -1860,8 +1874,8 @@ function buildAirspaceVolumes() {
     const rM = s.rNm * NM_M;
     const floorM = s.floorFt * FT_M * scale;
     const ceilM = s.ceilFt * FT_M * scale;
-    const op = 0.06 + i * 0.012;
-    airspaceGroup.add(makeRibbedShelf(0, 0, rM, floorM, ceilM, 0x7b6cff, op));
+    const op = 0.045 + i * 0.008;
+    airspaceGroup.add(makeRibbedShelf(0, 0, rM, floorM, ceilM, 0x6a5fb8, op));
   }
   for (const c of BAY_CLASS_C) {
     const p = enu(c.lat, c.lon, 0);
@@ -1873,21 +1887,52 @@ function buildAirspaceVolumes() {
 
 function makeCityLabelSprite(text, worldW) {
   const cvs = document.createElement('canvas');
-  const pad = 48;
+  const padX = 64, padY = 40;
   const ctx = cvs.getContext('2d');
-  const fontPx = 96;
-  ctx.font = `600 ${fontPx}px "IBM Plex Sans", system-ui, sans-serif`;
-  const tw = Math.ceil(ctx.measureText(text).width);
-  cvs.width = tw + pad * 2;
-  cvs.height = fontPx + pad * 2;
+  const fontPx = 88;
+  // Wide tracking for editorial / luxury map labels
+  ctx.font = `500 ${fontPx}px "Cormorant Garamond", "Times New Roman", Georgia, serif`;
+  const tw = Math.ceil(ctx.measureText(text.toUpperCase()).width * 1.12);
+  cvs.width = Math.max(256, tw + padX * 2);
+  cvs.height = fontPx + padY * 2;
   const g = cvs.getContext('2d');
-  g.font = `600 ${fontPx}px "IBM Plex Sans", system-ui, sans-serif`;
+  g.font = `500 ${fontPx}px "Cormorant Garamond", "Times New Roman", Georgia, serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.shadowColor = 'rgba(0,0,0,0.85)';
-  g.shadowBlur = 18;
-  g.fillStyle = 'rgba(255,255,255,0.92)';
-  g.fillText(text, cvs.width / 2, cvs.height / 2);
+  g.letterSpacing = '0.18em';
+  try { g.letterSpacing = '0.18em'; } catch (_) {}
+  // Soft depth shadow, then pearl fill
+  g.shadowColor = 'rgba(0,0,0,0.65)';
+  g.shadowBlur = 22;
+  g.shadowOffsetY = 2;
+  g.fillStyle = 'rgba(236, 240, 248, 0.82)';
+  const label = text; // keep title case for serif elegance
+  // Manual tracking if letterSpacing unsupported
+  const chars = label.split('');
+  let total = 0;
+  const gaps = [];
+  for (const ch of chars) {
+    const w = g.measureText(ch).width;
+    gaps.push(w);
+    total += w;
+  }
+  const tracking = fontPx * 0.12;
+  total += tracking * Math.max(0, chars.length - 1);
+  let x = (cvs.width - total) / 2;
+  const y = cvs.height / 2;
+  for (let i = 0; i < chars.length; i++) {
+    g.fillText(chars[i], x + gaps[i] / 2, y);
+    x += gaps[i] + tracking;
+  }
+  // Hairline underline accent
+  g.shadowBlur = 0;
+  g.strokeStyle = 'rgba(240, 213, 160, 0.28)';
+  g.lineWidth = 1.5;
+  const ul = total * 0.55;
+  g.beginPath();
+  g.moveTo(cvs.width / 2 - ul / 2, y + fontPx * 0.42);
+  g.lineTo(cvs.width / 2 + ul / 2, y + fontPx * 0.42);
+  g.stroke();
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
   const aspect = cvs.width / cvs.height;
@@ -1895,17 +1940,16 @@ function makeCityLabelSprite(text, worldW) {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(worldW, h),
     new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, depthWrite: false, opacity: 0.88, side: THREE.DoubleSide,
+      map: tex, transparent: true, depthWrite: false, opacity: 0.78, side: THREE.DoubleSide,
     })
   );
-  // Lay nearly flat with slight lift — reads as large floating 3D city label
-  mesh.rotation.x = -Math.PI / 2.15;
+  mesh.rotation.x = -Math.PI / 2.12;
   mesh.renderOrder = 3;
   return mesh;
 }
 
 const CITY_LABELS = [
-  { name: 'San Francisco', lat: 37.7749, lon: -122.4194, size: 9000 },
+  { name: 'San Francisco', lat: 37.7749, lon: -122.4194, size: 11000 },
   { name: 'Oakland', lat: 37.8044, lon: -122.2712, size: 5200 },
   { name: 'San Jose', lat: 37.3382, lon: -121.8863, size: 6200 },
   { name: 'Palo Alto', lat: 37.4419, lon: -122.1430, size: 3600 },
@@ -1945,17 +1989,21 @@ function applySceneTheme(mode) {
     }
   }
   if (follow) {
-    renderer.setClearColor(0x87a8c0);
-    scene.fog = new THREE.FogExp2(0xc2d4c8, 0.0000007);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.32;
-    sun.intensity = 1.55;
-    hemi.intensity = 0.85;
+    // Clean daylight frame around photoreal sat (not washed void)
+    renderer.setClearColor(0x6e8fa8);
+    scene.fog = new THREE.FogExp2(0xa8c0cc, 0.00000055);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.22;
+    sun.intensity = 1.45;
+    hemi.intensity = 0.75;
+    fill.intensity = 0.45;
   } else {
-    renderer.setClearColor(0x03050a);
-    scene.fog = new THREE.FogExp2(0x05070e, 0.00000105);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.02;
-    sun.intensity = 0.55;
-    hemi.intensity = 0.35;
+    // Luxury dark Orbit — deep ink, cool rim, no muddy purple crush
+    renderer.setClearColor(0x04060c);
+    scene.fog = new THREE.FogExp2(0x080b14, 0.00000095);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 0.98;
+    sun.intensity = 0.42;
+    hemi.intensity = 0.28;
+    fill.intensity = 0.22;
   }
 }
 
@@ -1985,16 +2033,17 @@ async function loadGroundLayers() {
 
 // ─── Aircraft resources ──────────────────────────────────────────────────────
 function makeGlowSprite() {
-  const s = 64;
+  const s = 128;
   const cvs = document.createElement('canvas');
   cvs.width = s; cvs.height = s;
   const g = cvs.getContext('2d');
   const grd = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
-  // Air Loom: warm white core + orange/yellow halo
-  grd.addColorStop(0, 'rgba(255,248,220,1)');
-  grd.addColorStop(0.18, 'rgba(255,190,70,0.85)');
-  grd.addColorStop(0.45, 'rgba(255,140,40,0.35)');
-  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  // Upscale: soft pearl core → champagne halo (restrained, not neon)
+  grd.addColorStop(0.0, 'rgba(255,252,245,0.95)');
+  grd.addColorStop(0.12, 'rgba(255,236,200,0.55)');
+  grd.addColorStop(0.32, 'rgba(232,190,130,0.22)');
+  grd.addColorStop(0.58, 'rgba(180,150,110,0.08)');
+  grd.addColorStop(1.0, 'rgba(0,0,0,0)');
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
   return new THREE.CanvasTexture(cvs);
@@ -2544,8 +2593,8 @@ function isArrival(p) {
 
 // ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 200;
-const TRAIL_HALF_W = 2.0;     // meters — Air Loom filament (not fat ribbon)
-const TRAIL_HALF_W_LOW = 0.7; // taxi / very low alt
+const TRAIL_HALF_W = 1.6;     // meters — refined filament
+const TRAIL_HALF_W_LOW = 0.55; // taxi / very low alt
 const TRAIL_SAMPLE_MS = 650;  // live stream cadence between ADS-B polls
 const TRAIL_SAMPLE_M = 90;    // or when DR tip has moved this far
 const _tA = new THREE.Vector3();
@@ -2571,7 +2620,7 @@ function createAircraft(icao, typeHint) {
   group.add(model);
 
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0xffb84a, transparent: true, opacity: 0.55,
+    map: glowTex, color: 0xf2e0c0, transparent: true, opacity: 0.48,
     blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   const glowSize = Math.max(140, info.span * SIZE_MULT * 1.6);
@@ -2585,7 +2634,7 @@ function createAircraft(icao, typeHint) {
   stickGeo.setAttribute('position', new THREE.BufferAttribute(stickPos, 3));
   stickGeo.setAttribute('color', new THREE.BufferAttribute(stickCol, 3));
   const stick = new THREE.Line(stickGeo, new THREE.LineBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.55,
+    vertexColors: true, transparent: true, opacity: 0.38,
   }));
   stick.visible = settings.showAltSticks;
   stick.renderOrder = 1;
@@ -2619,11 +2668,11 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.72,
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending, // thin filaments → soft Air Loom glow
+      blending: THREE.NormalBlending, // restrained bloom (no neon wash)
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -2834,9 +2883,9 @@ function updateTrail(rec) {
 
   // Opacity: softer on ground
   const mat = rec.trail.material;
-  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.35;
-  else if (tipAlt < 120) mat.opacity = 0.55;
-  else mat.opacity = 0.82;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.28;
+  else if (tipAlt < 120) mat.opacity = 0.48;
+  else mat.opacity = 0.68;
 
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
@@ -2974,9 +3023,9 @@ function applyPose(rec) {
     const scol = rec.stick.geometry.attributes.color.array;
     pos[0] = 0; pos[1] = -rec.display.y; pos[2] = 0;
     pos[3] = 0; pos[4] = 0; pos[5] = 0;
-    // Soft white/altitude drop-line (Air Loom style)
-    scol[0] = 0.55; scol[1] = 0.6; scol[2] = 0.7;
-    scol[3] = col.r * 0.75; scol[4] = col.g * 0.75; scol[5] = col.b * 0.75;
+    // Hairline drop — pearl at ground, soft altitude tip
+    scol[0] = 0.42; scol[1] = 0.46; scol[2] = 0.55;
+    scol[3] = col.r * 0.55; scol[4] = col.g * 0.55; scol[5] = col.b * 0.55;
     rec.stick.geometry.attributes.position.needsUpdate = true;
     rec.stick.geometry.attributes.color.needsUpdate = true;
   }
@@ -3255,18 +3304,18 @@ function animate() {
         const col = altColor(rec.altM || 0);
         rec.glow.material.color.copy(col);
         if (!showMesh) {
-          // Orbit far: bright altitude-colored glow dot (Air Loom)
-          const gs = THREE.MathUtils.clamp(180 + dist * 0.018, 220, 3200);
+          // Orbit far: soft altitude pearl (not neon billboard)
+          const gs = THREE.MathUtils.clamp(160 + dist * 0.014, 200, 2600);
           rec.glow.scale.set(gs, gs, 1);
-          rec.glow.material.opacity = THREE.MathUtils.clamp(0.55 + Math.min(dist, 90000) / 160000, 0.55, 0.95);
+          rec.glow.material.opacity = THREE.MathUtils.clamp(0.42 + Math.min(dist, 90000) / 200000, 0.42, 0.72);
           rec.glow.visible = true;
         } else {
-          // Close / Follow: small halo around photoreal mesh
-          const base = Math.max(90, (rec.span || 12) * SIZE_MULT * 1.15);
-          const boost = isFollow ? base * 0.35 : THREE.MathUtils.clamp(dist * 0.004, 0, 400);
-          const gs = Math.max(base * 0.55, boost);
+          // Close / Follow: delicate halo around white mesh
+          const base = Math.max(70, (rec.span || 12) * SIZE_MULT * 0.95);
+          const boost = isFollow ? base * 0.28 : THREE.MathUtils.clamp(dist * 0.003, 0, 280);
+          const gs = Math.max(base * 0.45, boost);
           rec.glow.scale.set(gs, gs, 1);
-          rec.glow.material.opacity = isFollow ? 0.32 : 0.42;
+          rec.glow.material.opacity = isFollow ? 0.22 : 0.34;
           rec.glow.visible = true;
         }
       }
