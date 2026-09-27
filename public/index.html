@@ -28,9 +28,15 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
-    position: absolute; top: 14px; left: 18px; right: 18px; z-index: 5; pointer-events: none;
-    text-shadow: 0 1px 8px rgba(0,0,0,0.85);
+    position: absolute; top: 10px; left: 14px; right: 14px; z-index: 5; pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
     display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 10px 14px;
+    background: rgba(8, 12, 20, 0.92);
+    border: 1px solid rgba(80, 140, 200, 0.32);
+    border-radius: 10px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
   }
   #hud .brand { min-width: 0; flex: 1 1 auto; }
   #hud h1 {
@@ -163,9 +169,9 @@
     position: absolute; top: max(14px, env(safe-area-inset-top)); left: 50%;
     transform: translateX(-50%); z-index: 12; pointer-events: auto;
     display: flex; gap: 0; border-radius: 8px; overflow: hidden;
-    background: rgba(10, 16, 26, 0.78); border: 1px solid rgba(80,140,200,0.35);
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    background: rgba(8, 12, 20, 0.94); border: 1px solid rgba(80,140,200,0.45);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
   }
   #camBar button {
     width: auto; margin: 0; border: none; border-radius: 0;
@@ -241,8 +247,9 @@
     #drawer:not(.collapsed) + #toggleDrawer { left: calc(min(86vw, 320px) + 8px); }
     /* Keep title clear of the green ☰ button (was boxing the leading “A”) */
     #hud {
-      top: max(14px, env(safe-area-inset-top));
-      left: 52px; right: 12px; gap: 8px;
+      top: max(10px, env(safe-area-inset-top));
+      left: 52px; right: 10px; gap: 8px;
+      padding: 8px 10px;
     }
     #hud h1 { font-size: 15px; }
     #hud .sub { font-size: 10px; }
@@ -399,8 +406,8 @@ const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
-const SIZE_MULT = 4.0; // readable but not cartoon; proportions from TYPE_DIMS
-const BUILD_MARK = 'follow-v7'; // ground-under-follow + thin trail + compact single chase
+const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
+const BUILD_MARK = 'follow-v8'; // smaller planes + photoreal mats + orbit fix + follow zoom
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -756,7 +763,7 @@ const gltfLoader = new GLTFLoader();
 const gltfTemplateCache = new Map(); // familyId → Promise<Group template>
 const gltfLoading = new Map();       // path → Promise
 let icaoMap = null;
-const MAX_CONCURRENT_GLTF = 3;
+const MAX_CONCURRENT_GLTF = 5;
 let gltfInflight = 0;
 const gltfQueue = [];
 
@@ -883,6 +890,81 @@ function gltfFuseAxisFromGeometry(root) {
   return { axis: 'x', sign: xMin < xMax ? -1 : 1 };
 }
 
+/** Classify mesh names into body / glass / metal for PBR polish. */
+function guessPartFromName(hint) {
+  const n = String(hint || '').toLowerCase();
+  if (/glass|windshield|canopy|window|cockpitglass|transpar/i.test(n)) return 'glass';
+  if (/engine|nacelle|fan|exhaust|nozzle|intake|spinner|prop|gear|strut|wheel|chrome|metal/i.test(n)) return 'engine';
+  if (/rudder|elevator|hstab|vstab|\bfin\b|tail/i.test(n)) return 'fin';
+  if (/wing|flap|aileron|slat|spoiler/i.test(n)) return 'wing';
+  return 'body';
+}
+
+/** Upgrade GLTF/procedural mats: metal + glossy paint, less plastic. */
+function polishAirframeMaterial(m, hint) {
+  const n = String(hint || '').toLowerCase();
+  const isGlass = /glass|windshield|canopy|window|cockpitglass|transpar/i.test(n);
+  const isMetal = /engine|nacelle|fan|exhaust|nozzle|intake|spinner|prop|gear|strut|wheel|chrome|metal|aluminium|aluminum/i.test(n);
+  const isTire = /tire|rubber|tyre/i.test(n);
+  let p = m;
+  if (!m.isMeshPhysicalMaterial) {
+    p = new THREE.MeshPhysicalMaterial();
+    if (m.color) p.color.copy(m.color);
+    else p.color.setHex(0xe6eaee);
+    if (m.map) p.map = m.map;
+    if (m.normalMap) p.normalMap = m.normalMap;
+    if (m.roughnessMap) p.roughnessMap = m.roughnessMap;
+    if (m.metalnessMap) p.metalnessMap = m.metalnessMap;
+    if (m.emissive) p.emissive.copy(m.emissive);
+    if (m.emissiveMap) p.emissiveMap = m.emissiveMap;
+    if (m.alphaMap) p.alphaMap = m.alphaMap;
+    p.transparent = !!m.transparent;
+    p.opacity = m.opacity != null ? m.opacity : 1;
+    p.side = m.side != null ? m.side : THREE.FrontSide;
+    p.roughness = m.roughness != null ? m.roughness : 0.45;
+    p.metalness = m.metalness != null ? m.metalness : 0.2;
+    p.emissiveIntensity = m.emissiveIntensity != null ? m.emissiveIntensity : 0;
+    if (m.envMap) p.envMap = m.envMap;
+  }
+  if (isGlass) {
+    p.color.setHex(0x8ec4e8);
+    p.metalness = 0.05;
+    p.roughness = 0.06;
+    p.transparent = true;
+    p.opacity = Math.min(p.opacity || 1, 0.42);
+    p.transmission = 0.55;
+    p.thickness = 0.35;
+    p.clearcoat = 1.0;
+    p.clearcoatRoughness = 0.05;
+    p.envMapIntensity = 1.2;
+  } else if (isTire) {
+    p.color.setHex(0x1a1a1a);
+    p.metalness = 0.05;
+    p.roughness = 0.88;
+    p.clearcoat = 0.05;
+  } else if (isMetal) {
+    if (p.color.getHex() > 0xe0e0e0) p.color.setHex(0xb0b6bc);
+    p.metalness = Math.max(0.72, p.metalness || 0);
+    p.roughness = Math.min(0.32, Math.max(0.18, p.roughness || 0.28));
+    p.clearcoat = 0.25;
+    p.clearcoatRoughness = 0.35;
+    p.envMapIntensity = 1.0;
+  } else {
+    // painted composite / airframe — glossy enamel, not matte toy plastic
+    p.metalness = THREE.MathUtils.clamp(p.metalness || 0.18, 0.08, 0.38);
+    p.roughness = THREE.MathUtils.clamp(p.roughness || 0.38, 0.22, 0.48);
+    p.clearcoat = 0.65;
+    p.clearcoatRoughness = 0.22;
+    p.envMapIntensity = 0.9;
+  }
+  if (p.emissive && p.emissive.getHex() === 0) {
+    p.emissive.setHex(0x0a1218);
+    p.emissiveIntensity = Math.max(p.emissiveIntensity || 0, 0.08);
+  }
+  p.side = THREE.DoubleSide;
+  return p;
+}
+
 /**
  * Center, orient nose → +Z (Y up), apply family offsets, scale to target length.
  * Mesh-name hints beat span/length heuristics (GA wings often longer than fuselage).
@@ -952,23 +1034,14 @@ function prepareGltfTemplate(scene, famMeta, targetLen) {
   const s = refLen / Math.max(size.z, 0.001);
   root.scale.setScalar(s);
 
-  // Night-readable materials: slight emissive, keep albedo (no altitude paint)
+  // Photoreal airframe: paint clearcoat / metal / glass (not toy plastic)
   root.traverse((ch) => {
     if (!ch.isMesh || !ch.material) return;
     const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
-    const out = mats.map((m) => {
-      const mm = m.clone();
-      if (mm.emissive) {
-        if (mm.emissive.getHex() === 0) mm.emissive.setHex(0x111820);
-        if ('emissiveIntensity' in mm) mm.emissiveIntensity = Math.max(mm.emissiveIntensity || 0, 0.12);
-      }
-      if ('roughness' in mm && mm.roughness > 0.85) mm.roughness = 0.55;
-      if ('metalness' in mm && mm.metalness < 0.05) mm.metalness = 0.25;
-      mm.side = THREE.DoubleSide;
-      return mm;
-    });
+    const hint = (ch.name || '') + ' ' + (ch.parent && ch.parent.name ? ch.parent.name : '');
+    const out = mats.map((m) => polishAirframeMaterial(m.clone(), hint));
     ch.material = Array.isArray(ch.material) ? out : out[0];
-    if (!ch.userData.part) ch.userData.part = 'body';
+    if (!ch.userData.part) ch.userData.part = guessPartFromName(hint);
   });
 
   root.userData.bodyMats = [];
@@ -1123,22 +1196,26 @@ function buildAircraftModel(icaoType) {
   const group = new THREE.Group();
   group.name = 'acModel_' + cacheKey;
 
-  // HIGH-END: neutral aluminum / white airframe — altitude color is for trails only
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0xe6eaee, emissive: 0x000000, emissiveIntensity: 0,
-    roughness: 0.32, metalness: 0.58,
+  // Fallback procedural (used briefly until family GLB loads): enamel paint + metal
+  const bodyMat = new THREE.MeshPhysicalMaterial({
+    color: 0xe8ecf0, emissive: 0x0a1218, emissiveIntensity: 0.06,
+    roughness: 0.34, metalness: 0.22, clearcoat: 0.7, clearcoatRoughness: 0.22,
+    envMapIntensity: 0.9,
   });
-  const wingMat = new THREE.MeshStandardMaterial({
-    color: 0xd0d5db, emissive: 0x000000, emissiveIntensity: 0,
-    roughness: 0.40, metalness: 0.50, side: THREE.DoubleSide,
+  const wingMat = new THREE.MeshPhysicalMaterial({
+    color: 0xd5dae0, emissive: 0x0a1218, emissiveIntensity: 0.05,
+    roughness: 0.40, metalness: 0.18, clearcoat: 0.55, clearcoatRoughness: 0.28,
+    side: THREE.DoubleSide, envMapIntensity: 0.85,
   });
-  const finMat = new THREE.MeshStandardMaterial({
-    color: 0xe8eef2, emissive: 0x0a3a3a, emissiveIntensity: 0.18,
-    roughness: 0.34, metalness: 0.52,
+  const finMat = new THREE.MeshPhysicalMaterial({
+    color: 0xe8eef2, emissive: 0x0a3a3a, emissiveIntensity: 0.14,
+    roughness: 0.32, metalness: 0.2, clearcoat: 0.65, clearcoatRoughness: 0.2,
+    envMapIntensity: 0.9,
   });
-  const engMat = new THREE.MeshStandardMaterial({
-    color: 0x2c323a, emissive: 0x000000, emissiveIntensity: 0,
-    roughness: 0.42, metalness: 0.72,
+  const engMat = new THREE.MeshPhysicalMaterial({
+    color: 0x2a3038, emissive: 0x000000, emissiveIntensity: 0,
+    roughness: 0.28, metalness: 0.82, clearcoat: 0.2, clearcoatRoughness: 0.4,
+    envMapIntensity: 1.0,
   });
 
   if (cat === 'heli') {
@@ -1406,29 +1483,50 @@ const scene = new THREE.Scene();
 // Light earth-tinted haze so Follow chase still reads ground (not blue void)
 scene.fog = new THREE.FogExp2(0xc2d4c8, 0.00000085);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 50, 8e6);
-// Default framing pulls back to show ~250 statute mi around KSFO
-camera.position.set(160000, 130000, 190000);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 20, 8e6);
+// Orbit default: close enough that GA meshes read as planes (follow-v6's 160km eye made them sub-pixel)
+camera.position.set(38000, 26000, 46000);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.minDistance = 800;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 350;
 controls.maxDistance = 1.35e6;
-controls.target.set(0, 0, 0);
-controls.autoRotate = true;
-controls.autoRotateSpeed = 0.35;
+controls.target.set(0, 400, 0);
+controls.autoRotate = false; // was true — auto-spin on empty-looking far view felt glitchy
+controls.autoRotateSpeed = 0.25;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.95));
-const sun = new THREE.DirectionalLight(0xfff2dd, 1.35);
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.55);
 sun.position.set(50000, 120000, 35000);
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0xd0e8ff, 0.45);
+const fill = new THREE.DirectionalLight(0xd0e8ff, 0.55);
 fill.position.set(-60000, 40000, -30000);
 scene.add(fill);
-const hemi = new THREE.HemisphereLight(0xd8eaf8, 0x6a8a6a, 0.7);
+const hemi = new THREE.HemisphereLight(0xd8eaf8, 0x6a8a6a, 0.85);
 scene.add(hemi);
+// Soft studio env so MeshPhysical clearcoat/metal reads as paint, not flat plastic
+(function buildAirframeEnv() {
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0xa8c4dc);
+    envScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const s1 = new THREE.DirectionalLight(0xfff5e8, 1.8);
+    s1.position.set(2, 3, 1); envScene.add(s1);
+    const s2 = new THREE.DirectionalLight(0xb0d0ff, 0.6);
+    s2.position.set(-2, 1, -2); envScene.add(s2);
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(8, 32),
+      new THREE.MeshBasicMaterial({ color: 0x4a6a48 })
+    );
+    ground.rotation.x = -Math.PI / 2; ground.position.y = -1; envScene.add(ground);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    scene.environment = rt.texture;
+    pmrem.dispose();
+  } catch (err) { console.warn('envMap build failed', err); }
+})();
 
 // ─── Ground ──────────────────────────────────────────────────────────────────
 const groundGroup = new THREE.Group();
@@ -1797,16 +1895,48 @@ $('btnArrivals').onclick = () => setMode('arrivals');
 $('btnAllTraffic').onclick = () => setMode('all');
 setMode('ga'); // persist initial default: Private/GA
 
+// Follow chase user offsets (wheel/pinch zoom + drag orbit around target)
+let followZoom = 1.0;   // 0.35..4.5 — distance multiplier
+let followYaw = 0;      // rad — orbit around aircraft
+let followPitch = 0;    // rad — elevation offset
+const FOLLOW_ZOOM_MIN = 0.35, FOLLOW_ZOOM_MAX = 4.5;
+
+function resetFollowViewOffsets() {
+  followZoom = 1.0;
+  followYaw = 0;
+  followPitch = 0;
+}
+
+function frameOrbitOverview() {
+  // Close enough that SIZE_MULT-scaled GA reads as aircraft, not dust
+  camera.position.set(38000, 26000, 46000);
+  controls.target.set(0, 400, 0);
+  camera.near = 20;
+  camera.far = 8e6;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
 function setCameraMode(mode) {
-  settings.cameraMode = mode === 'orbit' ? 'orbit' : 'follow';
-  const isFollow = settings.cameraMode === 'follow';
+  const next = mode === 'orbit' ? 'orbit' : 'follow';
+  const prev = settings.cameraMode;
+  settings.cameraMode = next;
+  const isFollow = next === 'follow';
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
   if ($('uiCamMode')) $('uiCamMode').textContent = settings.cameraMode;
   controls.enabled = !isFollow;
   controls.autoRotate = !isFollow && $('sAuto').checked;
-  // snap smooth state on next frame when (re)entering follow
+  // Always clear any leftover multi-view scissor from older dual-follow builds
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+  renderer.setScissorTest(false);
+  renderer.autoClear = true;
   _ckSmoothInit = false;
+  if (isFollow) {
+    // Keep prior offsets unless switching targets later
+  } else if (prev === 'follow') {
+    frameOrbitOverview();
+  }
   updateInfoPanel();
 }
 $('btnFollow').onclick = () => setCameraMode('follow');
@@ -1890,7 +2020,9 @@ function pickCockpitTargets(fromList) {
   }
 
   // Single chase: best inbound GA only (no secondary / dual / PiP)
-  cockpitPrimaryId = scored[0].icao;
+  const nextId = scored[0].icao;
+  if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
+  cockpitPrimaryId = nextId;
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
@@ -1907,24 +2039,38 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
 
   const body = Math.max(18, (rec.len || 12) * SIZE_MULT); // visual length (m)
   const lag = lagScale || 1;
+  const zoom = THREE.MathUtils.clamp(followZoom || 1, FOLLOW_ZOOM_MIN, FOLLOW_ZOOM_MAX);
   // Closer + higher → ~35–45° look-down so terrain sits under the aircraft
-  const back = Math.max(260, body * 5.2) * lag;
-  const up = Math.max(240, body * 5.0) * lag;
-  const side = Math.max(36, body * 0.85) * lag;
+  const back = Math.max(260, body * 5.2) * lag * zoom;
+  const up = Math.max(240, body * 5.0) * lag * zoom;
+  const side = Math.max(36, body * 0.85) * lag * zoom;
   const lookAhead = Math.max(6, body * 0.12);
 
   // Lateral offset: fwd × worldUp = (-fwd.z, 0, fwd.x)
   const rx = -_ckFwd.z, rz = _ckFwd.x;
 
+  outLook.copy(rec.display)
+    .addScaledVector(_ckFwd, lookAhead)
+    .addScaledVector(_ckUp, -Math.max(12, body * 0.22));
   outPos.copy(rec.display)
     .addScaledVector(_ckFwd, -back)
     .addScaledVector(_ckUp, up);
   outPos.x += rx * side;
   outPos.z += rz * side;
-  // Aim at the airframe / slightly below so ground fills under the chase
-  outLook.copy(rec.display)
-    .addScaledVector(_ckFwd, lookAhead)
-    .addScaledVector(_ckUp, -Math.max(12, body * 0.22));
+
+  // User drag orbit: rotate eye around look target (yaw about world up, pitch about right)
+  if (followYaw || followPitch) {
+    const off = outPos.clone().sub(outLook);
+    if (off.lengthSq() > 1e-6) {
+      off.applyAxisAngle(_ckUp, followYaw || 0);
+      const right = new THREE.Vector3().crossVectors(off, _ckUp);
+      if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+      else right.normalize();
+      const pitch = THREE.MathUtils.clamp(followPitch || 0, -0.85, 0.95);
+      off.applyAxisAngle(right, pitch);
+      outPos.copy(outLook).add(off);
+    }
+  }
   // Never aim above the eye (would sky-fill the frame)
   if (outLook.y > outPos.y - 20) outLook.y = outPos.y - 20;
   // Guard: identical eye/look → lookAt NaNs the matrix and freezes the scene
@@ -2154,10 +2300,10 @@ function createAircraft(icao, typeHint) {
   group.add(model);
 
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0xb8c4d0, transparent: true, opacity: 0.28,
+    map: glowTex, color: 0xc5d0da, transparent: true, opacity: 0.34,
     blending: THREE.AdditiveBlending, depthWrite: false,
   }));
-  const glowSize = Math.max(90, info.span * SIZE_MULT * 0.85);
+  const glowSize = Math.max(140, info.span * SIZE_MULT * 1.6);
   glow.scale.set(glowSize, glowSize, 1);
   group.add(glow);
 
@@ -2270,7 +2416,7 @@ function ensureModel(rec) {
   rec.len = info.len;
   rec.gltfFamily = null;
   rec._gltfRequested = null;
-  const glowSize = Math.max(90, info.span * SIZE_MULT * 0.85);
+  const glowSize = Math.max(140, info.span * SIZE_MULT * 1.6);
   rec.glow.scale.set(glowSize, glowSize, 1);
   loadIcaoMap().then(() => requestGltfForRec(rec));
 }
@@ -2547,7 +2693,7 @@ function applyPose(rec) {
   tintModel(rec.model, col); // fin accent only — body stays aluminum
   // subtle altitude hint on glow sprite (not the whole airframe)
   rec.glow.material.color.copy(col);
-  rec.glow.material.opacity = 0.22;
+  // glow opacity set per-frame from camera distance (Orbit visibility)
 
   // stick: ground → aircraft (subtle; default hidden)
   rec.stick.visible = !!settings.showAltSticks;
@@ -2823,6 +2969,17 @@ function animate() {
     rec.group.position.copy(rec.display);
     // Keep nose aligned with the same track used for dead-reckon (trails stay aft)
     orientAircraftModel(rec);
+    // Distance-adaptive halo so Orbit overview still reveals GA after SIZE_MULT shrink
+    if (rec.glow) {
+      const eye = (settings.cameraMode === 'follow' && camPosFinite(cockpitCam))
+        ? cockpitCam.position : camera.position;
+      const dist = rec.display.distanceTo(eye);
+      const base = Math.max(120, (rec.span || 12) * SIZE_MULT * 1.5);
+      const boost = THREE.MathUtils.clamp(dist * 0.011, 0, 2200);
+      const gs = Math.max(base, boost);
+      rec.glow.scale.set(gs, gs, 1);
+      rec.glow.material.opacity = THREE.MathUtils.clamp(0.22 + Math.min(dist, 80000) / 180000, 0.22, 0.55);
+    }
 
     // Live trail stream: tip tracks dead-reckon every frame; solidify samples
     // on cadence/distance so the wake grows behind the aircraft between polls.
@@ -2916,33 +3073,117 @@ function animate() {
 }
 animate();
 
-canvas.addEventListener('pointerdown', (ev) => {
-  if (ev.button !== 0) return;
+function activeViewCam() {
+  if (settings.cameraMode === 'follow' && camPosFinite(cockpitCam)) return cockpitCam;
+  return camera;
+}
+
+function pickAircraftAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  _ptr.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-  _ptr.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-  _raycaster.setFromCamera(_ptr, camera);
+  _ptr.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  _ptr.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _raycaster.setFromCamera(_ptr, activeViewCam());
   const meshes = [];
   for (const rec of aircraft.values()) {
+    if (!rec.model) continue;
     rec.model.traverse((ch) => { if (ch.isMesh) meshes.push(ch); });
   }
   const hits = _raycaster.intersectObjects(meshes, false);
-  if (hits.length) {
-    const id = hits[0].object.userData.icao;
-    selectedId = id;
-    const rec = aircraft.get(id);
-    updateSelPanel(rec);
-    for (const r of aircraft.values()) setLabelInfo(r);
-    renderArrivalsList(lastArrivals);
-    if (settings.cameraMode === 'follow' && rec && !rec.onGround) {
-      cockpitPrimaryId = id;
-      _ckSmoothInit = false;
-      updateInfoPanel();
-    } else if (settings.cameraMode === 'orbit' && rec) {
-      controls.target.lerp(rec.display, 0.7);
-    }
+  if (!hits.length) return null;
+  return aircraft.get(hits[0].object.userData.icao) || null;
+}
+
+let _followDrag = null;
+let _pinch = { active: false, d0: 0, z0: 1 };
+
+canvas.addEventListener('wheel', (ev) => {
+  if (settings.cameraMode !== 'follow') return;
+  ev.preventDefault();
+  const f = Math.exp(ev.deltaY * 0.00115);
+  followZoom = THREE.MathUtils.clamp(followZoom * f, FOLLOW_ZOOM_MIN, FOLLOW_ZOOM_MAX);
+}, { passive: false });
+
+canvas.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0) return;
+  if (settings.cameraMode === 'follow') {
+    _followDrag = { x: ev.clientX, y: ev.clientY, moved: false, id: ev.pointerId };
+    try { canvas.setPointerCapture(ev.pointerId); } catch (_) {}
+    return;
+  }
+  const rec = pickAircraftAt(ev.clientX, ev.clientY);
+  if (!rec) return;
+  selectedId = rec.icao;
+  updateSelPanel(rec);
+  for (const r of aircraft.values()) setLabelInfo(r);
+  renderArrivalsList(lastArrivals);
+  controls.target.lerp(rec.display, 0.7);
+});
+
+canvas.addEventListener('pointermove', (ev) => {
+  if (!_followDrag || settings.cameraMode !== 'follow') return;
+  const dx = ev.clientX - _followDrag.x;
+  const dy = ev.clientY - _followDrag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 5) _followDrag.moved = true;
+  if (_followDrag.moved) {
+    followYaw -= dx * 0.005;
+    followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.004, -0.85, 0.95);
+    _followDrag.x = ev.clientX;
+    _followDrag.y = ev.clientY;
   }
 });
+
+function endFollowPointer(ev) {
+  if (!_followDrag) return;
+  const drag = _followDrag;
+  _followDrag = null;
+  try { canvas.releasePointerCapture(drag.id); } catch (_) {}
+  if (drag.moved || settings.cameraMode !== 'follow') return;
+  const rec = pickAircraftAt(ev.clientX, ev.clientY);
+  if (!rec) return;
+  selectedId = rec.icao;
+  updateSelPanel(rec);
+  for (const r of aircraft.values()) setLabelInfo(r);
+  renderArrivalsList(lastArrivals);
+  if (!rec.onGround) {
+    if (cockpitPrimaryId !== rec.icao) resetFollowViewOffsets();
+    cockpitPrimaryId = rec.icao;
+    _ckSmoothInit = false;
+    updateInfoPanel();
+  }
+}
+canvas.addEventListener('pointerup', endFollowPointer);
+canvas.addEventListener('pointercancel', () => { _followDrag = null; });
+
+canvas.addEventListener('dblclick', () => {
+  if (settings.cameraMode === 'follow') resetFollowViewOffsets();
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  if (settings.cameraMode !== 'follow' || e.touches.length !== 2) {
+    if (e.touches.length !== 2) _pinch.active = false;
+    return;
+  }
+  const dx = e.touches[0].clientX - e.touches[1].clientX;
+  const dy = e.touches[0].clientY - e.touches[1].clientY;
+  _pinch.active = true;
+  _pinch.d0 = Math.hypot(dx, dy) || 1;
+  _pinch.z0 = followZoom;
+  _followDrag = null; // cancel single-finger orbit while pinching
+}, { passive: true });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (!_pinch.active || settings.cameraMode !== 'follow' || e.touches.length !== 2) return;
+  e.preventDefault();
+  const dx = e.touches[0].clientX - e.touches[1].clientX;
+  const dy = e.touches[0].clientY - e.touches[1].clientY;
+  const d = Math.hypot(dx, dy) || 1;
+  followZoom = THREE.MathUtils.clamp(_pinch.z0 * (_pinch.d0 / d), FOLLOW_ZOOM_MIN, FOLLOW_ZOOM_MAX);
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  if (e.touches.length < 2) _pinch.active = false;
+}, { passive: true });
+canvas.addEventListener('touchcancel', () => { _pinch.active = false; }, { passive: true });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
