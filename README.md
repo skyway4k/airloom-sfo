@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v7)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v8)
 
 ## Local
 
@@ -44,10 +44,14 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   so far-field terrain/cities stay sharp under Follow (USGS max useful zoom ≈
   **z16** over CONUS). Template:
   `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`
-- **Air Loom** (Orbit): dark high-contrast **Carto dark_all** basemap (z8 / z10 /
-  z12 / z14), translucent Class B / Bay airspace shells, altitude-colored glow
-  dots + thin trails with **altitude/speed tick labels**, vertical drop-lines,
-  and large floating city labels — modeled after the original Air Loom look.
+- **Air Loom** (Orbit): dark high-contrast **ESRI World Dark Gray Base** basemap
+  (keyless / CORS-*; z8 / z10 / z12 / z14). Carto `dark_all` was dropped in
+  airloom-v8 after it started serving "API KEY REQUIRED" watermark tiles.
+  Template:
+  `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`
+  Translucent Class B / Bay airspace shells, altitude-colored glow dots + thin
+  trails with **altitude/speed tick labels**, vertical drop-lines, and large
+  floating city labels — modeled after the original Air Loom look.
   (Orbit is stylized dark, not satellite.)
 - **Dual-final Orbit** (auto): when **2+** aircraft are on a KSFO final, camera
   switches to a **wide Orbit** framing both (airport kept in view). Drops back to
@@ -56,6 +60,8 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
 - **Landing target** (airloom-v6): clear KSFO beacon + approach funnels + runway
   threshold markers; Follow shows **distance-to-landing** on a tiny bottom chip
   (nm + ETA; “ON FINAL / AT THRESHOLD” under 0.2 nm — no 0.0 mi spam).
+- **Orbit keyless dark basemap** (airloom-v8): Carto dark_all → ESRI World
+  Dark Gray Base (no API key). Follow USGS ImageryOnly unchanged.
 - **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
   single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
   altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse

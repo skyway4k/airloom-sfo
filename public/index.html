@@ -499,7 +499,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v7'; // declutter Follow FOV + screen-constant trail labels
+const BUILD_MARK = 'airloom-v8'; // Orbit keyless ESRI Dark Gray (Carto API-key tiles dead)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -1869,6 +1869,11 @@ const FOLLOW_TILE_URL = (zz, ty, tx) =>
 const FOLLOW_TILE_FALLBACK_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_FOLLOW_TILE = FOLLOW_TILE_TMPL;
+/** Keyless dark canvas for Orbit / Air Loom (ESRI World Dark Gray Base). CORS-*. Note z/y/x. */
+const ORBIT_TILE_TMPL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ORBIT_TILE_URL = (zz, ty, tx) =>
+  `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${zz}/${ty}/${tx}`;
+window.__AIRLOOM_ORBIT_TILE = ORBIT_TILE_TMPL;
 
 async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   opts = opts || {};
@@ -2108,13 +2113,15 @@ async function loadSatBasemap() {
   groundReady = true;
 }
 
-/** Dark high-contrast stylized basemap — Air Loom Orbit overview. */
+/** Dark high-contrast stylized basemap — Air Loom Orbit overview.
+ *  airloom-v8: former Carto CDN dark tiles now watermark "API KEY REQUIRED";
+ *  use keyless ESRI World Dark Gray Base (CORS-*). USGS ImageryOnly stays Follow-only. */
 async function loadDarkBasemap() {
   while (darkGroundGroup.children.length) darkGroundGroup.remove(darkGroundGroup.children[0]);
   makeEarthBase(darkGroundGroup, true);
-  const carto = (z, ty, tx) => `https://basemaps.cartocdn.com/dark_all/${z}/${tx}/${ty}.png`;
-  // airloom-v6: denser Orbit dark stack so distant cities stay crisp
-  const wide = await fetchTileLayer(8, 5, '#05070c', false, { tileUrl: carto });
+  const dark = ORBIT_TILE_URL;
+  // denser Orbit dark stack so distant cities stay crisp
+  const wide = await fetchTileLayer(8, 5, '#05070c', false, { tileUrl: dark });
   if (wide) {
     wide.mesh.position.y = 0;
     darkGroundGroup.add(wide.mesh);
@@ -2123,11 +2130,11 @@ async function loadDarkBasemap() {
     const fb = await fetchTileLayer(8, 4, '#05070c', false, { tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true });
     if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
   }
-  const mid = await fetchTileLayer(10, 4, '#060910', false, { tileUrl: carto });
+  const mid = await fetchTileLayer(10, 4, '#060910', false, { tileUrl: dark });
   if (mid) { mid.mesh.position.y = 0.18; darkGroundGroup.add(mid.mesh); }
-  const inset = await fetchTileLayer(12, 4, '#080c14', false, { tileUrl: carto });
+  const inset = await fetchTileLayer(12, 4, '#080c14', false, { tileUrl: dark });
   if (inset) { inset.mesh.position.y = 0.35; darkGroundGroup.add(inset.mesh); }
-  const near = await fetchTileLayer(14, 3, '#0a1018', false, { tileUrl: carto });
+  const near = await fetchTileLayer(14, 3, '#0a1018', false, { tileUrl: dark });
   if (near) { near.mesh.position.y = 0.5; darkGroundGroup.add(near.mesh); }
 
   // Subtle grid ribs over dark map
