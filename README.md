@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v5)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v6)
 
 ## Local
 
@@ -39,17 +39,22 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
 - **Follow** (default when ≤1 on final): elevated chase on the best KSFO inbound /
   final private/GA. Wheel/pinch zoom + drag orbit around the target.
   Basemap is **USGS ImageryOnly** ultra-HD (keyless, CORS-ok NAIP-class; ESRI World
-  Imagery fallback). Static stack **z8 / z11 / z13 / z15 / z16** around KSFO plus a
-  denser **z14–z16 chase inset** that tracks the aircraft so tiles stay sharp under
-  Follow (USGS max useful zoom ≈ **z16** over CONUS). Template:
+  Imagery fallback). Static stack **z8 / z10–z16** (wider spans) around KSFO plus a
+  denser **z13–z16 chase inset** with **look-ahead prefetch** (~3.5 nm along track)
+  so far-field terrain/cities stay sharp under Follow (USGS max useful zoom ≈
+  **z16** over CONUS). Template:
   `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`
-- **Air Loom** (Orbit): dark high-contrast **Carto dark_all** basemap (z8 + denser
-  z12), translucent Class B / Bay airspace shells, altitude-colored glow dots +
-  thin trails, vertical drop-lines, and large floating city labels — modeled after
-  the original Air Loom look. (Orbit is stylized dark, not satellite.)
+- **Air Loom** (Orbit): dark high-contrast **Carto dark_all** basemap (z8 / z10 /
+  z12 / z14), translucent Class B / Bay airspace shells, altitude-colored glow
+  dots + thin trails with **altitude/speed tick labels**, vertical drop-lines,
+  and large floating city labels — modeled after the original Air Loom look.
+  (Orbit is stylized dark, not satellite.)
 - **Dual-final Orbit** (auto): when **2+** aircraft are on a KSFO final, camera
   switches to a **wide Orbit** framing both (airport kept in view). Drops back to
   Follow when fewer than two remain on final. Manual Follow/Orbit clicks lock out
   auto-switch for ~90s.
+- **Landing target** (airloom-v6): clear KSFO beacon + approach funnels + runway
+  threshold markers; Follow HUD shows **distance-to-landing** (nm / mi + ETA) with
+  a dashed remaining-path and optional distance ring.
 
 Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated only.
