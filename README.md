@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v11)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v12)
 
 ## Local
 
@@ -71,10 +71,13 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   28s west ops); opposite/closed runways (e.g. 10R) are not invented. “AT
   THRESHOLD” requires real final proximity — past-threshold geometry no longer
   collapses remaining distance to 0.
-- **Primary chase label in-frame** (airloom-v11): Follow/selected `.ac-label`
-  soft-clamps into the viewport safe area (below HUD, above bottom chips) and
-  flips below the plane when an overhead tilt would push it under the header —
-  stays compact and readable instead of clipping out of frame.
+- **Orbit map + primary label** (airloom-v12): Air Loom / Orbit dark basemap
+  loads via same-origin `/tiles/orbit/{z}/{y}/{x}` proxy (ESRI World Dark Gray
+  Base upstream) so Safari iOS no longer ends up with a black/empty ground when
+  mass cross-origin tile Images fail. Concurrent tile pool + midtone lift keep
+  coastline/roads discernible; direct ESRI + stylized imagery remain fallbacks.
+  Follow/selected `.ac-label` soft-clamps into the HUD/chip safe area and flips
+  below the plane under overhead tilt instead of clipping out of frame.
 - **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
   single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
   altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse

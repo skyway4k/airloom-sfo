@@ -14,7 +14,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.2 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
+const UA = 'AirLoomSFO/1.3 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
 
 const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 217 }; // ≈250 statute mi
 const ADSB_CACHE_FRESH_MS = 22000;
@@ -415,6 +415,94 @@ async function backgroundRefresh() {
   }
 }
 
+
+/** Same-origin Orbit basemap proxy — Safari often fails mass cross-origin
+ *  Image loads to arcgisonline (ACAO * + credentials). Server fetch has no CORS. */
+const ORBIT_UPSTREAMS = [
+  (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
+  (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
+];
+const tileProxyCache = new Map(); // key -> { buf, ct, at }
+const TILE_CACHE_MAX = 800;
+const TILE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+function fetchUpstreamTile(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https') ? require('https') : require('http');
+    const req = lib.get(url, {
+      headers: {
+        'User-Agent': UA,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      },
+      timeout: 12000,
+    }, (r) => {
+      if (r.statusCode && r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+        r.resume();
+        fetchUpstreamTile(r.headers.location).then(resolve, reject);
+        return;
+      }
+      if (r.statusCode !== 200) {
+        r.resume();
+        reject(new Error('upstream ' + r.statusCode));
+        return;
+      }
+      const chunks = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => resolve({
+        buf: Buffer.concat(chunks),
+        ct: r.headers['content-type'] || 'image/jpeg',
+      }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+async function handleOrbitTile(z, y, x, res) {
+  const key = z + '/' + y + '/' + x;
+  const cached = tileProxyCache.get(key);
+  if (cached && (Date.now() - cached.at) < TILE_CACHE_TTL_MS) {
+    res.writeHead(200, {
+      'Content-Type': cached.ct,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400',
+      'X-AirLoom-Tile': 'cache',
+    });
+    res.end(cached.buf);
+    return;
+  }
+  let lastErr = null;
+  for (const mk of ORBIT_UPSTREAMS) {
+    try {
+      const { buf, ct } = await fetchUpstreamTile(mk(z, y, x));
+      if (!buf || buf.length < 64) throw new Error('short');
+      if (tileProxyCache.size >= TILE_CACHE_MAX) {
+        // drop oldest ~10%
+        let i = 0;
+        for (const k of tileProxyCache.keys()) {
+          tileProxyCache.delete(k);
+          if (++i > TILE_CACHE_MAX * 0.1) break;
+        }
+      }
+      tileProxyCache.set(key, { buf, ct, at: Date.now() });
+      res.writeHead(200, {
+        'Content-Type': ct,
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=86400',
+        'X-AirLoom-Tile': 'miss',
+      });
+      res.end(buf);
+      return;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  log('orbit tile fail ' + key + ' ' + (lastErr && lastErr.message), 'WARN');
+  res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('tile upstream failed');
+}
+
+
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://localhost');
@@ -462,6 +550,22 @@ const server = http.createServer(async (req, res) => {
       const q = Object.fromEntries(u.searchParams.entries());
       await handleAdsbStates(q, res);
       return;
+    }
+
+
+    // Same-origin Orbit tiles (z/y/x ArcGIS order) — avoids Safari CORS flake
+    {
+      const m = pathname.match(/^\/tiles\/orbit\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
+      if (m) {
+        const z = Number(m[1]), y = Number(m[2]), x = Number(m[3]);
+        if (!Number.isFinite(z) || !Number.isFinite(y) || !Number.isFinite(x)
+            || z < 0 || z > 18 || x < 0 || y < 0 || x >= (1 << z) || y >= (1 << z)) {
+          res.writeHead(400).end('bad tile');
+          return;
+        }
+        await handleOrbitTile(z, y, x, res);
+        return;
+      }
     }
 
     if (pathname === '/' || pathname === '/airloom' || pathname === '/airloom.html' || pathname === '/index.html') {

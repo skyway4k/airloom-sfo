@@ -499,7 +499,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v11'; // Primary chase label stays in-frame under overhead tilt
+const BUILD_MARK = 'airloom-v12'; // Orbit same-origin dark tile proxy (Safari black map)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -1996,11 +1996,34 @@ const FOLLOW_TILE_URL = (zz, ty, tx) =>
 const FOLLOW_TILE_FALLBACK_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_FOLLOW_TILE = FOLLOW_TILE_TMPL;
-/** Keyless dark canvas for Orbit / Air Loom (ESRI World Dark Gray Base). CORS-*. Note z/y/x. */
-const ORBIT_TILE_TMPL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-const ORBIT_TILE_URL = (zz, ty, tx) =>
+/** Orbit / Air Loom dark basemap.
+ *  Prefer same-origin /tiles/orbit proxy — Safari iOS often drops mass cross-origin
+ *  Image loads to arcgisonline (ACAO * + Allow-Credentials), leaving Orbit black.
+ *  Direct ESRI URL kept as mosaic fallback. Note ArcGIS z/y/x order. */
+const ORBIT_TILE_TMPL = '/tiles/orbit/{z}/{y}/{x}';
+const ORBIT_TILE_DIRECT_TMPL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ORBIT_TILE_URL = (zz, ty, tx) => `/tiles/orbit/${zz}/${ty}/${tx}`;
+const ORBIT_TILE_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_ORBIT_TILE = ORBIT_TILE_TMPL;
+window.__AIRLOOM_ORBIT_TILE_DIRECT = ORBIT_TILE_DIRECT_TMPL;
+
+async function runPool(items, limit, worker) {
+  const n = items.length;
+  if (!n) return;
+  let i = 0;
+  const runners = [];
+  const conc = Math.max(1, Math.min(limit || 8, n));
+  for (let r = 0; r < conc; r++) {
+    runners.push((async () => {
+      while (i < n) {
+        const idx = i++;
+        await worker(items[idx], idx);
+      }
+    })());
+  }
+  await Promise.all(runners);
+}
 
 async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   opts = opts || {};
@@ -2026,18 +2049,21 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       const url = tileUrlFn(z, ty, tx);
       const px = (dx + span) * 256;
       const py = (dy + span) * 256;
-      jobs.push(new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        const t = setTimeout(() => resolve(), 10000);
-        img.onload = () => { clearTimeout(t); try { ctx.drawImage(img, px, py); loaded++; } catch (_) {} resolve(); };
-        img.onerror = () => { clearTimeout(t); resolve(); };
-        img.src = url;
-      }));
+      jobs.push({ url, px, py });
     }
   }
-  await Promise.all(jobs);
-  if (loaded < total * 0.15) return null;
+  // Safari iOS drops many parallel cross-origin Image loads; cap concurrency.
+  const poolLimit = opts.poolLimit || (opts.sameOrigin ? 16 : 8);
+  await runPool(jobs, poolLimit, ({ url, px, py }) => new Promise((resolve) => {
+    const img = new Image();
+    // Same-origin proxy tiles don't need CORS; still set anonymous for canvas safety.
+    img.crossOrigin = 'anonymous';
+    const t = setTimeout(() => resolve(), opts.tileTimeoutMs || 12000);
+    img.onload = () => { clearTimeout(t); try { ctx.drawImage(img, px, py); loaded++; } catch (_) {} resolve(); };
+    img.onerror = () => { clearTimeout(t); resolve(); };
+    img.src = url;
+  }));
+  if (loaded < total * 0.12) return null;
 
   if (brighten) {
     try {
@@ -2062,6 +2088,19 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
         d[i] = v * 0.55 + 6;
         d[i + 1] = v * 0.62 + 10;
         d[i + 2] = v * 0.78 + 18;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch (_) {}
+  }
+  // ESRI Dark Gray is very ink-heavy; lift midtones so coastline/roads read on OLED/Safari
+  if (opts.orbitLift) {
+    try {
+      const imgData = ctx.getImageData(0, 0, size, size);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = Math.min(255, d[i] * 1.28 + 14);
+        d[i + 1] = Math.min(255, d[i + 1] * 1.30 + 16);
+        d[i + 2] = Math.min(255, d[i + 2] * 1.36 + 22);
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) {}
@@ -2140,6 +2179,7 @@ window.__AIRLOOM_TILE_LEVELS = {
   maxUsgsZ: 16,
   densify: 'airloom-v9-exclusive-stable',
   orbitSource: ORBIT_TILE_TMPL,
+  orbitSourceDirect: ORBIT_TILE_DIRECT_TMPL,
 };
 
 function disposeMeshTree(root) {
@@ -2167,6 +2207,33 @@ let chaseInsetBusy = false;
 let chaseInsetLastTry = 0;
 
 /** Exactly one basemap stack active — never Orbit dark + Follow sat together. */
+
+window.__AIRLOOM_DIAG = function () {
+  const darkMeshes = [];
+  darkGroundGroup?.traverse?.((o) => {
+    if (o.isMesh && o.material?.map) {
+      darkMeshes.push({
+        z: o.userData.tileZ, span: o.userData.tileSpan, y: +o.position.y.toFixed(2),
+        vis: o.visible, ro: o.renderOrder, map: !!o.material.map,
+        size: o.material.map?.image ? [o.material.map.image.width, o.material.map.image.height] : null,
+      });
+    }
+  });
+  return {
+    build: BUILD_MARK,
+    mode: settings?.cameraMode,
+    exclusive: settings?.exclusiveBasemap,
+    darkVisible: darkGroundGroup?.visible,
+    satVisible: satGroundGroup?.visible,
+    darkChildren: darkGroundGroup?.children?.length,
+    satChildren: satGroundGroup?.children?.length,
+    chaseVisible: chaseHiZGroup?.visible,
+    orbitTile: ORBIT_TILE_TMPL,
+    darkMeshes,
+    clear: renderer?.getClearColor?.(new THREE.Color())?.getHexString?.(),
+  };
+};
+
 function setExclusiveBasemap(mode) {
   const follow = mode === 'follow';
   satGroundGroup.visible = follow;
@@ -2296,9 +2363,23 @@ async function loadSatBasemap() {
 async function loadDarkBasemap() {
   disposeMeshTree(darkGroundGroup);
   makeEarthBase(darkGroundGroup, true);
-  const dark = ORBIT_TILE_URL;
   const addDark = async (z, span, y, fill, overlay) => {
-    const layer = await fetchTileLayer(z, span, fill, false, { tileUrl: dark, overlay });
+    // 1) same-origin proxy (Safari-safe)
+    let layer = await fetchTileLayer(z, span, fill, false, {
+      tileUrl: ORBIT_TILE_URL, overlay, sameOrigin: true, orbitLift: true, poolLimit: 16,
+    });
+    // 2) direct ESRI (Chrome / desktop)
+    if (!layer) {
+      layer = await fetchTileLayer(z, span, fill, false, {
+        tileUrl: ORBIT_TILE_DIRECT_URL, overlay, orbitLift: true, poolLimit: 8,
+      });
+    }
+    // 3) stylized World Imagery so Orbit is never an empty ink disc
+    if (!layer) {
+      layer = await fetchTileLayer(z, span, fill, false, {
+        tileUrl: FOLLOW_TILE_FALLBACK_URL, overlay, darkStylize: true, poolLimit: 8,
+      });
+    }
     if (!layer) return null;
     layer.mesh.position.y = y;
     darkGroundGroup.add(layer.mesh);
@@ -2306,10 +2387,7 @@ async function loadDarkBasemap() {
   };
   const wide = await addDark(8, 5, 0, '#05070c', false);
   if (!wide) {
-    const fb = await fetchTileLayer(8, 4, '#05070c', false, {
-      tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true, overlay: false,
-    });
-    if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
+    console.warn('dark basemap: wide mosaic failed');
   }
   await addDark(10, 4, 0.4, '#060910', true);
   await addDark(12, 4, 0.7, '#080c14', true);
@@ -2957,13 +3035,13 @@ function applySceneTheme(mode) {
     hemi.intensity = 0.75;
     fill.intensity = 0.45;
   } else {
-    // Luxury dark Orbit — deep ink, cool rim, no muddy purple crush
-    renderer.setClearColor(0x04060c);
-    scene.fog = new THREE.FogExp2(0x080b14, 0.00000095);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 0.98;
-    sun.intensity = 0.42;
-    hemi.intensity = 0.28;
-    fill.intensity = 0.22;
+    // Luxury dark Orbit — readable ink (not black void), cool rim
+    renderer.setClearColor(0x070a12);
+    scene.fog = new THREE.FogExp2(0x0a0e18, 0.00000072);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.08;
+    sun.intensity = 0.52;
+    hemi.intensity = 0.36;
+    fill.intensity = 0.28;
   }
 }
 
