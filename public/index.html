@@ -499,7 +499,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v10'; // Strict KSFO final + active-flow runway (no false 10R threshold)
+const BUILD_MARK = 'airloom-v11'; // Primary chase label stays in-frame under overhead tilt
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -4069,6 +4069,41 @@ function setLabelInfo(rec) {
   el.querySelector('.meta').textContent = line2;
 }
 
+const _labelSafe = { t: 0, w: 0, h: 0, top: 72, bottom: 0, side: 8 };
+
+function refreshLabelSafeArea(vw, vh) {
+  const now = performance.now();
+  if (now - _labelSafe.t < 200 && _labelSafe.w === vw && _labelSafe.h === vh) return _labelSafe;
+  _labelSafe.t = now;
+  _labelSafe.w = vw;
+  _labelSafe.h = vh;
+  _labelSafe.side = 8;
+  const hud = document.getElementById('hud');
+  let top = 72;
+  if (hud) {
+    const r = hud.getBoundingClientRect();
+    if (r.height > 0) top = r.bottom + 6;
+  } else {
+    top = 72;
+  }
+  // Fallback if HUD temporarily collapsed / offscreen
+  if (!Number.isFinite(top) || top < 40) top = 72;
+  let bottom = vh - 20;
+  const camBar = document.getElementById('camBar');
+  if (camBar) {
+    const r = camBar.getBoundingClientRect();
+    if (r.height > 0 && r.top > vh * 0.35) bottom = Math.min(bottom, r.top - 6);
+  }
+  const chip = document.getElementById('landingChip');
+  if (chip && chip.classList.contains('visible')) {
+    const r = chip.getBoundingClientRect();
+    if (r.height > 0 && r.top > vh * 0.35) bottom = Math.min(bottom, r.top - 6);
+  }
+  _labelSafe.top = top;
+  _labelSafe.bottom = Math.max(top + 36, bottom);
+  return _labelSafe;
+}
+
 function updateLabelScreen(rec, cam, view) {
   const el = rec.label;
   if (!el) return;
@@ -4099,8 +4134,9 @@ function updateLabelScreen(rec, cam, view) {
   }
   el.classList.remove('hidden');
   el.classList.toggle('dim', dist > LABEL_MAX_DIST * 0.55);
-  el.classList.toggle('primary', !!(cockpitPrimaryId && rec.icao === cockpitPrimaryId)
-    || (!!selectedId && rec.icao === selectedId && settings.cameraMode === 'follow'));
+  const isPrimary = !!(cockpitPrimaryId && rec.icao === cockpitPrimaryId)
+    || (!!selectedId && rec.icao === selectedId && settings.cameraMode === 'follow');
+  el.classList.toggle('primary', isPrimary);
   // view = {x,y,w,h} in CSS px (y from top). Defaults to full window.
   const vx = view ? view.x : 0;
   const vy = view ? view.y : 0;
@@ -4112,8 +4148,26 @@ function updateLabelScreen(rec, cam, view) {
     el.classList.add('hidden');
     return;
   }
-  el.style.transform = 'translate(' + (x) + 'px,' + (y) + 'px) translate(-50%, calc(-100% - 8px))';
   setLabelInfo(rec);
+  // Primary chase/selected tag: keep readable under overhead tilt by flipping
+  // below the plane when the natural above-slot collides with the HUD, then
+  // soft-clamping into the viewport safe area (never hide).
+  if (isPrimary) {
+    const GAP = 8;
+    const safe = refreshLabelSafeArea(vw, vh);
+    const lw = el.offsetWidth || 88;
+    const lh = el.offsetHeight || 28;
+    let ox = -lw * 0.5;
+    let oy = -(lh + GAP); // prefer above
+    if ((y + oy) < safe.top) oy = GAP; // flip below when overhead
+    let px = x + ox;
+    let py = y + oy;
+    px = Math.max(safe.side, Math.min(px, vw - safe.side - lw));
+    py = Math.max(safe.top, Math.min(py, safe.bottom - lh));
+    el.style.transform = 'translate(' + px + 'px,' + py + 'px)';
+  } else {
+    el.style.transform = 'translate(' + x + 'px,' + y + 'px) translate(-50%, calc(-100% - 8px))';
+  }
 }
 
 function disposeAircraft(rec) {
