@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v6)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v7)
 
 ## Local
 
@@ -54,7 +54,11 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   Follow when fewer than two remain on final. Manual Follow/Orbit clicks lock out
   auto-switch for ~90s.
 - **Landing target** (airloom-v6): clear KSFO beacon + approach funnels + runway
-  threshold markers; Follow HUD shows **distance-to-landing** (nm / mi + ETA) with
-  a dashed remaining-path and optional distance ring.
+  threshold markers; Follow shows **distance-to-landing** on a tiny bottom chip
+  (nm + ETA; “ON FINAL / AT THRESHOLD” under 0.2 nm — no 0.0 mi spam).
+- **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
+  single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
+  altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse
+  and **screen-constant** (never giant blurry walls when the camera is close).
 
 Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated only.

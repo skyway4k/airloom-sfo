@@ -198,11 +198,21 @@
   }
   #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.03); }
 
-  /* Follow-mode compact HUD (top-right glass) — essentials only */
+  /* Dual-final Orbit HUD (top-right). Hidden in Follow — plane tag + bottom chip only. */
   #infoPanel {
     position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
     z-index: 12; pointer-events: none; width: auto; max-width: min(220px, calc(100vw - 28px));
   }
+  body.follow-mode #infoPanel { display: none !important; }
+  body.follow-mode .ac-label:not(.primary) { display: none !important; }
+  body.follow-mode .ac-label.primary {
+    padding: 2px 6px;
+    font-size: 8px;
+    border-radius: 4px;
+    background: rgba(8, 11, 18, 0.78);
+  }
+  body.follow-mode .ac-label.primary .cs { font-size: 9px; }
+  body.follow-mode .ac-label.primary .meta { font-size: 7px; }
   #infoPanel .ig-card {
     background: linear-gradient(160deg, rgba(16,20,30,0.9), rgba(7,10,16,0.92));
     border: 1px solid var(--border);
@@ -256,36 +266,40 @@
     font-size: 8px; letter-spacing: 0.1em; color: var(--cyan);
     margin-left: auto;
   }
+  /* Tiny bottom distance chip — single Follow landing cue (not a second full panel) */
   #landingChip {
-    position: absolute; bottom: max(18px, env(safe-area-inset-bottom));
+    position: absolute; bottom: max(14px, env(safe-area-inset-bottom));
     left: 50%; transform: translateX(-50%); z-index: 11; pointer-events: none;
-    display: none; align-items: center; gap: 14px;
-    background: linear-gradient(160deg, rgba(16,20,30,0.92), rgba(7,10,16,0.94));
-    border: 1px solid rgba(240,213,160,0.28); border-radius: 999px;
-    padding: 8px 18px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    display: none; align-items: center; gap: 8px;
+    background: rgba(8, 11, 18, 0.82);
+    border: 1px solid rgba(240,213,160,0.22); border-radius: 999px;
+    padding: 5px 12px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
     font-family: var(--mono); white-space: nowrap;
   }
   #landingChip.visible { display: flex; }
+  #landingChip.at-threshold { border-color: rgba(125,206,160,0.4); }
   #landingChip .lc-label {
-    font-family: var(--font); font-size: 8px; letter-spacing: 0.16em;
+    font-family: var(--font); font-size: 7px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--muted); font-weight: 500;
   }
   #landingChip .lc-dist {
-    font-size: 15px; font-weight: 500; color: var(--glow); letter-spacing: 0.04em;
+    font-size: 12px; font-weight: 500; color: var(--glow); letter-spacing: 0.03em;
   }
   #landingChip .lc-sub {
-    font-size: 9px; color: #9aa8ba; letter-spacing: 0.02em;
+    font-size: 8px; color: #9aa8ba; letter-spacing: 0.02em;
   }
+  #landingChip .lc-sub:empty { display: none; }
   #landingChip .lc-rwy {
-    font-size: 10px; color: var(--cyan); letter-spacing: 0.12em; font-weight: 500;
+    font-size: 9px; color: var(--cyan); letter-spacing: 0.1em; font-weight: 500;
   }
   @media (max-width: 720px) {
     #landingChip {
-      bottom: max(118px, calc(env(safe-area-inset-bottom) + 108px));
-      padding: 6px 12px; gap: 10px;
+      bottom: max(108px, calc(env(safe-area-inset-bottom) + 98px));
+      padding: 4px 10px; gap: 6px;
     }
-    #landingChip .lc-dist { font-size: 13px; }
+    #landingChip .lc-dist { font-size: 11px; }
+    #landingChip .lc-label { font-size: 6px; }
   }
 
 
@@ -345,10 +359,10 @@
 
 <div id="landingChip" aria-live="polite">
   <div>
-    <div class="lc-label">To landing</div>
+    <div class="lc-label" id="lcLabel">To threshold</div>
     <div class="lc-dist" id="lcDist">—</div>
   </div>
-  <div class="lc-sub" id="lcSub">—</div>
+  <div class="lc-sub" id="lcSub"></div>
   <div class="lc-rwy" id="lcRwy"></div>
 </div>
 
@@ -485,12 +499,14 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v6'; // denser tiles + trail alt cues + landing dist
+const BUILD_MARK = 'airloom-v7'; // declutter Follow FOV + screen-constant trail labels
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
   chaseLookaheadNm: 3.5,
   trailAltLabels: true,
+  trailLabelsScreenConstant: true,
+  followHudMinimal: true,
   landingTarget: true,
   distToLanding: true,
 };
@@ -2347,20 +2363,28 @@ function distToLanding(rec) {
 }
 
 function formatLdgDist(info) {
-  if (!info) return { dist: '—', sub: '', rwy: '' };
+  if (!info) return { dist: '—', sub: '', rwy: '', atThreshold: false, label: 'To threshold' };
   const nm = info.nm;
+  const rwy = info.rwy ? ('RWY ' + info.rwy) : 'KSFO';
+  // <0.2 nm: stop spamming "0.0 mi" — single status cue
+  if (nm < 0.2) {
+    return {
+      dist: nm < 0.08 ? 'AT THRESHOLD' : 'ON FINAL',
+      sub: '',
+      rwy,
+      atThreshold: true,
+      label: nm < 0.08 ? 'Landing' : 'On final',
+    };
+  }
   let dist;
-  if (nm < 0.15) dist = 'THRESHOLD';
-  else if (nm < 10) dist = nm.toFixed(1) + ' nm';
+  if (nm < 10) dist = nm.toFixed(1) + ' nm';
   else dist = Math.round(nm) + ' nm';
-  const mi = info.mi < 10 ? info.mi.toFixed(1) : Math.round(info.mi);
-  let sub = mi + ' mi';
+  let sub = '';
   if (info.etaMin != null && info.etaMin < 90) {
     const m = Math.max(1, Math.round(info.etaMin));
-    sub += ' · ~' + m + ' min';
+    sub = '~' + m + ' min';
   }
-  const rwy = info.rwy ? ('RWY ' + info.rwy) : 'KSFO';
-  return { dist, sub, rwy };
+  return { dist, sub, rwy, atThreshold: false, label: 'To threshold' };
 }
 
 function buildLandingCues() {
@@ -2408,7 +2432,8 @@ function buildLandingCues() {
   inner.position.set(apt.x, 7, apt.z);
   landingCueGroup.add(inner);
 
-  const aptLabel = makeBillboardLabel(['KSFO', 'LANDING'], 380, { color: 'rgba(245,230,200,0.98)' });
+  const aptLabel = makeBillboardLabel(['KSFO', 'LANDING'], 90, { color: 'rgba(245,230,200,0.98)' });
+  aptLabel.userData.screenPx = 28;
   aptLabel.position.set(apt.x, 520, apt.z);
   aptLabel.userData.kind = 'aptLabel';
   landingCueGroup.add(aptLabel);
@@ -2453,9 +2478,10 @@ function buildLandingCues() {
     thrMesh.userData.rwy = rw.name;
     landingCueGroup.add(thrMesh);
 
-    const thrLbl = makeBillboardLabel([rw.name], 220, {
+    const thrLbl = makeBillboardLabel([rw.name], 55, {
       color: 'rgba(125, 206, 160, 0.95)', border: 'rgba(125,206,160,0.4)',
     });
+    thrLbl.userData.screenPx = 22;
     thrLbl.position.set(thr.x, 160, thr.z);
     thrLbl.userData.rwy = rw.name;
     landingCueGroup.add(thrLbl);
@@ -2491,6 +2517,16 @@ function updateLandingCuesForRec(rec) {
   const rem = landingCueGroup.getObjectByName('remainingPath');
   const ring = landingCueGroup.getObjectByName('distRing');
   if (!rem || !ring) return;
+  // Keep KSFO/rwy billboards constant screen size (never walls of blurry text)
+  const cam = activeTrailCam();
+  landingCueGroup.traverse((o) => {
+    if (o.isSprite && o.userData && (o.userData.kind === 'aptLabel' || o.userData.rwy)) {
+      scaleSpriteToScreenPx(o, cam, o.userData.screenPx || 24, {
+        hideUnder: settings.cameraMode === 'follow' ? 480 : 0,
+        cap: 280,
+      });
+    }
+  });
   const info = distToLanding(rec);
   if (!info || !rec || rec.onGround || info.nm < 0.08 || info.nm > 55) {
     rem.visible = false;
@@ -2526,17 +2562,24 @@ function updateLandingChip(rec) {
   if (!chip) return;
   const show = settings.cameraMode === 'follow' && rec && !rec.onGround;
   if (!show) {
-    chip.classList.remove('visible');
+    chip.classList.remove('visible', 'at-threshold');
     return;
   }
   const info = distToLanding(rec);
+  if (!info || info.nm > 55) {
+    chip.classList.remove('visible', 'at-threshold');
+    return;
+  }
   const fmt = formatLdgDist(info);
   const dEl = document.getElementById('lcDist');
   const sEl = document.getElementById('lcSub');
   const rEl = document.getElementById('lcRwy');
+  const lEl = document.getElementById('lcLabel');
   if (dEl) dEl.textContent = fmt.dist;
-  if (sEl) sEl.textContent = fmt.sub;
+  if (sEl) sEl.textContent = fmt.sub || '';
   if (rEl) rEl.textContent = fmt.rwy;
+  if (lEl) lEl.textContent = fmt.label || 'To threshold';
+  chip.classList.toggle('at-threshold', !!fmt.atThreshold);
   chip.classList.add('visible');
 }
 
@@ -2630,12 +2673,13 @@ function buildCityLabels() {
 
 function applySceneTheme(mode) {
   const follow = mode === 'follow';
+  document.body.classList.toggle('follow-mode', follow);
   satGroundGroup.visible = follow;
   darkGroundGroup.visible = !follow;
   airspaceGroup.visible = !follow;
   cityLabelGroup.visible = !follow;
   landingCueGroup.visible = true; // KSFO target always readable
-  trailHudGroup.visible = true;
+  trailHudGroup.visible = !follow; // airloom-v7: no world-space trail text in Follow chase
   // Drop-lines always preferred in Air Loom Orbit; keep user toggle otherwise
   if (!follow) {
     settings.showAltSticks = true;
@@ -2906,6 +2950,7 @@ function setCameraMode(mode, opts) {
   settings.cameraMode = next;
   const isFollow = next === 'follow';
   const isDual = !isFollow && dualFinalActive && finalCache.length >= 2;
+  document.body.classList.toggle('follow-mode', isFollow);
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
   if ($('uiCamMode')) {
@@ -3259,11 +3304,11 @@ function buildIgCardHtml(rec, badge) {
 function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
-  // Show compact HUD in Follow, or dual-final Orbit summary
+  // Follow: no top-right panel — plane tag + bottom chip only (clear FOV)
   if (settings.cameraMode === 'follow') {
-    panel.classList.remove('hidden');
+    panel.classList.add('hidden');
+    if (igP) igP.innerHTML = '';
     const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
-    igP.innerHTML = buildIgCardHtml(prim);
     updateLandingChip(prim);
     updateLandingCuesForRec(prim);
     return;
@@ -3423,10 +3468,46 @@ const _tXAxis = new THREE.Vector3(1, 0, 0);
 const _tPrevSide = new THREE.Vector3(1, 0, 0);
 
 
-// ─── Informational trail altitude ticks (canvas sprites — Safari-safe) ────────
-const TRAIL_LABEL_MAX = 5;          // per aircraft; keep FPS healthy
-const TRAIL_LABEL_ALT_STEP_FT = 1000;
+// ─── Informational trail altitude ticks (screen-constant sprites) ─────────────
+const TRAIL_LABEL_MAX = 3;            // fewer ticks — never a wall of text
+const TRAIL_LABEL_ALT_STEP_FT = 1500; // coarser steps
+const TRAIL_LABEL_PX = 26;            // target CSS-pixel height on screen
+const TRAIL_LABEL_HIDE_DIST_M = 900;  // hide when camera this close (Follow chase)
 const _trailLabelPool = new Map(); // icao -> { sprites: Sprite[], lastKey: string }
+
+/** Keep canvas billboards a constant on-screen size (prevents giant blurry walls). */
+function scaleSpriteToScreenPx(spr, cam, targetPx, opts) {
+  if (!spr || !cam || !camPosFinite(cam)) return;
+  const img = spr.material?.map?.image;
+  if (!img || !img.height) return;
+  const dist = cam.position.distanceTo(spr.position);
+  if (!Number.isFinite(dist) || dist < 1) {
+    spr.visible = false;
+    return;
+  }
+  const hideUnder = (opts && opts.hideUnder != null) ? opts.hideUnder : TRAIL_LABEL_HIDE_DIST_M;
+  // Hide when camera is close — avoids giant blurry canvas walls
+  if (hideUnder > 0 && dist < hideUnder) {
+    spr.visible = false;
+    return;
+  }
+  const vFov = THREE.MathUtils.degToRad(cam.fov || 50);
+  const screenH = Math.max(320, (typeof innerHeight === 'number' ? innerHeight : 800));
+  const worldH = 2 * Math.tan(vFov / 2) * dist * ((targetPx || TRAIL_LABEL_PX) / screenH);
+  const aspect = img.width / img.height;
+  const cap = (opts && opts.cap) || 420;
+  const h = Math.max(14, Math.min(worldH, cap));
+  spr.scale.set(h * aspect, h, 1);
+  spr.visible = true;
+  spr.userData.screenPx = targetPx || TRAIL_LABEL_PX;
+}
+
+function activeTrailCam() {
+  if (settings.cameraMode === 'follow' && typeof cockpitCam !== 'undefined' && camPosFinite(cockpitCam)) {
+    return cockpitCam;
+  }
+  return camera;
+}
 
 function disposeTrailLabels(icao) {
   const pool = _trailLabelPool.get(icao);
@@ -3446,64 +3527,61 @@ function ensureTrailLabelSprites(icao, n) {
     _trailLabelPool.set(icao, pool);
   }
   while (pool.sprites.length < n) {
-    const spr = makeBillboardLabel(['—'], 160, {
-      color: 'rgba(245,230,200,0.92)', border: 'rgba(240,213,160,0.28)', opacity: 0.88,
+    const spr = makeBillboardLabel(['—'], 40, {
+      color: 'rgba(245,230,200,0.92)', border: 'rgba(240,213,160,0.28)', opacity: 0.82,
     });
     spr.visible = false;
     spr.userData.icao = icao;
+    spr.userData.baseWorldH = 40;
     trailHudGroup.add(spr);
     pool.sprites.push(spr);
   }
   return pool;
 }
 
-/** Pick sparse informative points along trail: altitude steps + optional speed. */
+/** Pick sparse informative points along trail — skip tip (plane tag covers now). */
 function pickTrailInfoPoints(rec) {
   const pts = rec.trailPts;
-  if (!pts || pts.length < 4) return [];
+  if (!pts || pts.length < 6) return [];
   const n = Math.min(pts.length, settings.trailLen);
   const start = pts.length - n;
   const out = [];
   let lastAltBucket = null;
-  let lastGsBucket = null;
-  // Walk oldest → newest; keep last few step crossings + tip
-  for (let i = 0; i < n; i++) {
+  // Walk oldest → newest; skip the live tip (duplicates plane floating tag)
+  for (let i = 0; i < n - 2; i++) {
     const tp = pts[start + i];
     const altFt = Math.round((tp.altM || 0) / FT_M);
     const bucket = Math.floor(altFt / TRAIL_LABEL_ALT_STEP_FT);
-    const gs = tp.gsKt != null ? Math.round(tp.gsKt) : null;
-    const gsBucket = gs != null ? Math.floor(gs / 50) : null;
-    const isTip = i === n - 1;
-    const isMid = i === Math.floor(n * 0.5);
     const crossed = lastAltBucket != null && bucket !== lastAltBucket;
-    const gsCross = gsBucket != null && lastGsBucket != null && gsBucket !== lastGsBucket;
-    if (crossed || isTip || isMid || (i === 0 && n > 8)) {
+    const isMid = i === Math.floor(n * 0.4) || i === Math.floor(n * 0.7);
+    if (crossed || (isMid && out.length < 2) || (i === 0 && n > 12 && out.length === 0)) {
+      const gs = tp.gsKt != null ? Math.round(tp.gsKt) : null;
       out.push({
         i, lat: tp.lat, lon: tp.lon, altM: tp.altM || 0, altFt, gs,
-        kind: isTip ? 'tip' : (crossed ? 'alt' : (gsCross ? 'gs' : 'mid')),
+        kind: crossed ? 'alt' : 'mid',
       });
     }
     lastAltBucket = bucket;
-    if (gsBucket != null) lastGsBucket = gsBucket;
   }
-  // Prefer tip + evenly spaced; cap
   if (out.length <= TRAIL_LABEL_MAX) return out;
-  const tip = out[out.length - 1];
-  const rest = out.slice(0, -1);
-  const step = Math.max(1, Math.floor(rest.length / (TRAIL_LABEL_MAX - 1)));
+  const step = Math.max(1, Math.floor(out.length / TRAIL_LABEL_MAX));
   const picked = [];
-  for (let i = 0; i < rest.length && picked.length < TRAIL_LABEL_MAX - 1; i += step) {
-    picked.push(rest[i]);
+  for (let i = 0; i < out.length && picked.length < TRAIL_LABEL_MAX; i += step) {
+    picked.push(out[i]);
   }
-  picked.push(tip);
   return picked.slice(-TRAIL_LABEL_MAX);
 }
 
 function updateTrailInfoLabels(rec, force) {
   if (!rec) return;
-  // Only Follow primary + aircraft on final (keep scene uncluttered)
-  const isPrimary = cockpitPrimaryId && rec.icao === cockpitPrimaryId;
-  const show = (isPrimary || rec.isOnFinal) && !rec.onGround && (rec.altM || 0) > 40;
+  // airloom-v7: hide world-space trail text in Follow chase (FOV clutter).
+  // Orbit / dual-final: sparse screen-constant ticks on finals only.
+  if (settings.cameraMode === 'follow') {
+    const pool = _trailLabelPool.get(rec.icao);
+    if (pool) for (const s of pool.sprites) s.visible = false;
+    return;
+  }
+  const show = rec.isOnFinal && !rec.onGround && (rec.altM || 0) > 80;
   if (!show) {
     const pool = _trailLabelPool.get(rec.icao);
     if (pool) for (const s of pool.sprites) s.visible = false;
@@ -3517,15 +3595,18 @@ function updateTrailInfoLabels(rec, force) {
   }
   const key = picks.map((p) => `${p.altFt}|${p.gs || ''}|${p.kind}`).join(';');
   const pool = ensureTrailLabelSprites(rec.icao, picks.length);
+  const cam = activeTrailCam();
+  const place = (spr, p) => {
+    const w = enu(p.lat, p.lon, (p.altM || 0) * settings.altScale);
+    spr.position.set(w.x + 30, w.y + 70, w.z + 30);
+    spr.visible = true;
+    scaleSpriteToScreenPx(spr, cam, TRAIL_LABEL_PX);
+  };
   if (!force && pool.lastKey === key) {
-    // Still refresh positions (aircraft moving)
     for (let i = 0; i < picks.length; i++) {
-      const p = picks[i];
       const spr = pool.sprites[i];
       if (!spr) continue;
-      const w = enu(p.lat, p.lon, (p.altM || 0) * settings.altScale);
-      spr.position.set(w.x, w.y + 90, w.z);
-      spr.visible = true;
+      place(spr, picks[i]);
     }
     for (let i = picks.length; i < pool.sprites.length; i++) pool.sprites[i].visible = false;
     return;
@@ -3536,24 +3617,20 @@ function updateTrailInfoLabels(rec, force) {
     let spr = pool.sprites[i];
     const altStr = p.altFt >= 10000
       ? (p.altFt / 1000).toFixed(1).replace(/\.0$/, '') + 'k ft'
-      : p.altFt.toLocaleString() + ' ft';
-    const sub = (p.gs != null && p.kind !== 'mid') ? (p.gs + ' kt') : (p.kind === 'tip' ? 'now' : '');
-    // Rebuild sprite texture (small canvas — few labels only)
+      : (p.altFt.toLocaleString() + ' ft');
+    const sub = p.gs != null ? (p.gs + ' kt') : '';
     trailHudGroup.remove(spr);
     spr.material?.map?.dispose?.();
     spr.material?.dispose?.();
-    spr = makeBillboardLabel([altStr, sub].filter(Boolean), p.kind === 'tip' ? 200 : 150, {
-      color: p.kind === 'tip' ? 'rgba(245,230,200,0.98)' : 'rgba(200,210,230,0.92)',
-      border: p.kind === 'tip' ? 'rgba(240,213,160,0.45)' : 'rgba(180,195,220,0.28)',
-      opacity: 0.9,
+    spr = makeBillboardLabel([altStr, sub].filter(Boolean), 36, {
+      color: 'rgba(210,220,235,0.94)',
+      border: 'rgba(180,195,220,0.28)',
+      opacity: 0.85,
     });
     spr.userData.icao = rec.icao;
-    const w = enu(p.lat, p.lon, (p.altM || 0) * settings.altScale);
-    // Offset slightly beside trail so ribbon stays readable
-    spr.position.set(w.x + 40, w.y + 110, w.z + 40);
-    spr.visible = true;
     trailHudGroup.add(spr);
     pool.sprites[i] = spr;
+    place(spr, p);
   }
   for (let i = picks.length; i < pool.sprites.length; i++) pool.sprites[i].visible = false;
 }
@@ -3757,6 +3834,8 @@ function updateLabelScreen(rec, cam, view) {
   }
   el.classList.remove('hidden');
   el.classList.toggle('dim', dist > LABEL_MAX_DIST * 0.55);
+  el.classList.toggle('primary', !!(cockpitPrimaryId && rec.icao === cockpitPrimaryId)
+    || (!!selectedId && rec.icao === selectedId && settings.cameraMode === 'follow'));
   // view = {x,y,w,h} in CSS px (y from top). Defaults to full window.
   const vx = view ? view.x : 0;
   const vy = view ? view.y : 0;
