@@ -266,19 +266,23 @@
     font-size: 8px; letter-spacing: 0.1em; color: var(--cyan);
     margin-left: auto;
   }
-  /* Tiny bottom distance chip — single Follow landing cue (not a second full panel) */
+  /* Tiny bottom distance/ETA chip — Follow only, no second panel */
   #landingChip {
     position: absolute; bottom: max(14px, env(safe-area-inset-bottom));
     left: 50%; transform: translateX(-50%); z-index: 11; pointer-events: none;
-    display: none; align-items: center; gap: 8px;
-    background: rgba(8, 11, 18, 0.82);
-    border: 1px solid rgba(240,213,160,0.22); border-radius: 999px;
-    padding: 5px 12px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    display: none; flex-direction: column; align-items: stretch; gap: 3px;
+    background: rgba(8, 11, 18, 0.84);
+    border: 1px solid rgba(240,213,160,0.22); border-radius: 14px;
+    padding: 5px 12px 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
     font-family: var(--mono); white-space: nowrap;
+    max-width: min(92vw, 340px);
   }
   #landingChip.visible { display: flex; }
-  #landingChip.at-threshold { border-color: rgba(125,206,160,0.4); }
+  #landingChip.at-threshold { border-color: rgba(125,206,160,0.45); }
+  #landingChip .lc-row {
+    display: flex; align-items: baseline; gap: 8px; justify-content: center;
+  }
   #landingChip .lc-label {
     font-family: var(--font); font-size: 7px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--muted); font-weight: 500;
@@ -287,19 +291,33 @@
     font-size: 12px; font-weight: 500; color: var(--glow); letter-spacing: 0.03em;
   }
   #landingChip .lc-sub {
-    font-size: 8px; color: #9aa8ba; letter-spacing: 0.02em;
+    font-size: 9px; color: #9aa8ba; letter-spacing: 0.02em;
   }
   #landingChip .lc-sub:empty { display: none; }
   #landingChip .lc-rwy {
     font-size: 9px; color: var(--cyan); letter-spacing: 0.1em; font-weight: 500;
   }
+  #landingChip .lc-bar {
+    height: 2px; border-radius: 2px; background: rgba(155,174,196,0.18);
+    overflow: hidden; width: 100%;
+  }
+  #landingChip .lc-bar-fill {
+    height: 100%; width: 0%; border-radius: 2px;
+    background: linear-gradient(90deg, rgba(125,206,160,0.85), rgba(240,213,160,0.9));
+    transition: width 0.35s ease-out;
+  }
+  #landingChip.at-threshold .lc-bar-fill {
+    background: rgba(125,206,160,0.95);
+  }
   @media (max-width: 720px) {
     #landingChip {
       bottom: max(108px, calc(env(safe-area-inset-bottom) + 98px));
-      padding: 4px 10px; gap: 6px;
+      padding: 4px 10px 5px; gap: 2px; border-radius: 12px;
     }
+    #landingChip .lc-row { gap: 6px; }
     #landingChip .lc-dist { font-size: 11px; }
     #landingChip .lc-label { font-size: 6px; }
+    #landingChip .lc-sub { font-size: 8px; }
   }
 
 
@@ -358,12 +376,13 @@
 </div>
 
 <div id="landingChip" aria-live="polite">
-  <div>
+  <div class="lc-row">
     <div class="lc-label" id="lcLabel">To threshold</div>
     <div class="lc-dist" id="lcDist">—</div>
+    <div class="lc-sub" id="lcSub"></div>
+    <div class="lc-rwy" id="lcRwy"></div>
   </div>
-  <div class="lc-sub" id="lcSub"></div>
-  <div class="lc-rwy" id="lcRwy"></div>
+  <div class="lc-bar" aria-hidden="true"><div class="lc-bar-fill" id="lcBar"></div></div>
 </div>
 
 
@@ -499,7 +518,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v12'; // Orbit same-origin dark tile proxy (Safari black map)
+const BUILD_MARK = 'airloom-v13'; // Stable KSFO landing ETA chip (GS smooth + hysteresis)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -515,6 +534,7 @@ window.__AIRLOOM_FEATURES = {
   strictKsfoFinal: true,
   activeFlowRunway: true,
   hideNonKsfoChip: true,
+  stableLandingEta: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -2581,39 +2601,49 @@ function makeBillboardLabel(lines, worldH, opts) {
 /** Best remaining distance to a KSFO runway threshold — only for real approach/final. */
 function distToLanding(rec) {
   if (!rec || !Number.isFinite(rec.lat) || !Number.isFinite(rec.lon)) return null;
-  const distKsfo = (rec.dist != null) ? rec.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, rec.lat, rec.lon);
+  // Prefer dead-reckoned pose between ADS-B polls so nm/ETA tick down smoothly
+  const lat = (Number.isFinite(rec.estLat) ? rec.estLat : rec.lat);
+  const lon = (Number.isFinite(rec.estLon) ? rec.estLon : rec.lon);
+  const distKsfo = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
 
   if (rec.onGround) {
     return {
       nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
-      mode: 'field', confidence: 'none', etaMin: null,
+      mode: 'field', confidence: 'none', etaMin: null, gsKt: null,
       thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
     };
   }
 
-  let final = rec.finalInfo || detectKsfoFinal(rec);
+  const gsRaw = spdKt(rec);
+  const livePose = Object.assign({}, rec, { lat, lon, dist: distKsfo });
+  // Prefer live detect on dead-reckoned pose; fall back to sticky poll finalInfo
+  let final = detectKsfoFinal(livePose) || rec.finalInfo || null;
   if (final) {
     const rw = rwyByName(final.rwy) || finalsForFlow(final.flow || activeFlow)[0] || KSFO_FINALS[0];
-    const alongNm = Math.max(0, final.alongNm != null ? final.alongNm : -final.atkNm);
-    // Never report "at threshold" from along alone — require proximity to thr
-    const distThr = haversineNm(rec.lat, rec.lon, rw.thrLat, rw.thrLon);
-    const nm = Math.max(alongNm, distThr * 0.15); // keep geometric along primary
-    const gs = spdKt(rec);
+    // Recompute along from current (est) pose so nm/ETA tick between polls
+    const offLive = rwyTrackOffsets(lat, lon, rw.thrLat, rw.thrLon, rw.hdg);
+    let alongNm = Math.max(0, -offLive.atkNm);
+    if (!Number.isFinite(alongNm)) {
+      alongNm = Math.max(0, final.alongNm != null ? final.alongNm : -(final.atkNm || 0));
+    }
+    const distThr = haversineNm(lat, lon, rw.thrLat, rw.thrLon);
+    const xtkNm = Number.isFinite(offLive.xtkNm) ? offLive.xtkNm : final.xtkNm;
     let etaMin = null;
-    if (gs != null && gs >= 30 && alongNm > 0.05) etaMin = (alongNm / gs) * 60;
+    // Groundspeed along approach; hide ETA if GS unknown / too slow
+    if (gsRaw != null && gsRaw >= 35 && alongNm > 0.08) etaMin = (alongNm / gsRaw) * 60;
     return {
       nm: alongNm, mi: alongNm * SM_PER_NM, rwy: rw.name, alongNm,
-      mode: 'final', confidence: 'final', etaMin,
+      mode: 'final', confidence: 'final', etaMin, gsKt: gsRaw,
       thrLat: rw.thrLat, thrLon: rw.thrLon,
-      xtkNm: final.xtkNm, distThrNm: distThr,
+      xtkNm, distThrNm: distThr,
     };
   }
 
-  // High-confidence approach (not yet centerline-final): clear inbound + near field
-  if (!isClearKsfoInbound(rec) || distKsfo > 18) {
+  // Chip only for clear KSFO inbound — not Bay transit / satellite GA
+  if (!isClearKsfoInbound(Object.assign({}, rec, { lat, lon, dist: distKsfo })) || distKsfo > 18) {
     return {
       nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
-      mode: 'none', confidence: 'none', etaMin: null,
+      mode: 'none', confidence: 'none', etaMin: null, gsKt: gsRaw,
       thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
     };
   }
@@ -2622,8 +2652,8 @@ function distToLanding(rec) {
   const candidates = finalsForFlow(activeFlow);
   let best = null;
   for (const rw of candidates) {
-    const off = rwyTrackOffsets(rec.lat, rec.lon, rw.thrLat, rw.thrLon, rw.hdg);
-    // Must be on approach side (behind threshold). Past/abeam → use haversine, not along=0.
+    const off = rwyTrackOffsets(lat, lon, rw.thrLat, rw.thrLon, rw.hdg);
+    // Must be on approach side (behind threshold). Past/abeam → skip (no fake 0 nm).
     if (off.atkNm > 0.5) continue;
     if (off.atkNm < -18) continue;
     if (Math.abs(off.xtkNm) > 3.5) continue;
@@ -2640,36 +2670,132 @@ function distToLanding(rec) {
   }
 
   if (!best) {
-    // Inbound but no usable runway geometry — distance to field, no runway label
-    const gs = spdKt(rec);
+    // Clear inbound but no usable active-flow geometry — hide chip (low confidence).
+    const field = BAY_FIELDS[0];
     let etaMin = null;
-    if (gs != null && gs >= 30 && distKsfo > 0.05) etaMin = (distKsfo / gs) * 60;
+    if (gsRaw != null && gsRaw >= 35) {
+      etaMin = etaToFieldMin(lat, lon, rec.track, gsRaw, field);
+    }
     return {
       nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
-      mode: 'approach', confidence: 'low', etaMin,
+      mode: 'approach', confidence: 'low', etaMin, gsKt: gsRaw,
       thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
     };
   }
 
-  const distThr = haversineNm(rec.lat, rec.lon, best.rw.thrLat, best.rw.thrLon);
+  const distThr = haversineNm(lat, lon, best.rw.thrLat, best.rw.thrLon);
   // Guard: never collapse large lateral miss into "0 nm remaining"
   const alongNm = Math.max(best.along, distThr > 1.5 ? distThr * 0.5 : 0);
   const conf = (Math.abs(best.off.xtkNm) < 1.2 && best.along < 12) ? 'approach' : 'low';
   const showRwy = conf === 'approach'; // only label runway when reasonably aligned
-  const gs = spdKt(rec);
   let etaMin = null;
-  if (gs != null && gs >= 30 && alongNm > 0.05) etaMin = (alongNm / gs) * 60;
+  if (gsRaw != null && gsRaw >= 35 && alongNm > 0.08) {
+    // Prefer closing speed toward threshold when track known
+    etaMin = (alongNm / gsRaw) * 60;
+    if (rec.track != null) {
+      const brg = bearingDeg(lat, lon, best.rw.thrLat, best.rw.thrLon);
+      const cos = Math.cos(angDiff(rec.track, brg) * Math.PI / 180);
+      if (cos > 0.2) {
+        const closing = gsRaw * cos;
+        if (closing >= 30) etaMin = (alongNm / closing) * 60;
+      } else if (cos <= 0.05) {
+        etaMin = null; // not closing on threshold
+      }
+    }
+  }
   return {
     nm: alongNm, mi: alongNm * SM_PER_NM,
     rwy: showRwy ? best.rw.name : null,
-    alongNm, mode: 'approach', confidence: conf, etaMin,
+    alongNm, mode: 'approach', confidence: conf, etaMin, gsKt: gsRaw,
     thrLat: best.rw.thrLat, thrLon: best.rw.thrLon,
     xtkNm: best.off.xtkNm, distThrNm: distThr,
   };
 }
 
-function formatLdgDist(info) {
-  if (!info) return { dist: '—', sub: '', rwy: '', atThreshold: false, label: 'To threshold', hide: true };
+/** Smoothed landing-chip state — kills jumpy ETA / flicker on ADS-B GS noise. */
+const _ldgChip = {
+  icao: null,
+  gsSm: null,
+  etaSm: null,
+  nmSm: null,
+  shownEta: null,
+  shownNmKey: null,
+  atThr: false,
+  onFinalNear: false,
+  goodStreak: 0,
+  missStreak: 0,
+  visible: false,
+  barPct: 0,
+  lastFmt: null,
+};
+
+function resetLdgChipState() {
+  _ldgChip.icao = null;
+  _ldgChip.gsSm = null;
+  _ldgChip.etaSm = null;
+  _ldgChip.nmSm = null;
+  _ldgChip.shownEta = null;
+  _ldgChip.shownNmKey = null;
+  _ldgChip.atThr = false;
+  _ldgChip.onFinalNear = false;
+  _ldgChip.goodStreak = 0;
+  _ldgChip.missStreak = 0;
+  _ldgChip.visible = false;
+  _ldgChip.barPct = 0;
+  _ldgChip.lastFmt = null;
+}
+
+/** Stable displayed ETA minutes from smoothed GS (null if unknown / not inbound). */
+function smoothLandingEta(icao, rawNm, rawEta, rawGs) {
+  if (_ldgChip.icao !== icao) {
+    _ldgChip.icao = icao;
+    _ldgChip.gsSm = (rawGs != null && rawGs >= 35) ? rawGs : null;
+    _ldgChip.etaSm = rawEta;
+    _ldgChip.nmSm = rawNm;
+    _ldgChip.shownEta = rawEta != null ? Math.max(1, Math.round(rawEta)) : null;
+    _ldgChip.shownNmKey = null;
+    _ldgChip.atThr = false;
+    _ldgChip.onFinalNear = false;
+    return _ldgChip.shownEta;
+  }
+  // Smooth GS (ADS-B often jumps ±10–20 kt)
+  if (rawGs != null && rawGs >= 35) {
+    _ldgChip.gsSm = (_ldgChip.gsSm == null) ? rawGs : (_ldgChip.gsSm * 0.72 + rawGs * 0.28);
+  } else {
+    _ldgChip.gsSm = (_ldgChip.gsSm != null) ? _ldgChip.gsSm * 0.85 : null;
+    if (_ldgChip.gsSm != null && _ldgChip.gsSm < 32) _ldgChip.gsSm = null;
+  }
+  if (Number.isFinite(rawNm)) {
+    _ldgChip.nmSm = (_ldgChip.nmSm == null) ? rawNm : (_ldgChip.nmSm * 0.55 + rawNm * 0.45);
+  }
+  let etaInst = null;
+  if (_ldgChip.gsSm != null && _ldgChip.gsSm >= 35 && _ldgChip.nmSm != null && _ldgChip.nmSm > 0.08) {
+    etaInst = (_ldgChip.nmSm / _ldgChip.gsSm) * 60;
+    if (rawEta != null && Number.isFinite(rawEta)) {
+      etaInst = etaInst * 0.45 + rawEta * 0.55;
+    }
+  } else if (rawEta != null && _ldgChip.gsSm != null) {
+    etaInst = rawEta;
+  }
+  if (etaInst == null || !Number.isFinite(etaInst) || etaInst < 0 || etaInst > 90) {
+    _ldgChip.etaSm = null;
+    _ldgChip.shownEta = null;
+    return null;
+  }
+  _ldgChip.etaSm = (_ldgChip.etaSm == null) ? etaInst : (_ldgChip.etaSm * 0.65 + etaInst * 0.35);
+  const rounded = Math.max(1, Math.round(_ldgChip.etaSm));
+  // Hysteresis: only change displayed minute when crossing ±0.55 from current shown
+  if (_ldgChip.shownEta == null) {
+    _ldgChip.shownEta = rounded;
+  } else if (Math.abs(_ldgChip.etaSm - _ldgChip.shownEta) >= 0.55) {
+    _ldgChip.shownEta = rounded;
+  }
+  return _ldgChip.shownEta;
+}
+
+function formatLdgDist(info, opts) {
+  const smooth = !!(opts && opts.smooth);
+  if (!info) return { dist: '—', sub: '', rwy: '', atThreshold: false, label: 'To threshold', hide: true, barPct: 0 };
   if (info.mode === 'none' || info.confidence === 'none') {
     return {
       dist: 'NOT KSFO',
@@ -2677,26 +2803,57 @@ function formatLdgDist(info) {
       rwy: '',
       atThreshold: false,
       label: 'Not KSFO approach',
-      hide: true, // chip hidden for non-approach; label kept for HUD callers
+      hide: true,
+      barPct: 0,
     };
   }
-  const nm = info.nm;
-  const rwy = info.rwy ? ('RWY ' + info.rwy) : (info.confidence === 'final' ? 'KSFO' : '');
-  const distThr = info.distThrNm != null ? info.distThrNm : nm;
-  const xtk = info.xtkNm != null ? Math.abs(info.xtkNm) : 0;
-  // AT THRESHOLD / ON FINAL only for genuine final, near thr, on centerline
-  const nearThr = info.confidence === 'final' && distThr < 0.45 && xtk < 0.4 && nm < 0.35;
-  if (nearThr) {
+  // Hide weak "To KSFO" spam — chip is for approach/final only
+  if (info.confidence === 'low') {
     return {
-      dist: distThr < 0.12 && nm < 0.15 ? 'AT THRESHOLD' : 'ON FINAL',
+      dist: '—',
+      sub: '',
+      rwy: '',
+      atThreshold: false,
+      label: 'To KSFO',
+      hide: true,
+      barPct: 0,
+    };
+  }
+
+  const nmRaw = info.nm;
+  const nm = (smooth && _ldgChip.nmSm != null && Number.isFinite(_ldgChip.nmSm))
+    ? _ldgChip.nmSm : nmRaw;
+  const rwy = info.rwy ? ('RWY ' + info.rwy) : (info.confidence === 'final' ? 'KSFO' : '');
+  const distThr = info.distThrNm != null ? info.distThrNm : nmRaw;
+  const xtk = info.xtkNm != null ? Math.abs(info.xtkNm) : 0;
+
+  // AT THRESHOLD / ON FINAL — latched to avoid flicker near thr
+  const nearThrRaw = info.confidence === 'final' && distThr < 0.45 && xtk < 0.4 && nmRaw < 0.35;
+  const onFinalRaw = info.confidence === 'final' && nmRaw < 0.55 && distThr < 0.8 && xtk < 0.5;
+  if (smooth) {
+    if (nearThrRaw) _ldgChip.atThr = true;
+    else if (!(info.confidence === 'final' && distThr < 0.7 && nmRaw < 0.55)) _ldgChip.atThr = false;
+    if (onFinalRaw || nearThrRaw) _ldgChip.onFinalNear = true;
+    else if (!(info.confidence === 'final' && nmRaw < 0.85 && distThr < 1.1)) _ldgChip.onFinalNear = false;
+  }
+  const atThr = smooth ? _ldgChip.atThr : nearThrRaw;
+  const onFinalNear = smooth ? _ldgChip.onFinalNear : onFinalRaw;
+
+  // Progress fill: 12 nm approach → 0 at threshold
+  const barPct = Math.max(0, Math.min(100, (1 - Math.min(Math.max(nmRaw, 0), 12) / 12) * 100));
+
+  if (atThr && distThr < 0.14 && nmRaw < 0.18) {
+    return {
+      dist: 'AT THRESHOLD',
       sub: '',
       rwy,
       atThreshold: true,
-      label: distThr < 0.12 ? 'Landing' : 'On final',
+      label: 'Landing',
       hide: false,
+      barPct: 100,
     };
   }
-  if (info.confidence === 'final' && nm < 0.55 && distThr < 0.8 && xtk < 0.5) {
+  if (atThr || onFinalNear) {
     return {
       dist: 'ON FINAL',
       sub: '',
@@ -2704,19 +2861,40 @@ function formatLdgDist(info) {
       atThreshold: true,
       label: 'On final',
       hide: false,
+      barPct: Math.max(barPct, 88),
     };
   }
+
   let dist;
-  if (nm < 10) dist = nm.toFixed(1) + ' nm';
-  else dist = Math.round(nm) + ' nm';
-  let sub = '';
-  if (info.etaMin != null && info.etaMin < 90) {
-    const m = Math.max(1, Math.round(info.etaMin));
-    sub = '~' + m + ' min';
+  if (nm < 10) {
+    let tenths = Math.round(nm * 10);
+    if (smooth && _ldgChip.shownNmKey != null && Math.abs(nm * 10 - _ldgChip.shownNmKey) < 0.55) {
+      tenths = _ldgChip.shownNmKey;
+    }
+    if (smooth) _ldgChip.shownNmKey = tenths;
+    dist = (tenths / 10).toFixed(1) + ' nm';
+  } else {
+    let whole = Math.round(nm);
+    if (smooth && _ldgChip.shownNmKey != null && Math.abs(nm - _ldgChip.shownNmKey) < 0.6) {
+      whole = _ldgChip.shownNmKey;
+    }
+    if (smooth) _ldgChip.shownNmKey = whole;
+    dist = whole + ' nm';
   }
+
+  let sub = '';
+  const icao = (opts && opts.icao) || _ldgChip.icao;
+  let shownEta = null;
+  if (smooth) {
+    shownEta = smoothLandingEta(icao, nmRaw, info.etaMin, info.gsKt);
+  } else if (info.etaMin != null && info.etaMin < 90 && info.gsKt != null && info.gsKt >= 35) {
+    shownEta = Math.max(1, Math.round(info.etaMin));
+  }
+  if (shownEta != null && shownEta < 90) sub = '~' + shownEta + ' min';
+
   const label = info.confidence === 'final' ? 'On final'
     : (info.rwy ? 'To threshold' : 'To KSFO');
-  return { dist, sub, rwy, atThreshold: false, label, hide: false };
+  return { dist, sub, rwy, atThreshold: false, label, hide: false, barPct };
 }
 
 function buildLandingCues() {
@@ -2893,31 +3071,73 @@ function updateLandingCuesForRec(rec) {
 function updateLandingChip(rec) {
   const chip = document.getElementById('landingChip');
   if (!chip) return;
-  const show = settings.cameraMode === 'follow' && rec && !rec.onGround;
-  if (!show) {
+  const showMode = settings.cameraMode === 'follow' && rec && !rec.onGround;
+  if (!showMode) {
     chip.classList.remove('visible', 'at-threshold');
+    resetLdgChipState();
     return;
   }
   const info = distToLanding(rec);
-  const fmt = formatLdgDist(info);
-  // Only show distance/runway chip for genuine KSFO approach/final
-  if (!info || fmt.hide || info.confidence === 'none' || info.mode === 'none') {
+  // Seed nm smoother before format (so first paint uses blended nm)
+  if (info && info.confidence !== 'none' && info.confidence !== 'low' && Number.isFinite(info.nm)) {
+    if (_ldgChip.icao !== rec.icao) {
+      _ldgChip.icao = rec.icao;
+      _ldgChip.nmSm = info.nm;
+      _ldgChip.gsSm = (info.gsKt != null && info.gsKt >= 35) ? info.gsKt : null;
+      _ldgChip.etaSm = info.etaMin;
+      _ldgChip.shownEta = null;
+      _ldgChip.shownNmKey = null;
+      _ldgChip.atThr = false;
+      _ldgChip.onFinalNear = false;
+      _ldgChip.goodStreak = 0;
+      _ldgChip.missStreak = 0;
+    } else if (_ldgChip.nmSm == null) {
+      _ldgChip.nmSm = info.nm;
+    }
+  }
+  const fmt = formatLdgDist(info, { icao: rec.icao, smooth: true });
+  const wantShow = !!(info && !fmt.hide && info.confidence !== 'none' && info.mode !== 'none'
+    && info.confidence !== 'low' && !(info.nm > 40 && info.confidence !== 'final'));
+
+  if (wantShow) {
+    _ldgChip.goodStreak++;
+    _ldgChip.missStreak = 0;
+  } else {
+    _ldgChip.missStreak++;
+    _ldgChip.goodStreak = 0;
+  }
+  // Show/hide hysteresis — avoid flicker when final detection briefly drops
+  if (wantShow && (_ldgChip.visible || _ldgChip.goodStreak >= 1)) {
+    _ldgChip.visible = true;
+  } else if (!wantShow && (_ldgChip.missStreak >= 3 || !_ldgChip.visible)) {
+    _ldgChip.visible = false;
+  }
+
+  if (!_ldgChip.visible) {
     chip.classList.remove('visible', 'at-threshold');
+    if (_ldgChip.missStreak >= 8) resetLdgChipState();
     return;
   }
-  if (info.nm > 40 && info.confidence !== 'final') {
-    chip.classList.remove('visible', 'at-threshold');
-    return;
-  }
+
+  // During brief miss streak keep last good paint (no NOT KSFO / — flash)
+  const paint = (wantShow || !_ldgChip.lastFmt) ? fmt : _ldgChip.lastFmt;
+  if (wantShow && !fmt.hide) _ldgChip.lastFmt = fmt;
+
   const dEl = document.getElementById('lcDist');
   const sEl = document.getElementById('lcSub');
   const rEl = document.getElementById('lcRwy');
   const lEl = document.getElementById('lcLabel');
-  if (dEl) dEl.textContent = fmt.dist;
-  if (sEl) sEl.textContent = fmt.sub || '';
-  if (rEl) rEl.textContent = fmt.rwy || '';
-  if (lEl) lEl.textContent = fmt.label || 'To threshold';
-  chip.classList.toggle('at-threshold', !!fmt.atThreshold);
+  const bEl = document.getElementById('lcBar');
+  if (dEl) dEl.textContent = paint.dist;
+  if (sEl) sEl.textContent = paint.sub || '';
+  if (rEl) rEl.textContent = paint.rwy || '';
+  if (lEl) lEl.textContent = paint.label || 'To threshold';
+  if (bEl) {
+    const pct = (paint.barPct != null) ? paint.barPct : 0;
+    _ldgChip.barPct = pct;
+    bEl.style.width = pct.toFixed(1) + '%';
+  }
+  chip.classList.toggle('at-threshold', !!paint.atThreshold);
   chip.classList.add('visible');
 }
 
@@ -4730,6 +4950,7 @@ function animate() {
   for (const rec of aircraft.values()) {
     // dead-reckon using ground speed
     let estLat = rec.lat, estLon = rec.lon, estAlt = rec.altM || 0;
+    rec.estLat = estLat; rec.estLon = estLon; rec.estAltM = estAlt;
     const spd = rec.vel != null ? rec.vel : (rec.gsKt != null ? rec.gsKt * KT_MS : 0);
     if (spd > 1 && rec.track != null && Number.isFinite(rec.track) && !rec.onGround) {
       const age = (t - rec.lastPoll) / 1000;
@@ -4744,6 +4965,7 @@ function animate() {
         estLat = rec.lat + dLat;
         estLon = rec.lon + dLon;
         estAlt = Math.max(0, (rec.altM || 0) + dAlt);
+        rec.estLat = estLat; rec.estLon = estLon; rec.estAltM = estAlt;
         if (Number.isFinite(estLat) && Number.isFinite(estLon) && Number.isFinite(estAlt)) {
           const altVis = estAlt * settings.altScale;
           const p = enu(estLat, estLon, altVis);

@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v12)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v13)
 
 ## Local
 
@@ -78,6 +78,12 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   coastline/roads discernible; direct ESRI + stylized imagery remain fallbacks.
   Follow/selected `.ac-label` soft-clamps into the HUD/chip safe area and flips
   below the plane under overhead tilt instead of clipping out of frame.
+- **Stable landing ETA chip** (airloom-v13): Follow bottom chip shows distance +
+  ETA only for clear KSFO approach/final (hides low-confidence “To KSFO” spam).
+  ETA is groundspeed-based with GS/nm smoothing and minute hysteresis (no jump
+  on ADS-B noise); hidden when GS unknown. AT THRESHOLD / ON FINAL latched.
+  Active-flow runway labeling kept. Compact single-row chip + thin approach
+  progress fill — readable on iPhone without restoring big panels.
 - **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
   single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
   altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse
