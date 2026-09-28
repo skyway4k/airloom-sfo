@@ -499,7 +499,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v9'; // Stable exclusive basemaps (no dual-stack / LOD thrash)
+const BUILD_MARK = 'airloom-v10'; // Strict KSFO final + active-flow runway (no false 10R threshold)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -512,6 +512,9 @@ window.__AIRLOOM_FEATURES = {
   exclusiveBasemap: true,
   chaseDoubleBuffer: true,
   groundDepthStable: true,
+  strictKsfoFinal: true,
+  activeFlowRunway: true,
+  hideNonKsfoChip: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -622,15 +625,85 @@ function nearestBayField(lat, lon) {
  * Used for extended-centerline final detection — not SQL/HAF/PAO.
  */
 const KSFO_FINALS = [
-  { name: '28L', thrLat: 37.6125, thrLon: -122.3580, hdg: 284 },
-  { name: '28R', thrLat: 37.6278, thrLon: -122.3665, hdg: 284 },
-  { name: '10L', thrLat: 37.6210, thrLon: -122.3935, hdg: 104 },
-  { name: '10R', thrLat: 37.6058, thrLon: -122.3850, hdg: 104 },
-  { name: '19L', thrLat: 37.6310, thrLon: -122.3845, hdg: 192 },
-  { name: '19R', thrLat: 37.6305, thrLon: -122.3785, hdg: 192 },
-  { name: '01L', thrLat: 37.6075, thrLon: -122.3715, hdg: 12 },
-  { name: '01R', thrLat: 37.6080, thrLon: -122.3775, hdg: 12 },
+  { name: '28L', thrLat: 37.6125, thrLon: -122.3580, hdg: 284, flow: '28' },
+  { name: '28R', thrLat: 37.6278, thrLon: -122.3665, hdg: 284, flow: '28' },
+  { name: '10L', thrLat: 37.6210, thrLon: -122.3935, hdg: 104, flow: '10' },
+  { name: '10R', thrLat: 37.6058, thrLon: -122.3850, hdg: 104, flow: '10' },
+  { name: '19L', thrLat: 37.6310, thrLon: -122.3845, hdg: 192, flow: '19' },
+  { name: '19R', thrLat: 37.6305, thrLon: -122.3785, hdg: 192, flow: '19' },
+  { name: '01L', thrLat: 37.6075, thrLon: -122.3715, hdg: 12, flow: '01' },
+  { name: '01R', thrLat: 37.6080, thrLon: -122.3775, hdg: 12, flow: '01' },
 ];
+
+/** Opposite / parallel flow pairs — prefer active, never default closed opposite. */
+const FLOW_OPPOSITE = { '28': '10', '10': '28', '19': '01', '01': '19' };
+const FLOW_HDG = { '28': 284, '10': 104, '19': 192, '01': 12 };
+/** Predominant KSFO config is west ops (28s). Never invent east ops without evidence. */
+let activeFlow = '28';
+let _flowVotes = { '28': 0, '10': 0, '19': 0, '01': 0 };
+
+function rwyByName(name) {
+  return KSFO_FINALS.find((x) => x.name === name) || null;
+}
+
+function finalsForFlow(flow) {
+  const f = flow || activeFlow;
+  return KSFO_FINALS.filter((rw) => rw.flow === f);
+}
+
+/**
+ * Infer active arrival flow from recent genuine finals + inbound tracks near the field.
+ * Defaults to 28 (west). Opposite of a strong vote is treated as closed/inactive.
+ */
+function updateActiveFlow(parsedOrRecs) {
+  const votes = { '28': 0, '10': 0, '19': 0, '01': 0 };
+  const src = parsedOrRecs || [];
+  for (const p of src) {
+    if (!p || p.onGround) continue;
+    const altFt = (p.altM || 0) / FT_M;
+    const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+    if (distKsfo > 22 || altFt > 9000) continue;
+
+    // Strong: already tagged final
+    if (p.finalInfo && p.finalInfo.rwy) {
+      const rw = rwyByName(p.finalInfo.rwy);
+      if (rw) votes[rw.flow] += 4;
+      continue;
+    }
+    // Soft: track aligned with a flow heading while toward the field
+    if (p.track == null || !Number.isFinite(p.track)) continue;
+    const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+    if (Math.abs(angDiff(p.track, brg)) > 55) continue;
+    const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+    if (vrFpm > 200) continue;
+    let bestFlow = null, bestTd = 25;
+    for (const [flow, hdg] of Object.entries(FLOW_HDG)) {
+      const td = Math.abs(angDiff(p.track, hdg));
+      if (td < bestTd) { bestTd = td; bestFlow = flow; }
+    }
+    if (bestFlow) votes[bestFlow] += (distKsfo < 12 ? 2 : 1);
+  }
+  _flowVotes = votes;
+  // Decay-resistant pick: need clear lead to flip off default 28
+  let best = '28', bestN = votes['28'] + 0.5; // slight prior for west ops
+  for (const f of ['28', '10', '19', '01']) {
+    if (votes[f] > bestN) { bestN = votes[f]; best = f; }
+  }
+  // Require at least one solid vote to leave 28; require 2+ to pick opposite of prior
+  const total = votes['28'] + votes['10'] + votes['19'] + votes['01'];
+  if (total < 1) {
+    activeFlow = '28';
+  } else if (best !== activeFlow) {
+    const opp = FLOW_OPPOSITE[activeFlow];
+    if (best === opp && votes[best] < Math.max(3, votes[activeFlow] + 2)) {
+      /* keep prior — weak opposite vote (e.g. closed 10s) */
+    } else {
+      activeFlow = best;
+    }
+  }
+  window.__AIRLOOM_ACTIVE_FLOW = activeFlow;
+  return activeFlow;
+}
 
 /** Cross/along-track nm from a runway threshold along its landing heading. */
 function rwyTrackOffsets(lat, lon, thrLat, thrLon, hdg) {
@@ -659,46 +732,73 @@ function inSfoClassB(lat, lon, altFt) {
 
 /**
  * Real KSFO final: extended centerline, track aligned, descending / toward field.
- * Returns best match { rwy, xtkNm, atkNm, score } or null.
+ * Behind threshold only — never "past" geometry. Prefers active flow runways.
+ * Returns best match { rwy, xtkNm, atkNm, alongNm, score, descending, flow } or null.
  */
 function detectKsfoFinal(p) {
   if (!p || p.onGround) return null;
   const altFt = (p.altM || 0) / FT_M;
-  if (altFt < 40 || altFt > 9000) return null;
+  if (altFt < 40 || altFt > 7500) return null;
   const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
-  if (distKsfo > 18) return null;
+  if (distKsfo > 14) return null;
 
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
   const descending = vrFpm < -80;
-  const notClimbing = vrFpm < 400;
-  if (!notClimbing && altFt > 1500) return null;
+  const notClimbing = vrFpm < 250;
+  // Climbing through the slot is never final
+  if (!notClimbing) return null;
+  // Beyond ~5 nm require descent evidence (or unknown VR treated cautiously)
+  if (!descending && distKsfo > 5 && vrFpm > -20) return null;
+
+  // Track must point at the field broadly (rejects Bay transit / departures)
+  if (p.track != null && Number.isFinite(p.track)) {
+    const brgApt = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+    if (Math.abs(angDiff(p.track, brgApt)) > 70 && distKsfo > 2.5) return null;
+  }
 
   let best = null;
   for (const rw of KSFO_FINALS) {
     const off = rwyTrackOffsets(p.lat, p.lon, rw.thrLat, rw.thrLon, rw.hdg);
-    // On approach: behind threshold along reciprocal, within ~12 nm final
-    if (off.atkNm > 0.6 || off.atkNm < -12.5) continue;
-    if (Math.abs(off.xtkNm) > 1.35) continue;
+    // Strictly on approach side: behind threshold (neg atk). Tiny overshoot only when very close.
+    if (off.atkNm > 0.25) continue;
+    if (off.atkNm < -12.0) continue;
+    // Tight centerline — Bay traffic abeam must not match
+    const xtkMax = off.atkNm > -2.5 ? 0.55 : 0.85;
+    if (Math.abs(off.xtkNm) > xtkMax) continue;
 
-    let trackOk = true;
-    if (p.track != null && Number.isFinite(p.track)) {
+    // Haversine gate: must actually be near the extended centerline corridor
+    if (off.distNm > 12.5) continue;
+
+    let trackOk = p.track == null || !Number.isFinite(p.track);
+    if (!trackOk) {
       const td = Math.abs(angDiff(p.track, rw.hdg));
-      trackOk = td <= 28;
+      trackOk = td <= 22;
       if (!trackOk) continue;
     }
+
+    const along = Math.max(0, -off.atkNm);
     // Glideslope soft band: ~300 ft/nm + cushion
-    const along = Math.max(0.3, -off.atkNm);
-    const gsMax = 800 + along * 380;
+    const gsMax = 700 + Math.max(0.4, along) * 360;
     if (altFt > gsMax) continue;
 
-    // Prefer descending + tight centerline + closer-in
-    let score = Math.abs(off.xtkNm) * 4 + along * 0.35;
-    if (descending) score *= 0.72;
-    if (p.track != null) score *= 0.85;
-    if (along < 6) score *= 0.9;
+    let score = Math.abs(off.xtkNm) * 5 + along * 0.4;
+    if (descending) score *= 0.7;
+    if (p.track != null) score *= 0.82;
+    if (along < 5) score *= 0.88;
+    // Prefer active flow; heavily penalize opposite (often closed) runways
+    if (rw.flow === activeFlow) score *= 0.72;
+    else if (FLOW_OPPOSITE[activeFlow] === rw.flow) score *= 2.8;
+    else score *= 1.55;
 
-    const cand = { rwy: rw.name, xtkNm: off.xtkNm, atkNm: off.atkNm, alongNm: along, score, descending };
+    const cand = {
+      rwy: rw.name, xtkNm: off.xtkNm, atkNm: off.atkNm, alongNm: along,
+      score, descending, flow: rw.flow, distThrNm: off.distNm,
+    };
     if (!best || cand.score < best.score) best = cand;
+  }
+  // Reject weak opposite-flow matches unless extremely tight
+  if (best && FLOW_OPPOSITE[activeFlow] === best.flow) {
+    if (Math.abs(best.xtkNm) > 0.35 || best.alongNm > 6 || !best.descending) return null;
   }
   return best;
 }
@@ -708,8 +808,41 @@ function isOnKsfoFinal(p) {
 }
 
 /**
+ * Clear inbound-to-KSFO (not mere Bay presence). Used by association + Follow scoring.
+ */
+function isClearKsfoInbound(p) {
+  if (!p || p.onGround) return false;
+  const altFt = (p.altM || 0) / FT_M;
+  const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  if (distKsfo > 40 || altFt > 16000 || altFt < 50) return false;
+
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  if (vrFpm > 800 && altFt > 2500) return false; // departing
+
+  const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+  const trackDiff = p.track != null && Number.isFinite(p.track)
+    ? Math.abs(angDiff(p.track, brg)) : null;
+  const toward = trackDiff != null ? trackDiff <= 48 : false;
+  const descending = vrFpm < -60;
+  let closing = false;
+  if (p._distKsfo != null && distKsfo < p._distKsfo - 0.12) closing = true;
+  if (p._prevDistKsfo != null && p._prevDistKsfo - distKsfo > 0.12) closing = true;
+
+  // Satellite-field primary: reject unless strongly KSFO-bound
+  const near = nearestBayField(p.lat, p.lon);
+  if (near.field.icao !== 'KSFO' && near.distNm < 6 && distKsfo > near.distNm + 2) {
+    if (!(toward && (descending || closing) && distKsfo < 22)) return false;
+  }
+
+  if (toward && (descending || closing)) return true;
+  // Close-in pattern / base: toward-ish + low
+  if (distKsfo < 8 && altFt < 4500 && (toward || trackDiff == null) && vrFpm < 400) return true;
+  return false;
+}
+
+/**
  * Aircraft clearly associated with KSFO (not SQL/HAF/PAO/SJC-primary Bay GA).
- * Include: on KSFO final / approach, inbound to KSFO, or inside SFO Class B pattern.
+ * Stricter than v9: Class B fly-through alone is not enough.
  */
 function isKsfoAssociated(p) {
   if (!p) return false;
@@ -719,37 +852,28 @@ function isKsfoAssociated(p) {
   if (p.onGround) return distKsfo < 2.8; // KSFO surface only
 
   if (detectKsfoFinal(p)) return true;
-  if (inSfoClassB(p.lat, p.lon, altFt)) return true;
+  if (isClearKsfoInbound(p)) return true;
 
-  // Satellite-field primary: near SQL/HAF/PAO/SJC and clearly not KSFO-bound
+  // Satellite-field primary reject
   const near = nearestBayField(p.lat, p.lon);
   if (near.field.icao !== 'KSFO' && near.distNm < 7 && distKsfo > near.distNm + 2.5) {
-    const brgK = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
-    const tdK = p.track != null ? Math.abs(angDiff(p.track, brgK)) : 180;
-    const towardKsfo = tdK <= 55;
-    const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
-    if (!(towardKsfo && vrFpm < -100 && distKsfo < 25)) return false;
+    return false;
   }
 
-  if (distKsfo > 45) return false;
+  // Tight local pattern only (not full Class B cake)
+  if (distKsfo < 7 && altFt < 6000) {
+    const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+    if (vrFpm < 700) return true;
+  }
 
-  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
-  const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
-  const trackDiff = p.track != null ? Math.abs(angDiff(p.track, brg)) : 70;
-  const toward = trackDiff <= 95;
-  const descending = vrFpm < -50;
-  const climbingHard = vrFpm > 900 && altFt > 3500;
-  if (climbingHard && distKsfo > 12) return false;
+  // Class B + clearly toward field (not a lateral transit)
+  if (inSfoClassB(p.lat, p.lon, altFt) && distKsfo < 18) {
+    const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+    const trackDiff = p.track != null ? Math.abs(angDiff(p.track, brg)) : 90;
+    const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+    if (trackDiff <= 60 && vrFpm < 500) return true;
+  }
 
-  // Closing distance to KSFO
-  let closing = false;
-  if (p._distKsfo != null && distKsfo < p._distKsfo - 0.15) closing = true;
-  if (p._prevDistKsfo != null && p._prevDistKsfo - distKsfo > 0.15) closing = true;
-
-  if (toward && (descending || closing || (altFt < 12000 && distKsfo < 32))) return true;
-  if (p.isArrival || isArrival(p)) return toward || distKsfo < 18;
-  // Tight local pattern / Class-B vicinity
-  if (distKsfo < 12 && altFt < 10000 && !climbingHard) return true;
   return false;
 }
 
@@ -2376,67 +2500,132 @@ function makeBillboardLabel(lines, worldH, opts) {
   return spr;
 }
 
-/** Best remaining distance to a KSFO runway threshold (or field center). */
+/** Best remaining distance to a KSFO runway threshold — only for real approach/final. */
 function distToLanding(rec) {
   if (!rec || !Number.isFinite(rec.lat) || !Number.isFinite(rec.lon)) return null;
+  const distKsfo = (rec.dist != null) ? rec.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, rec.lat, rec.lon);
+
   if (rec.onGround) {
-    const d = haversineNm(rec.lat, rec.lon, ORIGIN.lat, ORIGIN.lon);
-    return { nm: d, mi: d * SM_PER_NM, rwy: null, alongNm: d, mode: 'field', etaMin: null, thrLat: ORIGIN.lat, thrLon: ORIGIN.lon };
+    return {
+      nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
+      mode: 'field', confidence: 'none', etaMin: null,
+      thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
+    };
   }
+
   let final = rec.finalInfo || detectKsfoFinal(rec);
-  let thrLat, thrLon, rwy, alongNm, mode;
   if (final) {
-    const rw = KSFO_FINALS.find((x) => x.name === final.rwy) || KSFO_FINALS[0];
-    thrLat = rw.thrLat; thrLon = rw.thrLon; rwy = rw.name;
-    alongNm = Math.max(0, final.alongNm != null ? final.alongNm : -final.atkNm);
-    mode = 'final';
-  } else {
-    // Nearest threshold among approach candidates, else field
-    let best = null;
-    for (const rw of KSFO_FINALS) {
-      const off = rwyTrackOffsets(rec.lat, rec.lon, rw.thrLat, rw.thrLon, rw.hdg);
-      const along = Math.max(0, -off.atkNm);
-      const score = along + Math.abs(off.xtkNm) * 2;
-      // Prefer thresholds roughly ahead / inbound
-      let trackPenalty = 0;
-      if (rec.track != null) trackPenalty = Math.abs(angDiff(rec.track, rw.hdg)) / 90;
-      const s = score + trackPenalty * 4;
-      if (!best || s < best.s) best = { rw, along, s, off };
-    }
-    if (best && best.along < 40) {
-      thrLat = best.rw.thrLat; thrLon = best.rw.thrLon; rwy = best.rw.name;
-      alongNm = best.along; mode = 'approach';
-    } else {
-      thrLat = ORIGIN.lat; thrLon = ORIGIN.lon; rwy = null;
-      alongNm = haversineNm(rec.lat, rec.lon, ORIGIN.lat, ORIGIN.lon);
-      mode = 'field';
-    }
+    const rw = rwyByName(final.rwy) || finalsForFlow(final.flow || activeFlow)[0] || KSFO_FINALS[0];
+    const alongNm = Math.max(0, final.alongNm != null ? final.alongNm : -final.atkNm);
+    // Never report "at threshold" from along alone — require proximity to thr
+    const distThr = haversineNm(rec.lat, rec.lon, rw.thrLat, rw.thrLon);
+    const nm = Math.max(alongNm, distThr * 0.15); // keep geometric along primary
+    const gs = spdKt(rec);
+    let etaMin = null;
+    if (gs != null && gs >= 30 && alongNm > 0.05) etaMin = (alongNm / gs) * 60;
+    return {
+      nm: alongNm, mi: alongNm * SM_PER_NM, rwy: rw.name, alongNm,
+      mode: 'final', confidence: 'final', etaMin,
+      thrLat: rw.thrLat, thrLon: rw.thrLon,
+      xtkNm: final.xtkNm, distThrNm: distThr,
+    };
   }
+
+  // High-confidence approach (not yet centerline-final): clear inbound + near field
+  if (!isClearKsfoInbound(rec) || distKsfo > 18) {
+    return {
+      nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
+      mode: 'none', confidence: 'none', etaMin: null,
+      thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
+    };
+  }
+
+  // Pick among ACTIVE flow runways only — never default to closed opposite (e.g. 10R)
+  const candidates = finalsForFlow(activeFlow);
+  let best = null;
+  for (const rw of candidates) {
+    const off = rwyTrackOffsets(rec.lat, rec.lon, rw.thrLat, rw.thrLon, rw.hdg);
+    // Must be on approach side (behind threshold). Past/abeam → use haversine, not along=0.
+    if (off.atkNm > 0.5) continue;
+    if (off.atkNm < -18) continue;
+    if (Math.abs(off.xtkNm) > 3.5) continue;
+    const along = -off.atkNm; // positive behind thr
+    if (along < 0) continue;
+    let trackPenalty = 0;
+    if (rec.track != null) {
+      const td = Math.abs(angDiff(rec.track, rw.hdg));
+      if (td > 55) continue;
+      trackPenalty = td / 90;
+    }
+    const s = along + Math.abs(off.xtkNm) * 2.2 + trackPenalty * 5;
+    if (!best || s < best.s) best = { rw, along, s, off };
+  }
+
+  if (!best) {
+    // Inbound but no usable runway geometry — distance to field, no runway label
+    const gs = spdKt(rec);
+    let etaMin = null;
+    if (gs != null && gs >= 30 && distKsfo > 0.05) etaMin = (distKsfo / gs) * 60;
+    return {
+      nm: distKsfo, mi: distKsfo * SM_PER_NM, rwy: null, alongNm: distKsfo,
+      mode: 'approach', confidence: 'low', etaMin,
+      thrLat: ORIGIN.lat, thrLon: ORIGIN.lon,
+    };
+  }
+
+  const distThr = haversineNm(rec.lat, rec.lon, best.rw.thrLat, best.rw.thrLon);
+  // Guard: never collapse large lateral miss into "0 nm remaining"
+  const alongNm = Math.max(best.along, distThr > 1.5 ? distThr * 0.5 : 0);
+  const conf = (Math.abs(best.off.xtkNm) < 1.2 && best.along < 12) ? 'approach' : 'low';
+  const showRwy = conf === 'approach'; // only label runway when reasonably aligned
   const gs = spdKt(rec);
   let etaMin = null;
-  if (gs != null && gs >= 30 && alongNm > 0.05) {
-    etaMin = (alongNm / gs) * 60;
-  }
+  if (gs != null && gs >= 30 && alongNm > 0.05) etaMin = (alongNm / gs) * 60;
   return {
-    nm: alongNm,
-    mi: alongNm * SM_PER_NM,
-    rwy, alongNm, mode, etaMin,
-    thrLat, thrLon,
+    nm: alongNm, mi: alongNm * SM_PER_NM,
+    rwy: showRwy ? best.rw.name : null,
+    alongNm, mode: 'approach', confidence: conf, etaMin,
+    thrLat: best.rw.thrLat, thrLon: best.rw.thrLon,
+    xtkNm: best.off.xtkNm, distThrNm: distThr,
   };
 }
 
 function formatLdgDist(info) {
-  if (!info) return { dist: '—', sub: '', rwy: '', atThreshold: false, label: 'To threshold' };
-  const nm = info.nm;
-  const rwy = info.rwy ? ('RWY ' + info.rwy) : 'KSFO';
-  // <0.2 nm: stop spamming "0.0 mi" — single status cue
-  if (nm < 0.2) {
+  if (!info) return { dist: '—', sub: '', rwy: '', atThreshold: false, label: 'To threshold', hide: true };
+  if (info.mode === 'none' || info.confidence === 'none') {
     return {
-      dist: nm < 0.08 ? 'AT THRESHOLD' : 'ON FINAL',
+      dist: 'NOT KSFO',
+      sub: '',
+      rwy: '',
+      atThreshold: false,
+      label: 'Not KSFO approach',
+      hide: true, // chip hidden for non-approach; label kept for HUD callers
+    };
+  }
+  const nm = info.nm;
+  const rwy = info.rwy ? ('RWY ' + info.rwy) : (info.confidence === 'final' ? 'KSFO' : '');
+  const distThr = info.distThrNm != null ? info.distThrNm : nm;
+  const xtk = info.xtkNm != null ? Math.abs(info.xtkNm) : 0;
+  // AT THRESHOLD / ON FINAL only for genuine final, near thr, on centerline
+  const nearThr = info.confidence === 'final' && distThr < 0.45 && xtk < 0.4 && nm < 0.35;
+  if (nearThr) {
+    return {
+      dist: distThr < 0.12 && nm < 0.15 ? 'AT THRESHOLD' : 'ON FINAL',
       sub: '',
       rwy,
       atThreshold: true,
-      label: nm < 0.08 ? 'Landing' : 'On final',
+      label: distThr < 0.12 ? 'Landing' : 'On final',
+      hide: false,
+    };
+  }
+  if (info.confidence === 'final' && nm < 0.55 && distThr < 0.8 && xtk < 0.5) {
+    return {
+      dist: 'ON FINAL',
+      sub: '',
+      rwy,
+      atThreshold: true,
+      label: 'On final',
+      hide: false,
     };
   }
   let dist;
@@ -2447,7 +2636,9 @@ function formatLdgDist(info) {
     const m = Math.max(1, Math.round(info.etaMin));
     sub = '~' + m + ' min';
   }
-  return { dist, sub, rwy, atThreshold: false, label: 'To threshold' };
+  const label = info.confidence === 'final' ? 'On final'
+    : (info.rwy ? 'To threshold' : 'To KSFO');
+  return { dist, sub, rwy, atThreshold: false, label, hide: false };
 }
 
 function buildLandingCues() {
@@ -2591,7 +2782,8 @@ function updateLandingCuesForRec(rec) {
     }
   });
   const info = distToLanding(rec);
-  if (!info || !rec || rec.onGround || info.nm < 0.08 || info.nm > 55) {
+  if (!info || !rec || rec.onGround || info.mode === 'none' || info.confidence === 'none'
+      || info.nm < 0.08 || info.nm > 40) {
     rem.visible = false;
     ring.visible = false;
     return;
@@ -2629,18 +2821,23 @@ function updateLandingChip(rec) {
     return;
   }
   const info = distToLanding(rec);
-  if (!info || info.nm > 55) {
+  const fmt = formatLdgDist(info);
+  // Only show distance/runway chip for genuine KSFO approach/final
+  if (!info || fmt.hide || info.confidence === 'none' || info.mode === 'none') {
     chip.classList.remove('visible', 'at-threshold');
     return;
   }
-  const fmt = formatLdgDist(info);
+  if (info.nm > 40 && info.confidence !== 'final') {
+    chip.classList.remove('visible', 'at-threshold');
+    return;
+  }
   const dEl = document.getElementById('lcDist');
   const sEl = document.getElementById('lcSub');
   const rEl = document.getElementById('lcRwy');
   const lEl = document.getElementById('lcLabel');
   if (dEl) dEl.textContent = fmt.dist;
   if (sEl) sEl.textContent = fmt.sub || '';
-  if (rEl) rEl.textContent = fmt.rwy;
+  if (rEl) rEl.textContent = fmt.rwy || '';
   if (lEl) lEl.textContent = fmt.label || 'To threshold';
   chip.classList.toggle('at-threshold', !!fmt.atThreshold);
   chip.classList.add('visible');
@@ -3057,47 +3254,48 @@ $('sAuto').onchange = (e) => {
 };
 setCameraMode(settings.cameraMode);
 
-/** Score whether private/GA is inbound to KSFO (not Bay satellite fields). */
+/** Score whether private/GA is a genuine KSFO inbound / approach / final (Follow chase). */
 function scoreInboundGa(p) {
   if (!p || p.onGround) return null;
   if (!(p.isPrivateGa || isPrivateOrGa(p))) return null;
-  if (!(p.isKsfo || isKsfoAssociated(p))) return null;
   const altFt = (p.altM || 0) / FT_M;
   if (altFt < 50) return null;
   const field = BAY_FIELDS[0]; // KSFO only
   const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
-  if (distNm > 50) return null;
+  if (distNm > 45) return null;
+
+  const finalHit = p.finalInfo || detectKsfoFinal(p);
+  const clearIn = isClearKsfoInbound(p);
+  // Follow chase: final OR clear inbound only — not Class-B fly-through
+  if (!finalHit && !clearIn) return null;
+  if (!(p.isKsfo || isKsfoAssociated(p) || finalHit || clearIn)) return null;
 
   const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
     : (p.vel != null ? p.vel / KT_MS : null);
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
   const brg = bearingDeg(p.lat, p.lon, field.lat, field.lon);
   const trackDiff = p.track != null ? Math.abs(angDiff(p.track, brg)) : 60;
-  const toward = trackDiff <= 105;
-  const descending = vrFpm < -40;
-  const low = altFt < 14000;
-  const close = distNm < 35;
-  const finalHit = p.finalInfo || detectKsfoFinal(p);
+  const toward = trackDiff <= 55;
+  const descending = vrFpm < -60;
 
   let closingDist = false;
-  if (p._distKsfo != null && distNm < p._distKsfo - 0.15) closingDist = true;
-  if (p._prevDistKsfo != null && p._prevDistKsfo - distNm > 0.15) closingDist = true;
-
-  const inbound = toward && (descending || low || close || closingDist || !!finalHit);
-  const arr = p.isArrival || isArrival(p);
-  if (!inbound && !arr && !finalHit) return null;
+  if (p._distKsfo != null && distNm < p._distKsfo - 0.12) closingDist = true;
+  if (p._prevDistKsfo != null && p._prevDistKsfo - distNm > 0.12) closingDist = true;
 
   const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
   const tca = timeToClosestApproachMin(p.lat, p.lon, p.track, gs, field.lat, field.lon);
   const etaUse = eta != null ? eta : (tca != null ? tca : distNm * 1.2);
 
   let score = etaUse;
-  score += distNm * 0.15;
-  if (descending) score *= 0.88;
-  if (toward) score *= 0.92;
-  if (arr) score *= 0.9;
-  if (finalHit) score *= 0.55; // strongly prefer aircraft on KSFO final
-  if (!toward && arr) score *= 1.05;
+  score += distNm * 0.18;
+  if (descending) score *= 0.85;
+  if (toward) score *= 0.9;
+  if (closingDist) score *= 0.92;
+  if (clearIn) score *= 0.88;
+  if (finalHit) score *= 0.45; // strongly prefer aircraft on KSFO final
+  // Prefer active-flow finals
+  if (finalHit && finalHit.flow === activeFlow) score *= 0.85;
+  if (finalHit && FLOW_OPPOSITE[activeFlow] === finalHit.flow) score *= 1.6;
 
   return {
     icao: p.icao,
@@ -3352,7 +3550,7 @@ function buildIgCardHtml(rec, badge) {
   const rwy = rec.finalRwy || rec.finalInfo?.rwy;
   const ldg = distToLanding(rec);
   const fmt = formatLdgDist(ldg);
-  const ldgHtml = ldg && !rec.onGround
+  const ldgHtml = ldg && !rec.onGround && !fmt.hide
     ? (`<div class="ig-ldg">` +
         `<div><div class="k">To ldg</div><div class="v">${fmt.dist}</div></div>` +
         `<div><div class="k">Remain</div><div class="v dim">${fmt.sub || '—'}</div></div>` +
@@ -4232,8 +4430,15 @@ function ingest(data) {
   const arrivals = parsed.filter((p) => p.isArrival);
 
   // Tag private/GA + KSFO association / final on every parsed aircraft
+  // First pass: soft finals for flow vote (activeFlow may still be prior)
   for (const p of parsed) {
     p.isPrivateGa = isPrivateOrGa(p);
+    p.finalInfo = detectKsfoFinal(p);
+    p.isOnFinal = !!p.finalInfo;
+  }
+  updateActiveFlow(parsed);
+  // Second pass: re-detect with updated active flow preference + association
+  for (const p of parsed) {
     p.finalInfo = detectKsfoFinal(p);
     p.isOnFinal = !!p.finalInfo;
     p.isKsfo = isKsfoAssociated(p);
