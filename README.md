@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v8)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v9)
 
 ## Local
 
@@ -62,6 +62,9 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   (nm + ETA; “ON FINAL / AT THRESHOLD” under 0.2 nm — no 0.0 mi spam).
 - **Orbit keyless dark basemap** (airloom-v8): Carto dark_all → ESRI World
   Dark Gray Base (no API key). Follow USGS ImageryOnly unchanged.
+- **Stable exclusive basemaps** (airloom-v9): only one stack visible per mode
+  (no Orbit dark + Follow sat fighting); depth-stable LOD overlays; chase inset
+  double-buffered with 2-cell hysteresis so sharpness stays consistent.
 - **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
   single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
   altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse

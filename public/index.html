@@ -499,7 +499,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v8'; // Orbit keyless ESRI Dark Gray (Carto API-key tiles dead)
+const BUILD_MARK = 'airloom-v9'; // Stable exclusive basemaps (no dual-stack / LOD thrash)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -509,6 +509,9 @@ window.__AIRLOOM_FEATURES = {
   followHudMinimal: true,
   landingTarget: true,
   distToLanding: true,
+  exclusiveBasemap: true,
+  chaseDoubleBuffer: true,
+  groundDepthStable: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1950,18 +1953,35 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   const cz = (nwE.z + seE.z) / 2;
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.generateMipmaps = true;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  // Base mosaics keep mipmaps; overlays use linear to avoid mip shimmer/seams on stacks
+  const overlay = !!opts.overlay;
+  if (overlay) {
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+  } else {
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+  }
   tex.magFilter = THREE.LinearFilter;
-  // Full GPU anisotropy (often 16) — keeps ground sharp at chase look-down angles
   try { tex.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1; } catch (_) {}
-  const mat = new THREE.MeshBasicMaterial({ map: tex, depthWrite: true });
+  // Overlays: no depth write + polygonOffset stops z-fight flicker between LOD planes
+  // (near/far spans are huge; even log-depth can shimmer on Safari when y-gaps are cm-scale)
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    depthWrite: !overlay,
+    depthTest: true,
+    polygonOffset: overlay,
+    polygonOffsetFactor: overlay ? -1 : 0,
+    polygonOffsetUnits: overlay ? -1 : 0,
+  });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(cx, 0, cz);
+  mesh.renderOrder = overlay ? (10 + (z || 0)) : (z || 0);
   mesh.userData.tileZ = z;
   mesh.userData.tileSpan = span;
   mesh.userData.tileCenter = { x: center.x, y: center.y, z };
+  mesh.userData.overlay = overlay;
   return { mesh, width, height, loaded, total, z, span };
 }
 
@@ -1994,7 +2014,8 @@ window.__AIRLOOM_TILE_LEVELS = {
   source: FOLLOW_TILE_TMPL,
   fallback: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   maxUsgsZ: 16,
-  densify: 'airloom-v6-wider-radius-lookahead',
+  densify: 'airloom-v9-exclusive-stable',
+  orbitSource: ORBIT_TILE_TMPL,
 };
 
 function disposeMeshTree(root) {
@@ -2009,8 +2030,8 @@ function disposeMeshTree(root) {
   }
 }
 
-async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon) {
-  const base = { lat, lon };
+async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extraOpts) {
+  const base = { lat, lon, ...(extraOpts || {}) };
   let layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_URL });
   if (!layer) layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_FALLBACK_URL });
   return layer;
@@ -2020,6 +2041,20 @@ let chaseInsetGen = 0;
 let chaseInsetTileKey = '';
 let chaseInsetBusy = false;
 let chaseInsetLastTry = 0;
+
+/** Exactly one basemap stack active — never Orbit dark + Follow sat together. */
+function setExclusiveBasemap(mode) {
+  const follow = mode === 'follow';
+  satGroundGroup.visible = follow;
+  darkGroundGroup.visible = !follow;
+  // chase inset lives under sat; keep explicit for clarity / future reparent
+  chaseHiZGroup.visible = follow;
+  if (!follow) {
+    // Cancel in-flight chase rebuilds so Orbit never inherits a late sat swap
+    chaseInsetGen++;
+    chaseInsetBusy = false;
+  }
+}
 
 /** Offset lat/lon ~aheadNm along track (deg) so chase prefetch covers look-ahead. */
 function offsetAlongTrack(lat, lon, trackDeg, aheadNm) {
@@ -2035,54 +2070,68 @@ function offsetAlongTrack(lat, lon, trackDeg, aheadNm) {
 
 /**
  * Ultra-HD inset under + ahead of chase — denser radius, z13–z16, look-ahead prefetch.
- * Refreshes when z14 tile cell (or look-ahead cell) changes.
+ * airloom-v9: double-buffer swap (no mid-frame wipe), 2-cell hysteresis, longer coalesce
+ * so LOD does not thrash / flicker while the chase moves.
  */
 async function refreshChaseInset(lat, lon, trackDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   if (settings.cameraMode !== 'follow') return;
   const now = performance.now();
   if (chaseInsetBusy) return;
-  // Coalesce bursts; tile-key gate does the real skip
-  if (now - chaseInsetLastTry < 350) return;
+  if (now - chaseInsetLastTry < 900) return;
   chaseInsetLastTry = now;
-  // Prefetch ~3.5 nm ahead so distant terrain in view stays sharp
   const ahead = offsetAlongTrack(lat, lon, trackDeg, 3.5);
   const focusLat = (lat + ahead.lat) * 0.5;
   const focusLon = (lon + ahead.lon) * 0.5;
   const t14 = latLonToTile(focusLat, focusLon, 14);
+  // 2-cell hysteresis: ignore 1-tile jitter that caused inconsistent sharpness
+  if (chaseInsetTileKey) {
+    const parts = chaseInsetTileKey.split(':');
+    const px = Number(parts[1]), py = Number(parts[2]);
+    if (Number.isFinite(px) && Number.isFinite(py)) {
+      if (Math.abs(t14.x - px) < 2 && Math.abs(t14.y - py) < 2) return;
+    }
+  }
   const key = `14:${t14.x}:${t14.y}`;
   if (key === chaseInsetTileKey) return;
   chaseInsetBusy = true;
   const gen = ++chaseInsetGen;
+  const pending = [];
   try {
-    // Wider + denser: context → mid → sharp → runway detail (less LOD drop-off)
-    const context = await fetchLayerWithFallback(13, 4, '#365848', true, focusLat, focusLon);
-    if (gen !== chaseInsetGen) return;
-    const mid = await fetchLayerWithFallback(14, 4, '#3a5848', true, focusLat, focusLon);
-    if (gen !== chaseInsetGen) return;
-    const sharp = await fetchLayerWithFallback(15, 3, '#426848', true, lat, lon);
-    if (gen !== chaseInsetGen) return;
-    const detail = await fetchLayerWithFallback(16, 3, '#4a6e50', true, lat, lon);
-    if (gen !== chaseInsetGen) return;
+    const context = await fetchLayerWithFallback(13, 4, '#365848', true, focusLat, focusLon, { overlay: true });
+    if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
+    const mid = await fetchLayerWithFallback(14, 4, '#3a5848', true, focusLat, focusLon, { overlay: true });
+    if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
+    const sharp = await fetchLayerWithFallback(15, 3, '#426848', true, lat, lon, { overlay: true });
+    if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
+    const detail = await fetchLayerWithFallback(16, 3, '#4a6e50', true, lat, lon, { overlay: true });
+    if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
+
+    // Double-buffer: assemble fully, then atomic replace (no mid-frame void)
+    if (context) { context.mesh.position.y = 0.9; context.mesh.renderOrder = 23; pending.push(context.mesh); }
+    if (mid) { mid.mesh.position.y = 1.05; mid.mesh.renderOrder = 24; pending.push(mid.mesh); }
+    if (sharp) { sharp.mesh.position.y = 1.2; sharp.mesh.renderOrder = 25; pending.push(sharp.mesh); }
+    if (detail) { detail.mesh.position.y = 1.35; detail.mesh.renderOrder = 26; pending.push(detail.mesh); }
+    if (!pending.length) return;
     disposeMeshTree(chaseHiZGroup);
-    if (context) { context.mesh.position.y = 0.9; chaseHiZGroup.add(context.mesh); }
-    if (mid) { mid.mesh.position.y = 1.05; chaseHiZGroup.add(mid.mesh); }
-    if (sharp) { sharp.mesh.position.y = 1.2; chaseHiZGroup.add(sharp.mesh); }
-    if (detail) { detail.mesh.position.y = 1.35; chaseHiZGroup.add(detail.mesh); }
+    for (const m of pending) chaseHiZGroup.add(m);
     chaseInsetTileKey = key;
     window.__AIRLOOM_CHASE_TILE = {
       z: [13, 14, 15, 16], key, lat, lon, focusLat, focusLon, aheadNm: 3.5, at: Date.now(),
     };
   } catch (e) {
     console.warn('chase inset', e);
+    for (const m of pending) {
+      try { m.material?.map?.dispose?.(); m.material?.dispose?.(); m.geometry?.dispose?.(); } catch (_) {}
+    }
   } finally {
-    chaseInsetBusy = false;
+    if (gen === chaseInsetGen) chaseInsetBusy = false;
+    else chaseInsetBusy = false;
   }
 }
 
 /** Photoreal USGS ImageryOnly (NAIP-class) — Follow chase. Keyless / CORS-*. */
 async function loadSatBasemap() {
-  // Reset chase inset before rebuilding static stack
   chaseInsetGen++;
   chaseInsetTileKey = '';
   disposeMeshTree(chaseHiZGroup);
@@ -2090,58 +2139,65 @@ async function loadSatBasemap() {
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
   satGroundGroup.add(chaseHiZGroup);
-  // airloom-v6: wider radius + more zoom levels so far-field cities stay sharp (less LOD mush)
+  // airloom-v6/v9: wider radius + zoom ladder; overlays depth-stable
   const layers = [
-    { z: 8,  span: 5, y: 0,    fill: '#2f4a55' }, // regional ~250+ mi disc (wider)
-    { z: 10, span: 5, y: 0.12, fill: '#334f50' }, // far metro / hills bridge
-    { z: 11, span: 5, y: 0.22, fill: '#355548' }, // Bay Area metro denser
-    { z: 12, span: 4, y: 0.30, fill: '#3a5848' }, // peninsula mid detail
-    { z: 13, span: 4, y: 0.40, fill: '#3d5c48' }, // approaches / cities
-    { z: 14, span: 3, y: 0.50, fill: '#416648' }, // near-field static HD
-    { z: 15, span: 3, y: 0.62, fill: '#456a4c' }, // KSFO / terminals
-    { z: 16, span: 2, y: 0.78, fill: '#4a6e50' }, // runway / apron (USGS max useful)
+    { z: 8,  span: 5, y: 0,    fill: '#2f4a55', overlay: false },
+    { z: 10, span: 5, y: 0.35, fill: '#334f50', overlay: true },
+    { z: 11, span: 5, y: 0.55, fill: '#355548', overlay: true },
+    { z: 12, span: 4, y: 0.75, fill: '#3a5848', overlay: true },
+    { z: 13, span: 4, y: 0.95, fill: '#3d5c48', overlay: true },
+    { z: 14, span: 3, y: 1.15, fill: '#416648', overlay: true },
+    { z: 15, span: 3, y: 1.35, fill: '#456a4c', overlay: true },
+    { z: 16, span: 2, y: 1.55, fill: '#4a6e50', overlay: true },
   ];
   for (const L of layers) {
-    const layer = await fetchLayerWithFallback(L.z, L.span, L.fill, true, ORIGIN.lat, ORIGIN.lon);
+    const layer = await fetchLayerWithFallback(
+      L.z, L.span, L.fill, true, ORIGIN.lat, ORIGIN.lon, { overlay: !!L.overlay }
+    );
     if (layer) {
       layer.mesh.position.y = L.y;
       satGroundGroup.add(layer.mesh);
     }
   }
-  // Seed chase inset at KSFO so Follow is sharp before first aircraft lock
-  refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
+  // Seed chase inset at KSFO only when Follow is the active mode
+  if (settings.cameraMode === 'follow') {
+    refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
+  }
   groundReady = true;
 }
 
 /** Dark high-contrast stylized basemap — Air Loom Orbit overview.
- *  airloom-v8: former Carto CDN dark tiles now watermark "API KEY REQUIRED";
- *  use keyless ESRI World Dark Gray Base (CORS-*). USGS ImageryOnly stays Follow-only. */
+ *  airloom-v8: ESRI World Dark Gray Base (keyless). USGS ImageryOnly stays Follow-only.
+ *  airloom-v9: dispose + exclusive visibility + depth-stable overlays. */
 async function loadDarkBasemap() {
-  while (darkGroundGroup.children.length) darkGroundGroup.remove(darkGroundGroup.children[0]);
+  disposeMeshTree(darkGroundGroup);
   makeEarthBase(darkGroundGroup, true);
   const dark = ORBIT_TILE_URL;
-  // denser Orbit dark stack so distant cities stay crisp
-  const wide = await fetchTileLayer(8, 5, '#05070c', false, { tileUrl: dark });
-  if (wide) {
-    wide.mesh.position.y = 0;
-    darkGroundGroup.add(wide.mesh);
-  } else {
-    // Fallback: darken World Imagery (keyless)
-    const fb = await fetchTileLayer(8, 4, '#05070c', false, { tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true });
+  const addDark = async (z, span, y, fill, overlay) => {
+    const layer = await fetchTileLayer(z, span, fill, false, { tileUrl: dark, overlay });
+    if (!layer) return null;
+    layer.mesh.position.y = y;
+    darkGroundGroup.add(layer.mesh);
+    return layer;
+  };
+  const wide = await addDark(8, 5, 0, '#05070c', false);
+  if (!wide) {
+    const fb = await fetchTileLayer(8, 4, '#05070c', false, {
+      tileUrl: FOLLOW_TILE_FALLBACK_URL, darkStylize: true, overlay: false,
+    });
     if (fb) { fb.mesh.position.y = 0; darkGroundGroup.add(fb.mesh); }
   }
-  const mid = await fetchTileLayer(10, 4, '#060910', false, { tileUrl: dark });
-  if (mid) { mid.mesh.position.y = 0.18; darkGroundGroup.add(mid.mesh); }
-  const inset = await fetchTileLayer(12, 4, '#080c14', false, { tileUrl: dark });
-  if (inset) { inset.mesh.position.y = 0.35; darkGroundGroup.add(inset.mesh); }
-  const near = await fetchTileLayer(14, 3, '#0a1018', false, { tileUrl: dark });
-  if (near) { near.mesh.position.y = 0.5; darkGroundGroup.add(near.mesh); }
+  await addDark(10, 4, 0.4, '#060910', true);
+  await addDark(12, 4, 0.7, '#080c14', true);
+  await addDark(14, 3, 1.0, '#0a1018', true);
 
   // Subtle grid ribs over dark map
   const grid = new THREE.GridHelper(GROUND_M * 0.9, 48, 0xffffff, 0xffffff);
   grid.material.transparent = true;
   grid.material.opacity = 0.035;
-  grid.position.y = 2;
+  grid.material.depthWrite = false;
+  grid.position.y = 2.2;
+  grid.renderOrder = 30;
   darkGroundGroup.add(grid);
 
   // Minimal runway sketch (dim)
@@ -2681,8 +2737,7 @@ function buildCityLabels() {
 function applySceneTheme(mode) {
   const follow = mode === 'follow';
   document.body.classList.toggle('follow-mode', follow);
-  satGroundGroup.visible = follow;
-  darkGroundGroup.visible = !follow;
+  setExclusiveBasemap(mode);
   airspaceGroup.visible = !follow;
   cityLabelGroup.visible = !follow;
   landingCueGroup.visible = true; // KSFO target always readable
@@ -2726,12 +2781,17 @@ async function loadGroundLayers() {
   groundGroup.add(airspaceGroup);
   groundGroup.add(cityLabelGroup);
   groundGroup.add(landingCueGroup);
+  // airloom-v9: never show both stacks (mixed dark+sat was the Orbit/Follow glitch)
+  satGroundGroup.visible = false;
+  darkGroundGroup.visible = false;
+  chaseHiZGroup.visible = false;
   makeEarthBase(satGroundGroup, false);
   groundReady = true;
   buildAirspaceVolumes();
   buildCityLabels();
   buildLandingCues();
-  // Load both basemaps; theme picks which is visible
+  // Show only the active mode's stack while the other loads in the background
+  setExclusiveBasemap(settings.cameraMode || 'follow');
   await Promise.all([
     loadSatBasemap().catch((e) => console.warn('sat basemap', e)),
     loadDarkBasemap().catch((e) => console.warn('dark basemap', e)),
