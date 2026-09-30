@@ -416,7 +416,7 @@
 <div id="acLabels" aria-hidden="true"></div>
 
 <div id="camBar" role="group" aria-label="Camera mode">
-  <button type="button" id="btnOrbit" class="ghost" title="Air Loom · KSFO arrivals next ~60 min">Air Loom</button>
+  <button type="button" id="btnOrbit" class="ghost" title="Air Loom · KSFO arrivals next ~60–90 min">Air Loom</button>
   <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
@@ -483,8 +483,8 @@
     <div class="section">
       <h3>View</h3>
       <div class="row"><label>Camera</label><span class="val" id="uiCamMode">follow</span></div>
-      <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">217</span></div>
-      <input type="range" id="sRadius" min="30" max="250" value="217" step="1" />
+      <div class="row"><label>Radius (nm)</label><span class="val" id="vRadius">360</span></div>
+      <input type="range" id="sRadius" min="30" max="400" value="360" step="1" />
       <div class="row"><label>Trail length</label><span class="val" id="vTrail">80</span></div>
       <input type="range" id="sTrail" min="5" max="200" value="80" step="5" />
       <div class="row"><label>Altitude scale</label><span class="val" id="vAltScale">1.2</span></div>
@@ -564,10 +564,10 @@ const KT_MS = 0.514444;
 const MAX_AIRCRAFT = 500;
 const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
-/** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
-const DEFAULT_RADIUS_NM = 217;
+/** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
+const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v15'; // Orbit ~60min arrivals HUD + cluster frame (keep Follow v14)
+const BUILD_MARK = 'airloom-v16'; // Orbit FA-match enroute board + Follow label ETA/mi
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -890,7 +890,7 @@ function isClearKsfoInbound(p) {
   if (!p || p.onGround) return false;
   const altFt = (p.altM || 0) / FT_M;
   const distKsfo = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
-  if (distKsfo > 40 || altFt > 16000 || altFt < 50) return false;
+  if (altFt < 50) return false;
 
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
   if (vrFpm > 800 && altFt > 2500) return false; // departing
@@ -899,10 +899,17 @@ function isClearKsfoInbound(p) {
   const trackDiff = p.track != null && Number.isFinite(p.track)
     ? Math.abs(angDiff(p.track, brg)) : null;
   const toward = trackDiff != null ? trackDiff <= 48 : false;
+  const strongToward = trackDiff != null ? trackDiff <= 32 : false;
   const descending = vrFpm < -60;
   let closing = false;
   if (p._distKsfo != null && distKsfo < p._distKsfo - 0.12) closing = true;
   if (p._prevDistKsfo != null && p._prevDistKsfo - distKsfo > 0.12) closing = true;
+
+  // Range / alt gates: near approach stays tight; strong toward allows mid-range descent/cruise-in
+  if (distKsfo > 70 || altFt > 20000) return false;
+  if (distKsfo > 55 && !(strongToward && (descending || closing || altFt < 16000))) return false;
+  if (distKsfo > 40 && !(toward && (descending || closing || strongToward))) return false;
+  if (altFt > 16000 && !(strongToward && distKsfo <= 55)) return false;
 
   // Satellite-field primary: reject unless strongly KSFO-bound
   const near = nearestBayField(p.lat, p.lon);
@@ -911,6 +918,8 @@ function isClearKsfoInbound(p) {
   }
 
   if (toward && (descending || closing)) return true;
+  // Mid-range strong toward (e.g. bizjet ~40–55 nm inbound) even if VR momentarily flat
+  if (strongToward && distKsfo <= 60 && altFt <= 18000 && vrFpm < 500) return true;
   // Close-in pattern / base: toward-ish + low
   if (distKsfo < 8 && altFt < 4500 && (toward || trackDiff == null) && vrFpm < 400) return true;
   return false;
@@ -3474,8 +3483,8 @@ let inboundCache = []; // scored inbound GA from last ingest
 let finalCache = []; // KSFO-final aircraft
 let dualFinalBand = []; // on-final within ~5–7 mi band (dual Orbit framing)
 let dualFinalActive = false;
-const ORBIT_ARRIVAL_WINDOW_MIN = 60; // useful inbounds landing within ~1 hour
-const ORBIT_ARRIVAL_HUD_MAX = 8;
+const ORBIT_ARRIVAL_WINDOW_MIN = 90; // ~60–90 min pack; enroute cruise may extend to ~110
+const ORBIT_ARRIVAL_HUD_MAX = 12;
 let orbitArrivalsCache = []; // scored KSFO arrivals for Orbit HUD / framing
 let orbitUserFramed = false; // user dragged OrbitControls — pause auto reframe briefly
 controls.addEventListener('start', () => {
@@ -3660,21 +3669,96 @@ function frameOrbitOverview() {
 }
 
 /**
- * Score a useful KSFO arrival for Orbit (~60 min window).
- * Prefers GA/private but includes clear airline inbounds/finals.
+ * Prefer civil reg / tail (N724PB) when ADS-B flight is empty or mirrors reg.
+ * Operator callsigns (LXJ570, EJA187) kept when distinct — matches FA Ident feel.
+ */
+function displayIdent(p) {
+  if (!p) return '—';
+  const cs = (p.callsign && String(p.callsign).trim().toUpperCase()) || '';
+  const regRaw = (p.reg && String(p.reg).trim().toUpperCase()) || '';
+  const reg = regRaw.replace(/\s+/g, '');
+  const compact = (s) => String(s || '').replace(/[^A-Z0-9]/g, '');
+  if (reg) {
+    const rc = compact(reg);
+    const cc = compact(cs);
+    if (!cs || cc === rc || (cs.startsWith('N') && rc.startsWith('N'))) return reg.replace(/-/g, '');
+    // US tail available alongside operator CS — prefer tail for GA/private HUD
+    if (/^N[0-9]/.test(rc) && (p.isPrivateGa || isPrivateOrGa(p))) return rc;
+  }
+  if (cs) return cs;
+  if (reg) return reg.replace(/-/g, '');
+  return (p.icao || '—').toUpperCase();
+}
+
+/**
+ * Longer-range KSFO-bound enroute (ADS-B only). For Orbit arrivals board —
+ * toward field + closing ETA in ~60–110 min. Does not invent scheduled traffic.
+ * Keeps strict final/false-final logic untouched.
+ */
+function isKsfoEnrouteInbound(p) {
+  if (!p || p.onGround) return false;
+  const altFt = (p.altM || 0) / FT_M;
+  if (altFt < 500 || altFt > 45000) return false;
+  const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  if (distNm < 8 || distNm > 380) return false;
+
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  if (vrFpm > 1200 && altFt > 4000) return false; // departing
+  if (p.track == null || !Number.isFinite(p.track)) return false;
+
+  const brg = bearingDeg(p.lat, p.lon, ORIGIN.lat, ORIGIN.lon);
+  const trackDiff = Math.abs(angDiff(p.track, brg));
+  // Must be clearly toward KSFO (cruise / descent)
+  if (trackDiff > 38) return false;
+
+  const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
+    : (p.vel != null ? p.vel / KT_MS : null);
+  if (gs == null || gs < 80) return false;
+
+  const field = BAY_FIELDS[0];
+  const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
+  if (eta == null || eta < 1 || eta > 110) return false;
+
+  // Reject low traffic that is clearly another Bay field's pattern
+  const near = nearestBayField(p.lat, p.lon);
+  if (near.field.icao !== 'KSFO' && near.distNm < 8 && distNm > near.distNm + 5 && altFt < 8000) {
+    return false;
+  }
+
+  // Airline enroute: near/descending only — do not flood Orbit with distant airliner cruise
+  const isGa = !!(p.isPrivateGa || isPrivateOrGa(p));
+  if (!isGa) {
+    if (trackDiff > 28) return false;
+    if (distNm > 55 && altFt > 14000) return false;
+    if (altFt < 12000 && vrFpm > -20 && distNm > 40) return false;
+  }
+  return true;
+}
+
+/**
+ * Score a useful KSFO arrival for Orbit (~60–110 min window).
+ * Prefers GA/private but includes clear airline inbounds/finals + enroute ADS-B.
  */
 function scoreOrbitArrival(p) {
   if (!p || p.onGround) return null;
   const altFt = (p.altM || 0) / FT_M;
-  if (altFt < 50 || altFt > 22000) return null;
+  if (altFt < 50) return null;
   const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
-  if (distNm > 55) return null;
 
   const finalHit = p.finalInfo || detectKsfoFinal(p);
   const clearIn = isClearKsfoInbound(p);
+  const enroute = isKsfoEnrouteInbound(p);
   const assoc = p.isKsfo || isKsfoAssociated(p);
-  if (!finalHit && !clearIn && !(assoc && p.isArrival)) return null;
-  // Reject hard climb-outs
+  if (!finalHit && !clearIn && !enroute && !(assoc && p.isArrival)) return null;
+
+  // Near/approach pack stays within local altitudes; enroute may be FL450 cruise
+  if (!finalHit && !enroute) {
+    if (altFt > 22000) return null;
+    if (distNm > 70) return null;
+  }
+  if (enroute && !finalHit && !clearIn && distNm > 380) return null;
+
+  // Reject hard climb-outs (do not loosen false-final)
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
   if (vrFpm > 900 && altFt > 3000 && !finalHit) return null;
 
@@ -3695,32 +3779,33 @@ function scoreOrbitArrival(p) {
   if (etaUse == null && tca != null) etaUse = tca;
   if (etaUse == null && gs != null && gs >= 35) etaUse = (distNm / gs) * 60;
   if (etaUse == null) etaUse = distNm * 1.15; // slow unknown-GS estimate
-  if (etaUse > ORBIT_ARRIVAL_WINDOW_MIN + 8) return null; // outside useful window
+  const windowMax = (enroute && !clearIn && !finalHit)
+    ? Math.max(ORBIT_ARRIVAL_WINDOW_MIN + 20, 110)
+    : (ORBIT_ARRIVAL_WINDOW_MIN + 12);
+  if (etaUse > windowMax) return null; // outside useful window
 
   const isGa = !!(p.isPrivateGa || isPrivateOrGa(p));
   // Sort key: soonest first; soft prefer GA then final
   let sortKey = etaUse;
   if (alongNm != null) sortKey = Math.min(sortKey, alongNm * 0.9 + etaUse * 0.1);
   if (finalHit) sortKey *= 0.94;
+  if (clearIn) sortKey *= 0.97;
   if (isGa) sortKey *= 0.90; // prefer GA/private in the list
   else sortKey *= 1.02;
 
   const ldg = distToLanding(p);
   let nmShow = alongNm != null ? alongNm : distNm;
   let rwy = finalHit ? finalHit.rwy : null;
-  let conf = finalHit ? 'final' : (clearIn ? 'approach' : 'low');
+  let conf = finalHit ? 'final' : (clearIn ? 'approach' : (enroute ? 'enroute' : 'low'));
   if (ldg && ldg.confidence && ldg.confidence !== 'none') {
     if (ldg.alongNm != null) nmShow = ldg.alongNm;
     if (ldg.rwy) rwy = ldg.rwy;
-    if (ldg.etaMin != null && etaFromAlong == null) {
-      // keep etaUse unless along already set
-    }
     conf = ldg.confidence === 'final' ? 'final' : (ldg.confidence === 'approach' ? 'approach' : conf);
   }
 
   return {
     icao: p.icao,
-    callsign: (p.callsign && p.callsign.trim()) || p.icao,
+    callsign: displayIdent(p),
     type: p.type || '',
     isGa,
     onFinal: !!finalHit,
@@ -3733,6 +3818,7 @@ function scoreOrbitArrival(p) {
     distNm,
     gsKt: gs,
     altFt,
+    enroute: !!enroute && !clearIn && !finalHit,
   };
 }
 
@@ -3753,9 +3839,11 @@ function collectOrbitArrivals(fromList) {
     scored.push(s);
   }
   scored.sort((a, b) => {
+    // Tier: finals → GA/private → airline (matches FA private-heavy board; ETA within tier)
+    const tier = (s) => (s.onFinal ? 0 : (s.isGa ? 1 : 2));
+    const ta = tier(a), tb = tier(b);
+    if (ta !== tb) return ta - tb;
     if (Math.abs(a.etaMin - b.etaMin) > 0.4) return a.etaMin - b.etaMin;
-    if (a.onFinal !== b.onFinal) return a.onFinal ? -1 : 1;
-    if (a.isGa !== b.isGa) return a.isGa ? -1 : 1;
     return a.sortKey - b.sortKey;
   });
   orbitArrivalsCache = scored;
@@ -3908,11 +3996,11 @@ function scoreInboundGa(p) {
   if (altFt < 50) return null;
   const field = BAY_FIELDS[0]; // KSFO only
   const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
-  if (distNm > 45) return null;
+  if (distNm > 70) return null;
 
   const finalHit = p.finalInfo || detectKsfoFinal(p);
   const clearIn = isClearKsfoInbound(p);
-  // Follow chase: final OR clear inbound only — not Class-B fly-through
+  // Follow chase: final OR clear inbound only — not Class-B fly-through / not far enroute
   if (!finalHit && !clearIn) return null;
   if (!(p.isKsfo || isKsfoAssociated(p) || finalHit || clearIn)) return null;
 
@@ -4236,7 +4324,7 @@ function updateCockpitCameras(dt) {
 
 function buildIgCardHtml(rec, badge) {
   if (!rec) return '<div class="ig-empty">No KSFO inbound</div>';
-  const cs = (rec.callsign && rec.callsign.trim()) || rec.reg || rec.icao || '—';
+  const cs = displayIdent(rec);
   const altFt = Math.round((rec.altM || 0) / FT_M);
   const kt = spdKt(rec);
   const b = badge || (rec.isOnFinal ? 'FINAL' : 'FOLLOW');
@@ -4300,7 +4388,7 @@ function updateInfoPanel() {
     igP.innerHTML =
       `<div class="ig-arr-head"><div class="ig-arr-title">KSFO arrivals</div>` +
       `<div class="ig-arr-count">60m</div></div>` +
-      `<div class="ig-arr-empty">No clear inbounds in ~60 min</div>`;
+      `<div class="ig-arr-empty">No clear ADS-B inbounds in ~60–90 min</div>`;
     return;
   }
 
@@ -4318,7 +4406,7 @@ function updateInfoPanel() {
   }).join('');
 
   igP.innerHTML =
-    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60 min</div>` +
+    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60–90 min</div>` +
     `<div class="ig-badge">${badge}</div></div>` +
     `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} arrival${list.length === 1 ? '' : 's'}</div>` +
     `<div class="ig-arr-list">${rows}</div>`;
@@ -4889,20 +4977,63 @@ function makeLabel(rec) {
 function setLabelInfo(rec) {
   const el = rec.label;
   if (!el) return;
-  const cs = (rec.callsign && rec.callsign.trim()) || rec.icao || '—';
+  const ident = displayIdent(rec);
   const type = (rec.type && String(rec.type).trim()) || '';
   const altFt = Math.round((rec.altM || 0) / FT_M);
   const gs = rec.gsKt != null ? Math.round(rec.gsKt)
     : (rec.vel != null ? Math.round(rec.vel / KT_MS) : null);
-  const line2 = [
-    type || null,
-    Number.isFinite(altFt) ? (altFt + ' ft') : null,
-    gs != null ? (gs + ' kt') : null,
-  ].filter(Boolean).join(' · ');
-  const key = cs + '|' + line2;
+  const isFollowPrimary = settings.cameraMode === 'follow' && (
+    (cockpitPrimaryId && rec.icao === cockpitPrimaryId) ||
+    (selectedId && rec.icao === selectedId)
+  );
+
+  let line1 = ident;
+  let line2;
+  if (isFollowPrimary && !rec.onGround) {
+    // Compact Follow tag: N724PB · C25B · 42 mi · ~15 min (clamped in-frame via updateLabelScreen)
+    const parts = [ident];
+    if (type) parts.push(type);
+    const ldg = distToLanding(rec);
+    let mi = null;
+    let etaMin = null;
+    if (ldg && ldg.confidence && ldg.confidence !== 'none' && Number.isFinite(ldg.mi)) {
+      mi = ldg.mi;
+      etaMin = ldg.etaMin;
+    }
+    if (mi == null && Number.isFinite(rec.dist)) mi = rec.dist * SM_PER_NM;
+    if (etaMin == null) {
+      const gsKt = gs;
+      const field = BAY_FIELDS[0];
+      const towardish = isClearKsfoInbound(rec) || isKsfoEnrouteInbound(rec) || rec.isOnFinal
+        || !!(rec.finalInfo) || !!(rec.isArrival);
+      if (towardish && gsKt != null) {
+        etaMin = etaToFieldMin(rec.lat, rec.lon, rec.track, gsKt, field);
+      }
+    }
+    if (mi != null && Number.isFinite(mi) && mi >= 0.05) {
+      parts.push((mi >= 10 ? Math.round(mi) : (Math.round(mi * 10) / 10)) + ' mi');
+    }
+    if (etaMin != null && Number.isFinite(etaMin) && etaMin > 0 && etaMin < 180) {
+      const em = etaMin < 1.5 ? Math.max(1, Math.round(etaMin)) : Math.round(etaMin);
+      parts.push('~' + em + ' min');
+    }
+    line1 = parts.join(' · ');
+    // Keep meta tiny: alt / gs only (no second panel)
+    line2 = [
+      Number.isFinite(altFt) ? (altFt + ' ft') : null,
+      gs != null ? (gs + ' kt') : null,
+    ].filter(Boolean).join(' · ');
+  } else {
+    line2 = [
+      type || null,
+      Number.isFinite(altFt) ? (altFt + ' ft') : null,
+      gs != null ? (gs + ' kt') : null,
+    ].filter(Boolean).join(' · ');
+  }
+  const key = line1 + '|' + line2 + (isFollowPrimary ? '|F' : '');
   if (el.dataset.key === key) return;
   el.dataset.key = key;
-  el.querySelector('.cs').textContent = cs;
+  el.querySelector('.cs').textContent = line1;
   el.querySelector('.meta').textContent = line2;
 }
 
@@ -5338,8 +5469,8 @@ function ingest(data) {
   const ksfoGa = parsed.filter((p) => p.isPrivateGa && p.isKsfo);
   const onFinalAll = parsed.filter((p) => p.isOnFinal);
 
-  // Orbit usefulness: score clear KSFO inbounds/finals in ~60 min from full parse
-  // (before trafficMode filter) so HUD/framing always have real data.
+  // Orbit usefulness: score clear KSFO inbounds/finals/enroute in ~60–110 min
+  // from full parse (before trafficMode filter) so HUD/framing always have real data.
   collectOrbitArrivals(parsed);
 
   let list = parsed.filter((p) => {

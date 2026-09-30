@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v15)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v16)
 
 ## Local
 
@@ -48,10 +48,10 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`
 - **Air Loom** (Orbit): dark high-contrast **ESRI World Dark Gray Base** basemap
   (keyless / CORS-*; z8 / z10 / z12 / z14) via same-origin `/tiles/orbit` proxy.
-  Framed on the **cluster of KSFO arrivals in the next ~60 minutes** (soonest +
+  Framed on the **cluster of KSFO arrivals in the next ~60–90 minutes** (soonest +
   pack), not a max-wide empty Class B scenic shot. Compact **arrivals HUD**
   (callsign/type, nm/mi to land, ETA minutes, runway when known — soonest first).
-  GA/private preferred; clear airline inbounds/finals in the window still shown.
+  GA/private preferred; clear airline inbounds/finals + ADS-B enroute still shown.
   Translucent Class B / Bay shells, altitude-colored glow dots + thin trails with
   tick labels, drop-lines, city labels — stylized dark (not satellite).
 - **Dual-final Orbit** (auto): when **≥2** aircraft are on a KSFO final **~5–7 mi
@@ -79,6 +79,13 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   coastline/roads discernible; direct ESRI + stylized imagery remain fallbacks.
   Follow/selected `.ac-label` soft-clamps into the HUD/chip safe area and flips
   below the plane under overhead tilt instead of clipping out of frame.
+- **Orbit FA-match enroute + Follow ETA label** (airloom-v16): Orbit arrivals
+  board includes ADS-B GA/bizjet (and near airline) inbounds out to ~360 nm /
+  ~60–110 min ETA when track is clearly toward KSFO — better overlap with
+  FlightAware “en route to SFO” when positions exist. No invented scheduled
+  flights (ADS-B only). GA/private ranked above airline cruise; strict final /
+  dual-final / Follow false-final rules unchanged. Follow primary plane tag shows
+  compact `tail · type · mi · ~min` (v11 in-frame clamp kept).
 - **Orbit arrivals HUD + cluster frame** (airloom-v15): Air Loom frames the
   ~60 min KSFO arrivals pack (or soonest + neighbors) with a compact soonest-first
   list (callsign/type, nm/mi, ETA, runway). Empty Class-B scenic overview retired.
