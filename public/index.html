@@ -247,6 +247,55 @@
   }
   #infoPanel.hidden, #infoPanel .ig-card.hidden { display: none; }
 
+  /* Orbit ~60 min arrivals list (compact cards) */
+  #infoPanel.orbit-arrivals { max-width: min(268px, calc(100vw - 24px)); }
+  #infoPanel .ig-arr-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    margin-bottom: 6px;
+  }
+  #infoPanel .ig-arr-title {
+    font-family: var(--font); font-size: 8px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: #9aa8ba; font-weight: 500;
+  }
+  #infoPanel .ig-arr-count {
+    font-size: 9px; color: var(--glow); font-family: var(--mono); letter-spacing: 0.04em;
+  }
+  #infoPanel .ig-arr-list { display: flex; flex-direction: column; gap: 4px; max-height: min(42vh, 320px); overflow: hidden; }
+  #infoPanel .ig-arr-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+    padding: 5px 6px; border-radius: 7px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(180,195,220,0.08);
+  }
+  #infoPanel .ig-arr-row.soonest {
+    border-color: rgba(240,213,160,0.32);
+    background: rgba(240,213,160,0.07);
+  }
+  #infoPanel .ig-arr-row.ga .cs::after {
+    content: ' GA'; font-size: 7px; color: var(--accent); letter-spacing: 0.08em;
+  }
+  #infoPanel .ig-arr-row .cs {
+    font-size: 11px; font-weight: 500; letter-spacing: 0.06em; color: #f4f7fb;
+  }
+  #infoPanel .ig-arr-row .meta {
+    font-size: 8px; color: #7a8a9e; letter-spacing: 0.02em; grid-column: 1;
+  }
+  #infoPanel .ig-arr-row .eta {
+    font-size: 12px; font-weight: 500; color: var(--glow); text-align: right; align-self: center;
+  }
+  #infoPanel .ig-arr-row .dist {
+    font-size: 8px; color: #9aa8ba; text-align: right; grid-column: 2; grid-row: 2;
+  }
+  #infoPanel .ig-arr-empty {
+    color: var(--muted); font-size: 9px; padding: 4px 0; letter-spacing: 0.04em;
+  }
+  @media (max-width: 720px) {
+    #infoPanel.orbit-arrivals { max-width: min(200px, calc(100vw - 20px)); right: 8px; }
+    #infoPanel .ig-arr-row .cs { font-size: 10px; }
+    #infoPanel .ig-arr-row .eta { font-size: 11px; }
+    #infoPanel .ig-arr-list { max-height: min(36vh, 240px); }
+  }
+
   /* Landing distance chip (Follow) */
   #infoPanel .ig-metrics { flex-wrap: wrap; }
   #infoPanel .ig-ldg {
@@ -367,7 +416,7 @@
 <div id="acLabels" aria-hidden="true"></div>
 
 <div id="camBar" role="group" aria-label="Camera mode">
-  <button type="button" id="btnOrbit" class="ghost" title="Dark Air Loom overview">Air Loom</button>
+  <button type="button" id="btnOrbit" class="ghost" title="Air Loom · KSFO arrivals next ~60 min">Air Loom</button>
   <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
@@ -518,7 +567,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v14'; // Behind chase + trail ETA + soonest focus + dual-final 5–7 mi
+const BUILD_MARK = 'airloom-v15'; // Orbit ~60min arrivals HUD + cluster frame (keep Follow v14)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -539,6 +588,9 @@ window.__AIRLOOM_FEATURES = {
   chaseBehindLower: true,
   soonestEtaFocus: true,
   dualFinalBandMi: true,
+  orbitArrivalsHud: true,
+  orbitClusterFrame: true,
+  orbitUsefulWindowMin: 60,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -3422,6 +3474,16 @@ let inboundCache = []; // scored inbound GA from last ingest
 let finalCache = []; // KSFO-final aircraft
 let dualFinalBand = []; // on-final within ~5–7 mi band (dual Orbit framing)
 let dualFinalActive = false;
+const ORBIT_ARRIVAL_WINDOW_MIN = 60; // useful inbounds landing within ~1 hour
+const ORBIT_ARRIVAL_HUD_MAX = 8;
+let orbitArrivalsCache = []; // scored KSFO arrivals for Orbit HUD / framing
+let orbitUserFramed = false; // user dragged OrbitControls — pause auto reframe briefly
+controls.addEventListener('start', () => {
+  if (settings.cameraMode !== 'orbit') return;
+  orbitUserFramed = true;
+  clearTimeout(controls._orbitResumeT);
+  controls._orbitResumeT = setTimeout(() => { orbitUserFramed = false; }, 14000);
+});
 /** Dual-final distance band (nm along final). Tuned ~5–7 mi out. */
 const DUAL_FINAL_MAX_ALONG_NM = 6.5; // ~7.5 statute mi; aviation "mi out" ≈ nm
 const DUAL_FINAL_MIN_ALONG_NM = 0.35;
@@ -3563,10 +3625,225 @@ function resetFollowViewOffsets() {
   followPitch = 0;
 }
 
+/** Fallback Orbit frame: approach corridors (~15–20 nm), not empty Class-B scenic. */
+function frameApproachCorridor(snap) {
+  // SE-ish overview covering typical 28L/R finals + field — much tighter than v14 scenic
+  const desired = new THREE.Vector3(42000, 22000, 38000);
+  const tgt = new THREE.Vector3(0, 800, -8000);
+  if (snap !== false) {
+    camera.position.copy(desired);
+    controls.target.copy(tgt);
+  } else {
+    camera.position.lerp(desired, 0.05);
+    controls.target.lerp(tgt, 0.06);
+  }
+  camera.near = 20;
+  camera.far = 8e6;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
 function frameOrbitOverview() {
-  // Air Loom overview: wide enough to read Class B shelves + Bay labels
-  camera.position.set(78000, 48000, 92000);
-  controls.target.set(0, 1200, 0);
+  // airloom-v15: prefer arrivals cluster; never open on max-wide empty Bay
+  try {
+    if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
+      frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, true);
+      return;
+    }
+    const pack = orbitArrivalRecsForFrame();
+    if (pack.length) {
+      frameArrivalCluster(pack, true);
+      return;
+    }
+  } catch (_) {}
+  frameApproachCorridor(true);
+}
+
+/**
+ * Score a useful KSFO arrival for Orbit (~60 min window).
+ * Prefers GA/private but includes clear airline inbounds/finals.
+ */
+function scoreOrbitArrival(p) {
+  if (!p || p.onGround) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  if (altFt < 50 || altFt > 22000) return null;
+  const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  if (distNm > 55) return null;
+
+  const finalHit = p.finalInfo || detectKsfoFinal(p);
+  const clearIn = isClearKsfoInbound(p);
+  const assoc = p.isKsfo || isKsfoAssociated(p);
+  if (!finalHit && !clearIn && !(assoc && p.isArrival)) return null;
+  // Reject hard climb-outs
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  if (vrFpm > 900 && altFt > 3000 && !finalHit) return null;
+
+  const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt
+    : (p.vel != null ? p.vel / KT_MS : null);
+  const field = BAY_FIELDS[0];
+  let alongNm = null;
+  if (finalHit && finalHit.alongNm != null) alongNm = finalHit.alongNm;
+  let etaFromAlong = null;
+  if (alongNm != null && gs != null && gs >= 35 && alongNm > 0.05) {
+    etaFromAlong = (alongNm / gs) * 60;
+  }
+  const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
+  const tca = timeToClosestApproachMin(p.lat, p.lon, p.track, gs, field.lat, field.lon);
+  // Prefer along-final / closing ETA; fall back to nm/gs or dist heuristic
+  let etaUse = etaFromAlong;
+  if (etaUse == null && eta != null) etaUse = eta;
+  if (etaUse == null && tca != null) etaUse = tca;
+  if (etaUse == null && gs != null && gs >= 35) etaUse = (distNm / gs) * 60;
+  if (etaUse == null) etaUse = distNm * 1.15; // slow unknown-GS estimate
+  if (etaUse > ORBIT_ARRIVAL_WINDOW_MIN + 8) return null; // outside useful window
+
+  const isGa = !!(p.isPrivateGa || isPrivateOrGa(p));
+  // Sort key: soonest first; soft prefer GA then final
+  let sortKey = etaUse;
+  if (alongNm != null) sortKey = Math.min(sortKey, alongNm * 0.9 + etaUse * 0.1);
+  if (finalHit) sortKey *= 0.94;
+  if (isGa) sortKey *= 0.90; // prefer GA/private in the list
+  else sortKey *= 1.02;
+
+  const ldg = distToLanding(p);
+  let nmShow = alongNm != null ? alongNm : distNm;
+  let rwy = finalHit ? finalHit.rwy : null;
+  let conf = finalHit ? 'final' : (clearIn ? 'approach' : 'low');
+  if (ldg && ldg.confidence && ldg.confidence !== 'none') {
+    if (ldg.alongNm != null) nmShow = ldg.alongNm;
+    if (ldg.rwy) rwy = ldg.rwy;
+    if (ldg.etaMin != null && etaFromAlong == null) {
+      // keep etaUse unless along already set
+    }
+    conf = ldg.confidence === 'final' ? 'final' : (ldg.confidence === 'approach' ? 'approach' : conf);
+  }
+
+  return {
+    icao: p.icao,
+    callsign: (p.callsign && p.callsign.trim()) || p.icao,
+    type: p.type || '',
+    isGa,
+    onFinal: !!finalHit,
+    rwy: rwy || null,
+    nm: nmShow,
+    mi: nmShow * SM_PER_NM,
+    etaMin: etaUse,
+    sortKey,
+    conf,
+    distNm,
+    gsKt: gs,
+    altFt,
+  };
+}
+
+/** True when a non-GA should still appear (useful KSFO arrival in ~60 min). */
+function isOrbitUsefulArrival(p) {
+  return !!scoreOrbitArrival(p);
+}
+
+function collectOrbitArrivals(fromList) {
+  const src = fromList || [...aircraft.values()];
+  const scored = [];
+  const seen = new Set();
+  for (const p of src) {
+    if (!p || !p.icao || seen.has(p.icao)) continue;
+    const s = scoreOrbitArrival(p);
+    if (!s) continue;
+    seen.add(p.icao);
+    scored.push(s);
+  }
+  scored.sort((a, b) => {
+    if (Math.abs(a.etaMin - b.etaMin) > 0.4) return a.etaMin - b.etaMin;
+    if (a.onFinal !== b.onFinal) return a.onFinal ? -1 : 1;
+    if (a.isGa !== b.isGa) return a.isGa ? -1 : 1;
+    return a.sortKey - b.sortKey;
+  });
+  orbitArrivalsCache = scored;
+  return scored;
+}
+
+/** Live aircraft records for Orbit cluster framing (soonest pack). */
+function orbitArrivalRecsForFrame() {
+  const scored = orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals();
+  if (!scored.length) return [];
+  // Prefer soonest + nearby pack: take top N by ETA, drop outliers far from soonest cluster
+  const top = scored.slice(0, Math.min(6, scored.length));
+  const recs = [];
+  for (const s of top) {
+    const r = aircraft.get(s.icao);
+    if (r && r.display && Number.isFinite(r.display.x)) recs.push(r);
+  }
+  if (recs.length >= 2) {
+    // Drop spatial outliers > ~35 nm from soonest so camera stays tight
+    const soon = recs[0];
+    const maxM = 35 * NM_M;
+    const tight = recs.filter((r, i) => {
+      if (i === 0) return true;
+      const dx = r.display.x - soon.display.x;
+      const dz = r.display.z - soon.display.z;
+      return Math.hypot(dx, dz) <= maxM;
+    });
+    return tight.length ? tight : recs.slice(0, 1);
+  }
+  return recs;
+}
+
+/**
+ * Frame Orbit camera on the cluster of ~60 min arrivals (airport kept in view).
+ * Tighter padding than dual-final scenic wide shot.
+ */
+function frameArrivalCluster(recs, snap) {
+  const list = (recs && recs.length) ? recs : orbitArrivalRecsForFrame();
+  if (!list.length) {
+    frameApproachCorridor(snap !== false);
+    return;
+  }
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let n = 0;
+  for (const r of list) {
+    const p = r.display || r.target;
+    if (!p || !Number.isFinite(p.x)) continue;
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    n++;
+  }
+  // Keep KSFO in frame
+  minX = Math.min(minX, -2000); maxX = Math.max(maxX, 2000);
+  minZ = Math.min(minZ, -2000); maxZ = Math.max(maxZ, 2000);
+  minY = Math.min(minY, 0); maxY = Math.max(maxY, 600);
+  if (!n) {
+    frameApproachCorridor(snap !== false);
+    return;
+  }
+
+  const cx = (minX + maxX) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
+  const cy = (minY + maxY) * 0.3;
+  const spanX = Math.max(3500, maxX - minX);
+  const spanZ = Math.max(3500, maxZ - minZ);
+  const span = Math.max(spanX, spanZ);
+  // Moderate padding — cluster readable, not Bay-wide empty
+  const pad = span < 12000 ? 1.45 : (span < 35000 ? 1.25 : 1.1);
+  const dist = Math.max(9000, Math.min(78000, span * pad * 1.15));
+  const height = Math.max(4500, Math.min(42000, (maxY - minY) * 1.6 + span * 0.42));
+
+  const tgt = new THREE.Vector3(cx, Math.max(300, cy), cz);
+  const ang = (performance.now() / 1000) * 0.045;
+  const desired = new THREE.Vector3(
+    cx + Math.sin(ang) * dist,
+    height,
+    cz + Math.cos(ang) * dist
+  );
+
+  if (snap) {
+    controls.target.copy(tgt);
+    camera.position.copy(desired);
+  } else {
+    controls.target.lerp(tgt, 0.07);
+    camera.position.lerp(desired, 0.05);
+  }
   camera.near = 20;
   camera.far = 8e6;
   camera.updateProjectionMatrix();
@@ -3584,11 +3861,14 @@ function setCameraMode(mode, opts) {
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
   if ($('uiCamMode')) {
+    const nArr = orbitArrivalsCache.length;
     $('uiCamMode').textContent = isFollow ? 'follow'
-      : (isDual ? 'dual final orbit' : 'air loom');
+      : (isDual ? 'dual final orbit'
+        : (nArr ? ('arrivals · ' + nArr) : 'air loom'));
   }
-  controls.enabled = !isFollow && !isDual; // dual drives its own framing
+  controls.enabled = !isFollow && !isDual; // dual / cluster drive framing; user can still drag when enabled
   controls.autoRotate = !isFollow && !isDual && $('sAuto').checked;
+  if (!isFollow) orbitUserFramed = false;
   // Always clear any leftover multi-view scissor from older dual-follow builds
   renderer.setViewport(0, 0, innerWidth, innerHeight);
   renderer.setScissorTest(false);
@@ -3979,39 +4259,88 @@ function buildIgCardHtml(rec, badge) {
   );
 }
 
+function formatOrbitEta(min) {
+  if (min == null || !Number.isFinite(min)) return '—';
+  if (min < 1) return '<1m';
+  if (min < 90) return '~' + Math.max(1, Math.round(min)) + 'm';
+  return '>90m';
+}
+
+function formatOrbitDist(nm) {
+  if (nm == null || !Number.isFinite(nm)) return '—';
+  const mi = nm * SM_PER_NM;
+  if (nm < 10) return nm.toFixed(1) + ' nm · ' + mi.toFixed(1) + ' mi';
+  return Math.round(nm) + ' nm · ' + Math.round(mi) + ' mi';
+}
+
 function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
   // Follow: no top-right panel — plane tag + bottom chip only (clear FOV)
   if (settings.cameraMode === 'follow') {
     panel.classList.add('hidden');
+    panel.classList.remove('orbit-arrivals');
     if (igP) igP.innerHTML = '';
     const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
     updateLandingChip(prim);
     updateLandingCuesForRec(prim);
     return;
   }
-  if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
-    panel.classList.remove('hidden');
-    const pair = dualFinalBand.length >= 2 ? dualFinalBand : finalCache;
-    const a = pair[0], b = pair[1];
-    const csA = (a.callsign && a.callsign.trim()) || a.icao;
-    const csB = (b.callsign && b.callsign.trim()) || b.icao;
-    const rA = a.finalRwy || a.finalInfo?.rwy || '';
-    const rB = b.finalRwy || b.finalInfo?.rwy || '';
-    const dA = formatLdgDist(distToLanding(a));
-    const dB = formatLdgDist(distToLanding(b));
+
+  // Orbit: always show compact ~60 min arrivals HUD (real data, soonest first)
+  const dual = dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2);
+  const list = (orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals())
+    .slice(0, ORBIT_ARRIVAL_HUD_MAX);
+
+  panel.classList.remove('hidden');
+  panel.classList.add('orbit-arrivals');
+  updateLandingChip(null);
+
+  if (!list.length) {
     igP.innerHTML =
-      `<div class="ig-head"><div class="ig-cs">${csA} + ${csB}</div><div class="ig-badge">DUAL FINAL</div></div>` +
-      `<div class="ig-metrics">` +
-        `<div><div class="k">${rA || 'A'}</div><div class="v">${dA.dist}</div></div>` +
-        `<div><div class="k">${rB || 'B'}</div><div class="v">${dB.dist}</div></div>` +
-      `</div>`;
-    updateLandingChip(null);
+      `<div class="ig-arr-head"><div class="ig-arr-title">KSFO arrivals</div>` +
+      `<div class="ig-arr-count">60m</div></div>` +
+      `<div class="ig-arr-empty">No clear inbounds in ~60 min</div>`;
     return;
   }
-  panel.classList.add('hidden');
-  updateLandingChip(null);
+
+  const badge = dual ? 'DUAL FINAL' : (list.some((s) => s.onFinal) ? 'APPROACH' : 'INBOUND');
+  const rows = list.map((s, i) => {
+    const typ = s.type || '????';
+    const rwy = s.rwy ? (' · RWY ' + s.rwy) : (s.onFinal ? ' · FINAL' : '');
+    const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-icao="${s.icao}">` +
+      `<div class="cs">${s.callsign}</div>` +
+      `<div class="eta">${formatOrbitEta(s.etaMin)}</div>` +
+      `<div class="meta">${typ}${rwy}</div>` +
+      `<div class="dist">${formatOrbitDist(s.nm)}</div>` +
+      `</div>`;
+  }).join('');
+
+  igP.innerHTML =
+    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60 min</div>` +
+    `<div class="ig-badge">${badge}</div></div>` +
+    `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} arrival${list.length === 1 ? '' : 's'}</div>` +
+    `<div class="ig-arr-list">${rows}</div>`;
+
+  // Tap a row → select + soft-focus Orbit target
+  igP.querySelectorAll('.ig-arr-row').forEach((row) => {
+    row.style.pointerEvents = 'auto';
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => {
+      const id = row.getAttribute('data-icao');
+      selectedId = id;
+      const rec = aircraft.get(id);
+      if (rec) {
+        updateSelPanel(rec);
+        if (rec.display && Number.isFinite(rec.display.x)) {
+          controls.target.lerp(rec.display, 0.55);
+          orbitUserFramed = true;
+          setTimeout(() => { orbitUserFramed = false; }, 12000);
+        }
+      }
+    });
+  });
 }
 
 function showToast(msg, ms = 4000) {
@@ -5009,11 +5338,16 @@ function ingest(data) {
   const ksfoGa = parsed.filter((p) => p.isPrivateGa && p.isKsfo);
   const onFinalAll = parsed.filter((p) => p.isOnFinal);
 
+  // Orbit usefulness: score clear KSFO inbounds/finals in ~60 min from full parse
+  // (before trafficMode filter) so HUD/framing always have real data.
+  collectOrbitArrivals(parsed);
+
   let list = parsed.filter((p) => {
     if (!settings.showGround && p.onGround) return false;
     if (settings.trafficMode === 'ga') {
-      // Default product: ONLY KSFO-associated private/GA (not SQL/HAF/PAO Bay GA)
-      if (!p.isPrivateGa || !p.isKsfo) return false;
+      // Default: KSFO-associated private/GA; also keep useful ~60 min arrivals
+      // so Orbit has real inbounds (airliners) when GA is sparse.
+      if (!(p.isPrivateGa && p.isKsfo) && !isOrbitUsefulArrival(p)) return false;
     }
     if (settings.trafficMode === 'arrivals' && !p.isArrival) return false;
     // Arrivals / all still prefer KSFO association for shown traffic unless filter set
@@ -5136,6 +5470,8 @@ function ingest(data) {
     r._prevDistField = r._prevDistField;
   }
   pickCockpitTargets(cockpitPool);
+  // Refresh Orbit arrivals from live shown aircraft (DR poses / final tags)
+  collectOrbitArrivals([...aircraft.values()]);
   // If selected aircraft is inbound GA, prefer it as the single chase target
   if (selectedId && aircraft.has(selectedId)) {
     const sel = aircraft.get(selectedId);
@@ -5143,6 +5479,13 @@ function ingest(data) {
       const scored = scoreInboundGa(sel);
       if (scored) cockpitPrimaryId = sel.icao;
     }
+  }
+  // Snap Orbit frame onto new pack after each poll (unless user is dragging)
+  if (settings.cameraMode === 'orbit' && !orbitUserFramed && !dualFinalActive) {
+    try {
+      const pack = orbitArrivalRecsForFrame();
+      if (pack.length) frameArrivalCluster(pack, true);
+    } catch (_) {}
   }
   updateInfoPanel();
 }
@@ -5318,9 +5661,17 @@ function animate() {
       for (const r of finalCache) updateTrailInfoLabels(r, false);
     }
 
-    // Dual-final wide Orbit: continuously re-frame both aircraft
-    if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2) && settings.cameraMode === 'orbit') {
-      try { frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false); } catch (_) { controls.update(); }
+    // Orbit framing: dual-final band, else ~60 min arrivals cluster (unless user dragged)
+    if (settings.cameraMode === 'orbit') {
+      try {
+        if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
+          frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false);
+        } else if (!orbitUserFramed && orbitArrivalsCache.length) {
+          frameArrivalCluster(orbitArrivalRecsForFrame(), false);
+        } else {
+          controls.update();
+        }
+      } catch (_) { controls.update(); }
     } else {
       controls.update();
     }
