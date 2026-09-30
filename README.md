@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v13)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v14)
 
 ## Local
 
@@ -36,8 +36,10 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
 
 ## Camera & visual modes
 
-- **Follow** (default when ≤1 on final): elevated chase on the best KSFO inbound /
-  final private/GA. Wheel/pinch zoom + drag orbit around the target.
+- **Follow** (default when ≤1 on final in the dual band): rear 3rd-person chase
+  (lower elevation, more behind — not cockpit / not overhead) on the **soonest
+  arriving** clear KSFO inbound / final private/GA. Wheel/pinch zoom + drag orbit
+  around the target.
   Basemap is **USGS ImageryOnly** ultra-HD (keyless, CORS-ok NAIP-class; ESRI World
   Imagery fallback). Static stack **z8 / z10–z16** (wider spans) around KSFO plus a
   denser **z13–z16 chase inset** with **look-ahead prefetch** (~3.5 nm along track)
@@ -53,10 +55,10 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   trails with **altitude/speed tick labels**, vertical drop-lines, and large
   floating city labels — modeled after the original Air Loom look.
   (Orbit is stylized dark, not satellite.)
-- **Dual-final Orbit** (auto): when **2+** aircraft are on a KSFO final, camera
-  switches to a **wide Orbit** framing both (airport kept in view). Drops back to
-  Follow when fewer than two remain on final. Manual Follow/Orbit clicks lock out
-  auto-switch for ~90s.
+- **Dual-final Orbit** (auto): when **≥2** aircraft are on a KSFO final **~5–7 mi
+  out** (along-final band ≤ ~6.5 nm), camera switches to a **wide Orbit** framing
+  both (airport kept in view). Drops back to Follow when fewer than two remain in
+  that band. Manual Follow/Orbit clicks lock out auto-switch for ~90s.
 - **Landing target** (airloom-v6): clear KSFO beacon + approach funnels + runway
   threshold markers; Follow shows **distance-to-landing** on a tiny bottom chip
   (nm + ETA; “ON FINAL / AT THRESHOLD” under 0.2 nm — no 0.0 mi spam).
@@ -78,15 +80,20 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   coastline/roads discernible; direct ESRI + stylized imagery remain fallbacks.
   Follow/selected `.ac-label` soft-clamps into the HUD/chip safe area and flips
   below the plane under overhead tilt instead of clipping out of frame.
+- **Behind chase + trail ETA + soonest focus** (airloom-v14): Follow chase sits
+  farther behind / lower (rear 3rd-person). Flight-path trail ticks and remaining-
+  path markers show distance-to-landing (nm/mi) + ETA minutes from speed. Focus
+  always picks the soonest ETA / nearest-to-landing clear KSFO inbound. Dual-final
+  Orbit triggers when ≥2 are on final in the ~5–7 mi band.
 - **Stable landing ETA chip** (airloom-v13): Follow bottom chip shows distance +
   ETA only for clear KSFO approach/final (hides low-confidence “To KSFO” spam).
   ETA is groundspeed-based with GS/nm smoothing and minute hysteresis (no jump
   on ADS-B noise); hidden when GS unknown. AT THRESHOLD / ON FINAL latched.
   Active-flow runway labeling kept. Compact single-row chip + thin approach
   progress fill — readable on iPhone without restoring big panels.
-- **Follow FOV declutter** (airloom-v7): top-right info panel removed in Follow;
-  single plane tag (callsign/alt/gs) + bottom chip only. World-space trail
-  altitude/speed billboards hidden in Follow chase; in Orbit they stay sparse
-  and **screen-constant** (never giant blurry walls when the camera is close).
+- **Follow FOV declutter** (airloom-v7 / v14): top-right info panel removed in
+  Follow; single plane tag (callsign/alt/gs) + bottom chip only. Sparse trail /
+  remaining-path **ETA ticks** (mi + minutes) allowed in Follow for the primary;
+  Orbit keeps screen-constant ticks on finals (never giant blurry walls).
 
 Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated only.

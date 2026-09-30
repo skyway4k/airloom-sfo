@@ -518,13 +518,14 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B / map radius: ~250 statute miles ≈ 400 km around KSFO (nm). */
 const DEFAULT_RADIUS_NM = 217;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v13'; // Stable KSFO landing ETA chip (GS smooth + hysteresis)
+const BUILD_MARK = 'airloom-v14'; // Behind chase + trail ETA + soonest focus + dual-final 5–7 mi
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
   chaseLookaheadNm: 3.5,
   trailAltLabels: true,
   trailLabelsScreenConstant: true,
+  trailEtaTicks: true,
   followHudMinimal: true,
   landingTarget: true,
   distToLanding: true,
@@ -535,6 +536,9 @@ window.__AIRLOOM_FEATURES = {
   activeFlowRunway: true,
   hideNonKsfoChip: true,
   stableLandingEta: true,
+  chaseBehindLower: true,
+  soonestEtaFocus: true,
+  dualFinalBandMi: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -3010,6 +3014,18 @@ function buildLandingCues() {
   remLine.renderOrder = 5;
   landingCueGroup.add(remLine);
 
+  // airloom-v14: sparse ETA ticks along remaining path to threshold
+  for (let i = 0; i < 2; i++) {
+    const spr = makeBillboardLabel(['—'], 34, {
+      color: 'rgba(245,230,200,0.92)', border: 'rgba(240,213,160,0.28)', opacity: 0.84,
+    });
+    spr.name = 'remEta' + i;
+    spr.visible = false;
+    spr.userData.kind = 'remEta';
+    spr.userData.screenPx = 22;
+    landingCueGroup.add(spr);
+  }
+
   const ringGeo = new THREE.RingGeometry(0.95, 1.05, 64);
   const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
     color: 0xf0d5a0, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
@@ -3038,10 +3054,17 @@ function updateLandingCuesForRec(rec) {
     }
   });
   const info = distToLanding(rec);
+  const hideRemEta = () => {
+    for (let i = 0; i < 2; i++) {
+      const s = landingCueGroup.getObjectByName('remEta' + i);
+      if (s) s.visible = false;
+    }
+  };
   if (!info || !rec || rec.onGround || info.mode === 'none' || info.confidence === 'none'
       || info.nm < 0.08 || info.nm > 40) {
     rem.visible = false;
     ring.visible = false;
+    hideRemEta();
     return;
   }
   const segs = 31;
@@ -3059,6 +3082,47 @@ function updateLandingCuesForRec(rec) {
   rem.geometry.computeBoundingSphere();
   try { rem.computeLineDistances(); } catch (_) {}
   rem.visible = true;
+
+  // airloom-v14: 1–2 ETA ticks along remaining path (plane → threshold)
+  const gs = info.gsKt != null ? info.gsKt : spdKt(rec);
+  const rw = info.rwy ? rwyByName(info.rwy) : null;
+  const hdg = rw ? rw.hdg : null;
+  const fracs = info.nm > 3.5 ? [0.28, 0.62] : (info.nm > 1.2 ? [0.45] : []);
+  const follow = settings.cameraMode === 'follow';
+  for (let i = 0; i < 2; i++) {
+    let spr = landingCueGroup.getObjectByName('remEta' + i);
+    if (!spr) continue;
+    if (i >= fracs.length) { spr.visible = false; continue; }
+    const t = fracs[i];
+    const lat = rec.lat + (info.thrLat - rec.lat) * t;
+    const lon = rec.lon + (info.thrLon - rec.lon) * t;
+    const altM = (rec.altM || 0) * (1 - t) * settings.altScale;
+    const eta = trailEtaAtPoint(lat, lon, gs, info.thrLat, info.thrLon, hdg);
+    const lines = formatTrailEtaLines(eta, { compact: follow });
+    if (!lines || !lines.length) { spr.visible = false; continue; }
+    const key = lines.join('|');
+    if (spr.userData.etaKey !== key) {
+      const posName = spr.name;
+      landingCueGroup.remove(spr);
+      spr.material?.map?.dispose?.();
+      spr.material?.dispose?.();
+      spr = makeBillboardLabel(lines, 32, {
+        color: 'rgba(245,230,200,0.92)', border: 'rgba(240,213,160,0.28)', opacity: 0.84,
+      });
+      spr.name = posName;
+      spr.userData.kind = 'remEta';
+      spr.userData.screenPx = 22;
+      spr.userData.etaKey = key;
+      landingCueGroup.add(spr);
+    }
+    const w = enu(lat, lon, altM);
+    spr.position.set(w.x, w.y + 55, w.z);
+    scaleSpriteToScreenPx(spr, cam, spr.userData.screenPx || 22, {
+      hideUnder: follow ? 550 : 0,
+      cap: 260,
+    });
+    spr.visible = true;
+  }
 
   // Distance ring centered on threshold at remaining radius (plan view cue)
   const thr = enu(info.thrLat, info.thrLon, 0);
@@ -3236,7 +3300,7 @@ function applySceneTheme(mode) {
   airspaceGroup.visible = !follow;
   cityLabelGroup.visible = !follow;
   landingCueGroup.visible = true; // KSFO target always readable
-  trailHudGroup.visible = !follow; // airloom-v7: no world-space trail text in Follow chase
+  trailHudGroup.visible = true; // airloom-v14: sparse trail ETA ticks (Follow + Orbit); no alt walls in Follow
   // Drop-lines always preferred in Air Loom Orbit; keep user toggle otherwise
   if (!follow) {
     settings.showAltSticks = true;
@@ -3356,7 +3420,11 @@ let cockpitPrimaryId = null;
 let _ckSmoothInit = false;
 let inboundCache = []; // scored inbound GA from last ingest
 let finalCache = []; // KSFO-final aircraft
+let dualFinalBand = []; // on-final within ~5–7 mi band (dual Orbit framing)
 let dualFinalActive = false;
+/** Dual-final distance band (nm along final). Tuned ~5–7 mi out. */
+const DUAL_FINAL_MAX_ALONG_NM = 6.5; // ~7.5 statute mi; aviation "mi out" ≈ nm
+const DUAL_FINAL_MIN_ALONG_NM = 0.35;
 let camUserOverrideUntil = 0; // manual Follow/Orbit click lock (ms)
 
 
@@ -3511,7 +3579,7 @@ function setCameraMode(mode, opts) {
   const prev = settings.cameraMode;
   settings.cameraMode = next;
   const isFollow = next === 'follow';
-  const isDual = !isFollow && dualFinalActive && finalCache.length >= 2;
+  const isDual = !isFollow && dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2);
   document.body.classList.toggle('follow-mode', isFollow);
   $('btnFollow').classList.toggle('active', isFollow);
   $('btnOrbit').classList.toggle('active', !isFollow);
@@ -3531,7 +3599,7 @@ function setCameraMode(mode, opts) {
     // Keep prior offsets unless switching targets later
   } else if (prev === 'follow') {
     if (isDual) {
-      try { frameDualFinalOrbit(finalCache, true); } catch (_) { frameOrbitOverview(); }
+      try { frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, true); } catch (_) { frameOrbitOverview(); }
     } else {
       frameOrbitOverview();
     }
@@ -3582,25 +3650,37 @@ function scoreInboundGa(p) {
 
   const eta = etaToFieldMin(p.lat, p.lon, p.track, gs, field);
   const tca = timeToClosestApproachMin(p.lat, p.lon, p.track, gs, field.lat, field.lon);
-  const etaUse = eta != null ? eta : (tca != null ? tca : distNm * 1.2);
+  // Along-final nm → minutes via GS when on final (nearest-to-landing)
+  let alongNm = null;
+  if (finalHit && finalHit.alongNm != null) alongNm = finalHit.alongNm;
+  let etaFromAlong = null;
+  if (alongNm != null && gs != null && gs >= 35 && alongNm > 0.05) {
+    etaFromAlong = (alongNm / gs) * 60;
+  }
+  // airloom-v14: soonest arriving = soonest ETA / nearest-to-landing among clear KSFO inbounds
+  const etaUse = (etaFromAlong != null) ? etaFromAlong
+    : (eta != null ? eta : (tca != null ? tca : distNm * 1.2));
 
+  // Score is primarily ETA minutes (lower = sooner). Light tie-breakers only.
   let score = etaUse;
-  score += distNm * 0.18;
-  if (descending) score *= 0.85;
-  if (toward) score *= 0.9;
-  if (closingDist) score *= 0.92;
-  if (clearIn) score *= 0.88;
-  if (finalHit) score *= 0.45; // strongly prefer aircraft on KSFO final
-  // Prefer active-flow finals
-  if (finalHit && finalHit.flow === activeFlow) score *= 0.85;
-  if (finalHit && FLOW_OPPOSITE[activeFlow] === finalHit.flow) score *= 1.6;
+  if (alongNm != null) score = Math.min(score, alongNm * 0.85 + (etaUse * 0.15));
+  score += distNm * 0.04;
+  if (descending) score *= 0.97;
+  if (toward) score *= 0.98;
+  if (closingDist) score *= 0.97;
+  if (clearIn) score *= 0.96;
+  // Soft prefer final / active flow — do not override a clearly sooner inbound
+  if (finalHit) score *= 0.92;
+  if (finalHit && finalHit.flow === activeFlow) score *= 0.96;
+  if (finalHit && FLOW_OPPOSITE[activeFlow] === finalHit.flow) score *= 1.35;
 
   return {
     icao: p.icao,
     score,
     etaMin: etaUse,
-    etaExact: eta,
+    etaExact: etaFromAlong != null ? etaFromAlong : eta,
     tcaMin: tca,
+    alongNm,
     field,
     distNm,
     toward,
@@ -3641,9 +3721,19 @@ function pickCockpitTargets(fromList) {
   if (!scored.length) {
     cockpitPrimaryId = null;
   } else {
-    // Single chase primary: prefer best on-final, else best inbound
-    const finalScored = scored.filter((s) => s.onFinal);
-    const nextId = (finalScored[0] || scored[0]).icao;
+    // airloom-v14: always focus soonest arriving (lowest ETA / nearest-to-landing)
+    scored.sort((a, b) => {
+      const ea = a.etaExact != null ? a.etaExact : a.etaMin;
+      const eb = b.etaExact != null ? b.etaExact : b.etaMin;
+      if (Math.abs(ea - eb) > 0.35) return ea - eb;
+      // Near-tie: nearer along-final, then on-final, then score
+      const aa = a.alongNm != null ? a.alongNm : a.distNm;
+      const bb = b.alongNm != null ? b.alongNm : b.distNm;
+      if (Math.abs(aa - bb) > 0.2) return aa - bb;
+      if (a.onFinal !== b.onFinal) return a.onFinal ? -1 : 1;
+      return a.score - b.score;
+    });
+    const nextId = scored[0].icao;
     if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
     cockpitPrimaryId = nextId;
   }
@@ -3651,25 +3741,49 @@ function pickCockpitTargets(fromList) {
   updateDualFinalCameraMode();
 }
 
-/** Auto wide Orbit when 2+ on KSFO final; else Follow (unless user overrode). */
+/** On-final aircraft inside the dual-view distance band (~5–7 mi out). */
+function finalsInDualBand(list) {
+  const src = list || finalCache;
+  const out = [];
+  for (const p of src) {
+    let along = p.finalInfo && p.finalInfo.alongNm != null ? p.finalInfo.alongNm : null;
+    if (along == null) {
+      const d = distToLanding(p);
+      if (d && d.mode === 'final' && d.alongNm != null) along = d.alongNm;
+    }
+    if (along == null || !Number.isFinite(along)) continue;
+    if (along < DUAL_FINAL_MIN_ALONG_NM || along > DUAL_FINAL_MAX_ALONG_NM) continue;
+    out.push(p);
+  }
+  // Nearest-to-landing first
+  out.sort((a, b) => {
+    const aa = a.finalInfo?.alongNm ?? 99;
+    const bb = b.finalInfo?.alongNm ?? 99;
+    return aa - bb;
+  });
+  return out;
+}
+
+/** Auto wide Orbit when ≥2 on KSFO final in the ~5–7 mi band; else Follow (unless user overrode). */
 function updateDualFinalCameraMode() {
-  const nFinal = finalCache.length;
+  dualFinalBand = finalsInDualBand(finalCache);
+  const nDual = dualFinalBand.length;
   const now = performance.now();
   const userLocked = now < camUserOverrideUntil;
 
-  if (nFinal >= 2) {
+  if (nDual >= 2) {
     if (!userLocked) {
       if (settings.cameraMode !== 'orbit') {
         setCameraMode('orbit', { auto: true });
       }
       dualFinalActive = true;
       // Frame immediately so first dual frame isn't overview
-      try { frameDualFinalOrbit(finalCache, true); } catch (_) {}
+      try { frameDualFinalOrbit(dualFinalBand, true); } catch (_) {}
     }
   } else if (dualFinalActive) {
     dualFinalActive = false;
     if (!userLocked && settings.cameraMode === 'orbit') {
-      // Drop back to Follow for single / none
+      // Drop back to Follow for single / none / outside band
       setCameraMode('follow', { auto: true });
     }
   }
@@ -3731,7 +3845,7 @@ function frameDualFinalOrbit(recs, snap) {
 }
 
 function cockpitEyeFor(rec, outPos, outLook, lagScale) {
-  // Elevated chase: steep enough that sat ground fills the lower frame (no blue void).
+  // airloom-v14: rear 3rd-person chase — farther behind, lower elevation (not overhead / not cockpit).
   if (!rec || !rec.display ||
       !Number.isFinite(rec.display.x) || !Number.isFinite(rec.display.y) || !Number.isFinite(rec.display.z)) {
     return false;
@@ -3745,18 +3859,19 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
   const body = Math.max(18, (rec.len || 12) * SIZE_MULT); // visual length (m)
   const lag = lagScale || 1;
   const zoom = THREE.MathUtils.clamp(followZoom || 1, FOLLOW_ZOOM_MIN, FOLLOW_ZOOM_MAX);
-  // Closer + higher → ~35–45° look-down so terrain sits under the aircraft
-  const back = Math.max(260, body * 5.2) * lag * zoom;
-  const up = Math.max(240, body * 5.0) * lag * zoom;
-  const side = Math.max(36, body * 0.85) * lag * zoom;
-  const lookAhead = Math.max(6, body * 0.12);
+  // Trailing view ~18–24° look-down: more rear distance, lower chase elevation
+  const back = Math.max(420, body * 8.8) * lag * zoom;
+  const up = Math.max(130, body * 2.7) * lag * zoom;
+  const side = Math.max(28, body * 0.55) * lag * zoom;
+  const lookAhead = Math.max(14, body * 0.28);
 
   // Lateral offset: fwd × worldUp = (-fwd.z, 0, fwd.x)
   const rx = -_ckFwd.z, rz = _ckFwd.x;
 
+  // Look near the airframe (slightly ahead), not deep under it — keeps rear 3rd-person framing
   outLook.copy(rec.display)
     .addScaledVector(_ckFwd, lookAhead)
-    .addScaledVector(_ckUp, -Math.max(12, body * 0.22));
+    .addScaledVector(_ckUp, Math.max(2, body * 0.05));
   outPos.copy(rec.display)
     .addScaledVector(_ckFwd, -back)
     .addScaledVector(_ckUp, up);
@@ -3876,9 +3991,10 @@ function updateInfoPanel() {
     updateLandingCuesForRec(prim);
     return;
   }
-  if (dualFinalActive && finalCache.length >= 2) {
+  if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
     panel.classList.remove('hidden');
-    const a = finalCache[0], b = finalCache[1];
+    const pair = dualFinalBand.length >= 2 ? dualFinalBand : finalCache;
+    const a = pair[0], b = pair[1];
     const csA = (a.callsign && a.callsign.trim()) || a.icao;
     const csB = (b.callsign && b.callsign.trim()) || b.icao;
     const rA = a.finalRwy || a.finalInfo?.rwy || '';
@@ -4135,35 +4251,115 @@ function pickTrailInfoPoints(rec) {
   return picked.slice(-TRAIL_LABEL_MAX);
 }
 
+function trailEtaAtPoint(lat, lon, gsKt, thrLat, thrLon, rwyHdg) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (!Number.isFinite(thrLat) || !Number.isFinite(thrLon)) return null;
+  let alongNm;
+  if (rwyHdg != null && Number.isFinite(rwyHdg)) {
+    const off = rwyTrackOffsets(lat, lon, thrLat, thrLon, rwyHdg);
+    alongNm = Math.max(0, -off.atkNm);
+    // If past threshold / bad geometry, fall back to haversine
+    if (off.atkNm > 0.4) alongNm = haversineNm(lat, lon, thrLat, thrLon);
+  } else {
+    alongNm = haversineNm(lat, lon, thrLat, thrLon);
+  }
+  if (!Number.isFinite(alongNm) || alongNm < 0.05) return null;
+  const mi = alongNm * SM_PER_NM;
+  let etaMin = null;
+  if (gsKt != null && gsKt >= 35) etaMin = (alongNm / gsKt) * 60;
+  return { alongNm, mi, etaMin, gsKt };
+}
+
+function formatTrailEtaLines(info, opts) {
+  if (!info) return null;
+  const nm = info.alongNm;
+  const mi = info.mi;
+  let distLine;
+  if (nm < 10) {
+    distLine = nm.toFixed(1) + ' nm · ' + mi.toFixed(1) + ' mi';
+  } else {
+    distLine = Math.round(nm) + ' nm · ' + Math.round(mi) + ' mi';
+  }
+  let etaLine = '';
+  if (info.etaMin != null && info.etaMin > 0 && info.etaMin < 90) {
+    const m = Math.max(1, Math.round(info.etaMin));
+    etaLine = '~' + m + ' min';
+  }
+  const compact = !!(opts && opts.compact);
+  if (compact) {
+    // Follow: one tight line — "4.2 mi · ~5m"
+    const miStr = mi < 10 ? mi.toFixed(1) + ' mi' : Math.round(mi) + ' mi';
+    return etaLine ? [miStr + ' · ' + etaLine.replace(' min', 'm')] : [miStr];
+  }
+  return etaLine ? [distLine, etaLine] : [distLine];
+}
+
+function landingThrForTrail(rec) {
+  const info = distToLanding(rec);
+  if (info && (info.confidence === 'final' || info.confidence === 'approach')
+      && Number.isFinite(info.thrLat) && Number.isFinite(info.thrLon)) {
+    const rw = info.rwy ? rwyByName(info.rwy) : null;
+    return {
+      thrLat: info.thrLat,
+      thrLon: info.thrLon,
+      hdg: rw ? rw.hdg : null,
+      ok: info.confidence === 'final' || info.confidence === 'approach',
+    };
+  }
+  if (rec.finalInfo && rec.finalInfo.rwy) {
+    const rw = rwyByName(rec.finalInfo.rwy);
+    if (rw) return { thrLat: rw.thrLat, thrLon: rw.thrLon, hdg: rw.hdg, ok: true };
+  }
+  return null;
+}
+
 function updateTrailInfoLabels(rec, force) {
   if (!rec) return;
-  // airloom-v7: hide world-space trail text in Follow chase (FOV clutter).
-  // Orbit / dual-final: sparse screen-constant ticks on finals only.
-  if (settings.cameraMode === 'follow') {
-    const pool = _trailLabelPool.get(rec.icao);
-    if (pool) for (const s of pool.sprites) s.visible = false;
-    return;
-  }
-  const show = rec.isOnFinal && !rec.onGround && (rec.altM || 0) > 80;
+  const follow = settings.cameraMode === 'follow';
+  const isPrim = !!(cockpitPrimaryId && rec.icao === cockpitPrimaryId);
+  // Follow: sparse ETA ticks on primary only. Orbit/dual: finals.
+  const show = !rec.onGround && (rec.altM || 0) > 80 && (
+    follow ? isPrim : !!rec.isOnFinal
+  );
   if (!show) {
     const pool = _trailLabelPool.get(rec.icao);
     if (pool) for (const s of pool.sprites) s.visible = false;
     return;
   }
-  const picks = pickTrailInfoPoints(rec);
+  const thr = landingThrForTrail(rec);
+  if (!thr || !thr.ok) {
+    const pool = _trailLabelPool.get(rec.icao);
+    if (pool) for (const s of pool.sprites) s.visible = false;
+    return;
+  }
+  let picks = pickTrailInfoPoints(rec);
+  if (follow) picks = picks.slice(-2); // declutter Follow FOV
   if (!picks.length) {
     const pool = _trailLabelPool.get(rec.icao);
     if (pool) for (const s of pool.sprites) s.visible = false;
     return;
   }
-  const key = picks.map((p) => `${p.altFt}|${p.gs || ''}|${p.kind}`).join(';');
+  // Enrich picks with remaining distance / ETA to landing from that trail point
+  const gsNow = spdKt(rec);
+  for (const p of picks) {
+    const gs = p.gs != null ? p.gs : gsNow;
+    p.etaInfo = trailEtaAtPoint(p.lat, p.lon, gs, thr.thrLat, thr.thrLon, thr.hdg);
+  }
+  const key = picks.map((p) => {
+    const e = p.etaInfo;
+    return e
+      ? (Math.round(e.alongNm * 10) + '|' + (e.etaMin != null ? Math.round(e.etaMin) : '') + '|' + p.kind)
+      : (p.altFt + '|' + p.kind);
+  }).join(';');
   const pool = ensureTrailLabelSprites(rec.icao, picks.length);
   const cam = activeTrailCam();
   const place = (spr, p) => {
     const w = enu(p.lat, p.lon, (p.altM || 0) * settings.altScale);
     spr.position.set(w.x + 30, w.y + 70, w.z + 30);
     spr.visible = true;
-    scaleSpriteToScreenPx(spr, cam, TRAIL_LABEL_PX);
+    scaleSpriteToScreenPx(spr, cam, follow ? 22 : TRAIL_LABEL_PX, {
+      hideUnder: follow ? 700 : TRAIL_LABEL_HIDE_DIST_M,
+    });
   };
   if (!force && pool.lastKey === key) {
     for (let i = 0; i < picks.length; i++) {
@@ -4178,17 +4374,30 @@ function updateTrailInfoLabels(rec, force) {
   for (let i = 0; i < picks.length; i++) {
     const p = picks[i];
     let spr = pool.sprites[i];
-    const altStr = p.altFt >= 10000
-      ? (p.altFt / 1000).toFixed(1).replace(/\.0$/, '') + 'k ft'
-      : (p.altFt.toLocaleString() + ' ft');
-    const sub = p.gs != null ? (p.gs + ' kt') : '';
+    const lines = formatTrailEtaLines(p.etaInfo, { compact: follow });
+    let labelLines;
+    if (lines && lines.length) {
+      labelLines = lines;
+      // Orbit: keep a light alt cue under ETA when useful
+      if (!follow && p.altFt != null && p.kind === 'alt') {
+        const altStr = p.altFt >= 10000
+          ? (p.altFt / 1000).toFixed(1).replace(/\.0$/, '') + 'k ft'
+          : (p.altFt.toLocaleString() + ' ft');
+        if (labelLines.length < 3) labelLines = labelLines.concat([altStr]);
+      }
+    } else {
+      const altStr = p.altFt >= 10000
+        ? (p.altFt / 1000).toFixed(1).replace(/\.0$/, '') + 'k ft'
+        : (p.altFt.toLocaleString() + ' ft');
+      labelLines = [altStr];
+    }
     trailHudGroup.remove(spr);
     spr.material?.map?.dispose?.();
     spr.material?.dispose?.();
-    spr = makeBillboardLabel([altStr, sub].filter(Boolean), 36, {
-      color: 'rgba(210,220,235,0.94)',
-      border: 'rgba(180,195,220,0.28)',
-      opacity: 0.85,
+    spr = makeBillboardLabel(labelLines.filter(Boolean), follow ? 30 : 36, {
+      color: follow ? 'rgba(245,230,200,0.92)' : 'rgba(210,220,235,0.94)',
+      border: follow ? 'rgba(240,213,160,0.30)' : 'rgba(180,195,220,0.28)',
+      opacity: follow ? 0.82 : 0.85,
     });
     spr.userData.icao = rec.icao;
     trailHudGroup.add(spr);
@@ -4197,6 +4406,7 @@ function updateTrailInfoLabels(rec, force) {
   }
   for (let i = picks.length; i < pool.sprites.length; i++) pool.sprites[i].visible = false;
 }
+
 
 // ─── Aircraft lifecycle ──────────────────────────────────────────────────────
 function createAircraft(icao, typeHint) {
@@ -5109,8 +5319,8 @@ function animate() {
     }
 
     // Dual-final wide Orbit: continuously re-frame both aircraft
-    if (dualFinalActive && finalCache.length >= 2 && settings.cameraMode === 'orbit') {
-      try { frameDualFinalOrbit(finalCache, false); } catch (_) { controls.update(); }
+    if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2) && settings.cameraMode === 'orbit') {
+      try { frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false); } catch (_) { controls.update(); }
     } else {
       controls.update();
     }
