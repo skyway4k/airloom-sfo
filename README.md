@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v16)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v17)
 
 ## Local
 
@@ -49,11 +49,14 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
 - **Air Loom** (Orbit): dark high-contrast **ESRI World Dark Gray Base** basemap
   (keyless / CORS-*; z8 / z10 / z12 / z14) via same-origin `/tiles/orbit` proxy.
   Framed on the **cluster of KSFO arrivals in the next ~60–90 minutes** (soonest +
-  pack), not a max-wide empty Class B scenic shot. Compact **arrivals HUD**
-  (callsign/type, nm/mi to land, ETA minutes, runway when known — soonest first).
-  GA/private preferred; clear airline inbounds/finals + ADS-B enroute still shown.
-  Translucent Class B / Bay shells, altitude-colored glow dots + thin trails with
-  tick labels, drop-lines, city labels — stylized dark (not satellite).
+  pack), not a max-wide empty Class B scenic shot. Compact **arrivals sidebar**
+  (closed by default; **Arrivals** chip / ✕ / Escape; persists via localStorage)
+  lists callsign/type, mi, ETA — GA-first. **Hover a row** for a temporary
+  top-down map peek (plane↔KSFO distance); mouse leave restores prior framing.
+  Clear airline inbounds/finals + ADS-B enroute still shown. Translucent Class B /
+  Bay shells, altitude-colored glow dots + thin trails with tick labels,
+  drop-lines, city labels — stylized dark (not satellite). Controls drawer also
+  starts **closed** (☰ to open; localStorage).
 - **Dual-final Orbit** (auto): when **≥2** aircraft are on a KSFO final **~5–7 mi
   out** (along-final band ≤ ~6.5 nm), camera switches to a **wide Orbit** framing
   both (airport kept in view). Drops back to Follow when fewer than two remain in
@@ -79,6 +82,14 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   coastline/roads discernible; direct ESRI + stylized imagery remain fallbacks.
   Follow/selected `.ac-label` soft-clamps into the HUD/chip safe area and flips
   below the plane under overhead tilt instead of clipping out of frame.
+- **Closed arrivals sidebar + hover top-down** (airloom-v17): App no longer
+  forces an undismissable sidebar open. Controls drawer and Orbit ~60 min
+  arrivals list start **closed** (toggle / ✕ / Escape); open state persists in
+  localStorage. Arrivals rows show ident / type / mi / ETA (existing Orbit
+  scoring). Hovering a row temporarily frames a **top-down** view of that plane
+  vs KSFO; leave restores prior Orbit/Follow framing unless the row was clicked
+  to select. Follow chase, dual-final, strict final, tiles, Safari Orbit proxy
+  unchanged.
 - **Orbit FA-match enroute + Follow ETA label** (airloom-v16): Orbit arrivals
   board includes ADS-B GA/bizjet (and near airline) inbounds out to ~360 nm /
   ~60–110 min ETA when track is clearly toward KSFO — better overlap with

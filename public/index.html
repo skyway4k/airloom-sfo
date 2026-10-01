@@ -79,12 +79,24 @@
     transition: transform 0.25s ease; display: flex; flex-direction: column;
     font-size: 12px;
   }
-  #drawer.collapsed { transform: translateX(-100%); }
+  #drawer.collapsed { transform: translateX(-100%); pointer-events: none; }
   #drawer header {
     padding: 18px 18px 14px; border-bottom: 1px solid var(--border);
     letter-spacing: 0.22em; font-size: 10px; color: var(--glow);
     font-family: var(--font); font-weight: 500;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
+  #drawer header .hdr-title { flex: 1; min-width: 0; }
+  #drawer header .panel-x,
+  #infoPanel .panel-x {
+    width: auto; min-width: 28px; padding: 4px 8px; margin: 0;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    color: var(--muted); border-radius: 6px; cursor: pointer;
+    font-size: 12px; letter-spacing: 0; line-height: 1; flex: 0 0 auto;
+    pointer-events: auto;
+  }
+  #drawer header .panel-x:hover,
+  #infoPanel .panel-x:hover { color: var(--text); background: rgba(255,255,255,0.08); }
   #drawer .body { padding: 12px 16px 24px; overflow-y: auto; flex: 1; }
   .row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; gap: 8px; }
   .row label { color: var(--muted); flex: 1; }
@@ -113,6 +125,36 @@
     width: auto; padding: 6px 10px; transition: left 0.25s ease;
   }
   #drawer.collapsed + #toggleDrawer { left: 12px; }
+  /* Compact ~60m arrivals sidebar toggle (Orbit) */
+  #btnArrivalsSide {
+    position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
+    z-index: 13; width: auto; padding: 7px 11px;
+    border-radius: 999px; letter-spacing: 0.1em; font-size: 10px;
+    font-family: var(--font); text-transform: uppercase; font-weight: 500;
+    background: rgba(8, 11, 18, 0.9); border: 1px solid var(--border-strong);
+    color: var(--muted); cursor: pointer;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    display: none;
+  }
+  #btnArrivalsSide.visible { display: inline-flex; align-items: center; gap: 6px; }
+  #btnArrivalsSide.active {
+    color: #f5e6c8; border-color: rgba(240,213,160,0.35);
+    background: rgba(240,213,160,0.1);
+  }
+  body.follow-mode #btnArrivalsSide { display: none !important; }
+  #infoPanel.user-closed { display: none !important; }
+  #infoPanel .ig-arr-head { align-items: center; }
+  #infoPanel .ig-arr-row.hovering {
+    border-color: rgba(125,206,160,0.45);
+    background: rgba(62,207,142,0.14);
+  }
+  @media (max-width: 720px) {
+    #btnArrivalsSide {
+      top: max(52px, calc(env(safe-area-inset-top) + 44px));
+      right: 8px; padding: 6px 9px; font-size: 9px;
+    }
+  }
   #sel {
     position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -420,9 +462,10 @@
   <button type="button" id="btnFollow" class="active">Follow</button>
 </div>
 
-<div id="infoPanel" class="hidden">
+<div id="infoPanel" class="hidden user-closed">
   <div class="ig-card" id="igPrimary"></div>
 </div>
+<button type="button" id="btnArrivalsSide" title="KSFO arrivals next ~60 min">Arrivals</button>
 
 <div id="landingChip" aria-live="polite">
   <div class="lc-row">
@@ -451,8 +494,8 @@
   </div>
 </div>
 
-<aside id="drawer">
-  <header>AIR LOOM CONTROLS</header>
+<aside id="drawer" class="collapsed">
+  <header><span class="hdr-title">AIR LOOM CONTROLS</span><button type="button" class="panel-x" id="btnCloseDrawer" title="Close panel" aria-label="Close panel">✕</button></header>
   <div class="body">
     <div class="row"><label>Shown</label><span class="val" id="uiCount">0</span></div>
     <div class="row"><label>Private/GA</label><span class="val" id="uiGaCount" style="color:var(--accent)">0</span></div>
@@ -567,7 +610,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v16'; // Orbit FA-match enroute board + Follow label ETA/mi
+const BUILD_MARK = 'airloom-v17'; // Closed arrivals sidebar + hover top-down preview
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -591,6 +634,9 @@ window.__AIRLOOM_FEATURES = {
   orbitArrivalsHud: true,
   orbitClusterFrame: true,
   orbitUsefulWindowMin: 60,
+  arrivalsSidebarToggle: true,
+  arrivalsHoverTopDown: true,
+  drawerClosedDefault: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -3487,12 +3533,139 @@ const ORBIT_ARRIVAL_WINDOW_MIN = 90; // ~60–90 min pack; enroute cruise may ex
 const ORBIT_ARRIVAL_HUD_MAX = 12;
 let orbitArrivalsCache = []; // scored KSFO arrivals for Orbit HUD / framing
 let orbitUserFramed = false; // user dragged OrbitControls — pause auto reframe briefly
+let orbitHoverPreview = null; // icao under arrivals-row hover (top-down peek)
+let orbitHoverSaved = null;   // { pos, target, userFramed } to restore on leave
+let orbitHoverLocked = false; // click selected — keep framing until leave+click elsewhere
 controls.addEventListener('start', () => {
   if (settings.cameraMode !== 'orbit') return;
+  if (orbitHoverPreview) clearOrbitHoverPreview(false); // user takes over
   orbitUserFramed = true;
   clearTimeout(controls._orbitResumeT);
   controls._orbitResumeT = setTimeout(() => { orbitUserFramed = false; }, 14000);
 });
+
+/** Top-down Orbit peek: high look-down so plane↔KSFO distance is readable. */
+function frameTopDownPreview(rec, snap) {
+  if (!rec) return;
+  const p = rec.display || rec.target;
+  if (!p || !Number.isFinite(p.x)) return;
+  // Midpoint plane ↔ KSFO so both stay in frame and range is obvious
+  const mx = p.x * 0.55;
+  const mz = p.z * 0.55;
+  const my = Math.max(200, (p.y || 0) * 0.35);
+  const span = Math.max(4500, Math.hypot(p.x, p.z) * 1.15, (p.y || 800) * 2.2);
+  const height = Math.max(8000, Math.min(95000, span * 1.05 + (p.y || 0) * 0.6));
+  // Near-nadir: slight south offset so north-up feel remains readable
+  const desired = new THREE.Vector3(mx + span * 0.02, height, mz + span * 0.18);
+  const tgt = new THREE.Vector3(mx, my, mz);
+  if (snap) {
+    controls.target.copy(tgt);
+    camera.position.copy(desired);
+  } else {
+    controls.target.lerp(tgt, 0.22);
+    camera.position.lerp(desired, 0.18);
+  }
+  camera.near = 20;
+  camera.far = 8e6;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function saveOrbitCamForHover() {
+  return {
+    pos: camera.position.clone(),
+    target: controls.target.clone(),
+    userFramed: orbitUserFramed,
+  };
+}
+
+function clearOrbitHoverPreview(restore) {
+  const had = orbitHoverPreview;
+  orbitHoverPreview = null;
+  orbitHoverLocked = false;
+  try {
+    document.querySelectorAll('#infoPanel .ig-arr-row.hovering').forEach((el) => {
+      el.classList.remove('hovering');
+    });
+  } catch (_) {}
+  if (restore && orbitHoverSaved && settings.cameraMode === 'orbit') {
+    try {
+      camera.position.copy(orbitHoverSaved.pos);
+      controls.target.copy(orbitHoverSaved.target);
+      orbitUserFramed = !!orbitHoverSaved.userFramed;
+      controls.update();
+    } catch (_) {}
+  }
+  orbitHoverSaved = null;
+  return had;
+}
+
+function beginOrbitHoverPreview(icao) {
+  if (settings.cameraMode !== 'orbit') return;
+  const rec = aircraft.get(icao);
+  if (!rec || !rec.display || !Number.isFinite(rec.display.x)) return;
+  if (orbitHoverPreview === icao) {
+    frameTopDownPreview(rec, false);
+    return;
+  }
+  if (!orbitHoverSaved) orbitHoverSaved = saveOrbitCamForHover();
+  orbitHoverPreview = icao;
+  orbitUserFramed = true; // pause auto cluster/dual reframe
+  frameTopDownPreview(rec, true);
+}
+let _orbitArrivalsSig = '';
+function orbitArrivalsSignature(list) {
+  return list.map((s) => s.icao + ':' + Math.round((s.etaMin || 0) * 2) + ':' + Math.round((s.nm || 0) * 2)).join('|');
+}
+function bindArrivalsSidebarEvents() {
+  const igP = $('igPrimary');
+  if (!igP || igP._arrBound) return;
+  igP._arrBound = true;
+  igP.addEventListener('pointerover', (ev) => {
+    const row = ev.target.closest && ev.target.closest('.ig-arr-row');
+    if (!row || !igP.contains(row)) return;
+    if (igP._hovRow === row) return;
+    if (igP._hovRow) igP._hovRow.classList.remove('hovering');
+    igP._hovRow = row;
+    row.classList.add('hovering');
+    beginOrbitHoverPreview(row.getAttribute('data-icao'));
+  });
+  igP.addEventListener('pointerout', (ev) => {
+    const row = ev.target.closest && ev.target.closest('.ig-arr-row');
+    if (!row || !igP.contains(row)) return;
+    const to = ev.relatedTarget;
+    if (to && (row === to || row.contains(to))) return;
+    if (igP._hovRow === row) igP._hovRow = null;
+    row.classList.remove('hovering');
+    const id = row.getAttribute('data-icao');
+    if (orbitHoverLocked && selectedId === id) return;
+    if (orbitHoverPreview === id) clearOrbitHoverPreview(true);
+  });
+  igP.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('#btnCloseArrivals')) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setArrivalsSidebarOpen(false);
+      return;
+    }
+    const row = ev.target.closest && ev.target.closest('.ig-arr-row');
+    if (!row || !igP.contains(row)) return;
+    const id = row.getAttribute('data-icao');
+    selectedId = id;
+    orbitHoverLocked = true;
+    beginOrbitHoverPreview(id);
+    const rec = aircraft.get(id);
+    if (rec) {
+      updateSelPanel(rec);
+      orbitUserFramed = true;
+      clearTimeout(controls._orbitResumeT);
+      controls._orbitResumeT = setTimeout(() => {
+        if (!orbitHoverPreview) orbitUserFramed = false;
+      }, 14000);
+    }
+  });
+}
+
 /** Dual-final distance band (nm along final). Tuned ~5–7 mi out. */
 const DUAL_FINAL_MAX_ALONG_NM = 6.5; // ~7.5 statute mi; aviation "mi out" ≈ nm
 const DUAL_FINAL_MIN_ALONG_NM = 0.35;
@@ -3532,10 +3705,67 @@ $('btnClear').onclick = () => {
   updateSelPanel(null);
   renderArrivalsList(lastArrivals);
 };
-$('toggleDrawer').onclick = () => $('drawer').classList.toggle('collapsed');
-if (matchMedia('(max-width: 720px)').matches) {
-  $('drawer').classList.add('collapsed');
+// Drawer + arrivals sidebar: closed by default, persist via localStorage
+const LS_DRAWER = 'airloom.drawerOpen';
+const LS_ARRIVALS = 'airloom.arrivalsOpen';
+function readLsBool(key, defaultVal) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null || v === undefined) return defaultVal;
+    return v === '1' || v === 'true';
+  } catch (_) { return defaultVal; }
 }
+function writeLsBool(key, val) {
+  try { localStorage.setItem(key, val ? '1' : '0'); } catch (_) {}
+}
+function setDrawerOpen(open) {
+  const d = $('drawer');
+  if (!d) return;
+  d.classList.toggle('collapsed', !open);
+  writeLsBool(LS_DRAWER, !!open);
+}
+function isDrawerOpen() {
+  const d = $('drawer');
+  return !!(d && !d.classList.contains('collapsed'));
+}
+function setArrivalsSidebarOpen(open) {
+  arrivalsSidebarOpen = !!open;
+  const panel = $('infoPanel');
+  const btn = $('btnArrivalsSide');
+  if (panel) panel.classList.toggle('user-closed', !arrivalsSidebarOpen);
+  if (btn) {
+    // Show floating chip only when Orbit + sidebar closed (open panel has ✕)
+    const showBtn = settings.cameraMode === 'orbit' && !arrivalsSidebarOpen;
+    btn.classList.toggle('visible', showBtn);
+    btn.classList.toggle('active', false);
+    btn.setAttribute('aria-pressed', arrivalsSidebarOpen ? 'true' : 'false');
+    btn.textContent = 'Arrivals';
+  }
+  writeLsBool(LS_ARRIVALS, arrivalsSidebarOpen);
+  if (!arrivalsSidebarOpen) {
+    clearOrbitHoverPreview(true);
+    _orbitArrivalsSig = '';
+  }
+  if (settings.cameraMode === 'orbit') updateInfoPanel();
+}
+let arrivalsSidebarOpen = readLsBool(LS_ARRIVALS, false); // default CLOSED
+setDrawerOpen(readLsBool(LS_DRAWER, false)); // default CLOSED (all viewports)
+$('toggleDrawer').onclick = () => setDrawerOpen(!isDrawerOpen());
+if ($('btnCloseDrawer')) $('btnCloseDrawer').onclick = () => setDrawerOpen(false);
+if ($('btnArrivalsSide')) {
+  $('btnArrivalsSide').onclick = () => {
+    if (settings.cameraMode !== 'orbit') return;
+    setArrivalsSidebarOpen(!arrivalsSidebarOpen);
+  };
+}
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  if (orbitHoverPreview) { clearOrbitHoverPreview(true); return; }
+  if (isDrawerOpen()) { setDrawerOpen(false); return; }
+  if (arrivalsSidebarOpen && settings.cameraMode === 'orbit') {
+    setArrivalsSidebarOpen(false);
+  }
+});
 
 /**
  * Private / GA classification heuristic (product default filter).
@@ -3972,6 +4202,14 @@ function setCameraMode(mode, opts) {
       frameOrbitOverview();
     }
   }
+  // Arrivals sidebar only in Orbit; leave closed unless user opens it
+  if (isFollow) {
+    clearOrbitHoverPreview(false);
+    const btn = $('btnArrivalsSide');
+    if (btn) { btn.classList.remove('visible', 'active'); }
+  } else {
+    setArrivalsSidebarOpen(arrivalsSidebarOpen); // sync button + panel class
+  }
   updateInfoPanel();
 }
 $('btnFollow').onclick = () => {
@@ -4364,71 +4602,83 @@ function formatOrbitDist(nm) {
 function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
+  const btnSide = $('btnArrivalsSide');
   // Follow: no top-right panel — plane tag + bottom chip only (clear FOV)
   if (settings.cameraMode === 'follow') {
     panel.classList.add('hidden');
     panel.classList.remove('orbit-arrivals');
     if (igP) igP.innerHTML = '';
+    if (btnSide) btnSide.classList.remove('visible', 'active');
+    _orbitArrivalsSig = '';
     const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
     updateLandingChip(prim);
     updateLandingCuesForRec(prim);
     return;
   }
 
-  // Orbit: always show compact ~60 min arrivals HUD (real data, soonest first)
+  // Orbit: compact ~60 min arrivals sidebar — only when user opens it
+  if (btnSide) {
+    btnSide.classList.toggle('visible', !arrivalsSidebarOpen);
+    btnSide.classList.remove('active');
+    btnSide.textContent = 'Arrivals';
+  }
+  if (!arrivalsSidebarOpen) {
+    panel.classList.add('hidden');
+    panel.classList.add('user-closed');
+    panel.classList.remove('orbit-arrivals');
+    if (igP) igP.innerHTML = '';
+    _orbitArrivalsSig = '';
+    updateLandingChip(null);
+    return;
+  }
+
   const dual = dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2);
   const list = (orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals())
     .slice(0, ORBIT_ARRIVAL_HUD_MAX);
 
   panel.classList.remove('hidden');
+  panel.classList.remove('user-closed');
   panel.classList.add('orbit-arrivals');
   updateLandingChip(null);
+  bindArrivalsSidebarEvents();
+
+  const badge = dual ? 'DUAL FINAL' : (list.some((s) => s.onFinal) ? 'APPROACH' : 'INBOUND');
+  const sig = orbitArrivalsSignature(list) + '#' + badge + '#' + (orbitHoverPreview || '') + '#' + (selectedId || '');
+  // Avoid wiping DOM every 500ms (drops hover); refresh when pack changes
+  if (sig === _orbitArrivalsSig && igP && igP.querySelector('.ig-arr-list, .ig-arr-empty')) return;
+  _orbitArrivalsSig = sig;
+
+  const closeBtn = `<button type="button" class="panel-x" id="btnCloseArrivals" title="Close arrivals" aria-label="Close arrivals">✕</button>`;
 
   if (!list.length) {
     igP.innerHTML =
       `<div class="ig-arr-head"><div class="ig-arr-title">KSFO arrivals</div>` +
-      `<div class="ig-arr-count">60m</div></div>` +
+      `<div style="display:flex;align-items:center;gap:6px"><div class="ig-arr-count">60m</div>${closeBtn}</div></div>` +
       `<div class="ig-arr-empty">No clear ADS-B inbounds in ~60–90 min</div>`;
     return;
   }
 
-  const badge = dual ? 'DUAL FINAL' : (list.some((s) => s.onFinal) ? 'APPROACH' : 'INBOUND');
   const rows = list.map((s, i) => {
     const typ = s.type || '????';
     const rwy = s.rwy ? (' · RWY ' + s.rwy) : (s.onFinal ? ' · FINAL' : '');
-    const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : ''].filter(Boolean).join(' ');
+    const mi = (s.mi != null && Number.isFinite(s.mi))
+      ? (s.mi < 10 ? s.mi.toFixed(1) : Math.round(s.mi)) + ' mi'
+      : formatOrbitDist(s.nm);
+    const hoverCls = (orbitHoverPreview === s.icao || selectedId === s.icao) ? ' hovering' : '';
+    const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : ''].filter(Boolean).join(' ') + hoverCls;
     return `<div class="${cls}" data-icao="${s.icao}">` +
       `<div class="cs">${s.callsign}</div>` +
       `<div class="eta">${formatOrbitEta(s.etaMin)}</div>` +
       `<div class="meta">${typ}${rwy}</div>` +
-      `<div class="dist">${formatOrbitDist(s.nm)}</div>` +
+      `<div class="dist">${mi}</div>` +
       `</div>`;
   }).join('');
 
   igP.innerHTML =
-    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60–90 min</div>` +
-    `<div class="ig-badge">${badge}</div></div>` +
+    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60 min</div>` +
+    `<div style="display:flex;align-items:center;gap:6px"><div class="ig-badge">${badge}</div>${closeBtn}</div></div>` +
     `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} arrival${list.length === 1 ? '' : 's'}</div>` +
     `<div class="ig-arr-list">${rows}</div>`;
-
-  // Tap a row → select + soft-focus Orbit target
-  igP.querySelectorAll('.ig-arr-row').forEach((row) => {
-    row.style.pointerEvents = 'auto';
-    row.style.cursor = 'pointer';
-    row.addEventListener('click', () => {
-      const id = row.getAttribute('data-icao');
-      selectedId = id;
-      const rec = aircraft.get(id);
-      if (rec) {
-        updateSelPanel(rec);
-        if (rec.display && Number.isFinite(rec.display.x)) {
-          controls.target.lerp(rec.display, 0.55);
-          orbitUserFramed = true;
-          setTimeout(() => { orbitUserFramed = false; }, 12000);
-        }
-      }
-    });
-  });
 }
 
 function showToast(msg, ms = 4000) {
@@ -5611,8 +5861,8 @@ function ingest(data) {
       if (scored) cockpitPrimaryId = sel.icao;
     }
   }
-  // Snap Orbit frame onto new pack after each poll (unless user is dragging)
-  if (settings.cameraMode === 'orbit' && !orbitUserFramed && !dualFinalActive) {
+  // Snap Orbit frame onto new pack after each poll (unless user drag / hover peek)
+  if (settings.cameraMode === 'orbit' && !orbitUserFramed && !dualFinalActive && !orbitHoverPreview) {
     try {
       const pack = orbitArrivalRecsForFrame();
       if (pack.length) frameArrivalCluster(pack, true);
@@ -5792,10 +6042,15 @@ function animate() {
       for (const r of finalCache) updateTrailInfoLabels(r, false);
     }
 
-    // Orbit framing: dual-final band, else ~60 min arrivals cluster (unless user dragged)
+    // Orbit framing: hover top-down peek, dual-final, else ~60 min cluster
     if (settings.cameraMode === 'orbit') {
       try {
-        if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
+        if (orbitHoverPreview) {
+          const hr = aircraft.get(orbitHoverPreview);
+          if (hr) frameTopDownPreview(hr, false);
+          else clearOrbitHoverPreview(true);
+          controls.update();
+        } else if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
           frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false);
         } else if (!orbitUserFramed && orbitArrivalsCache.length) {
           frameArrivalCluster(orbitArrivalRecsForFrame(), false);
