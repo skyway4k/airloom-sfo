@@ -338,10 +338,25 @@
     font-size: 8px; color: #7a8a9e; letter-spacing: 0.02em; grid-column: 1;
   }
   #infoPanel .ig-arr-row .eta {
-    font-size: 12px; font-weight: 500; color: var(--glow); text-align: right; align-self: center;
+    font-size: 13px; font-weight: 600; color: var(--glow); text-align: right; align-self: center;
+    letter-spacing: 0.01em; line-height: 1.15;
   }
+  #infoPanel .ig-arr-row .eta .eta-to {
+    display: block; font-size: 8px; font-weight: 500; color: #c8b88a;
+    letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px;
+  }
+  #infoPanel .ig-arr-row.soonest .eta { font-size: 15px; color: #f5e6c8; }
   #infoPanel .ig-arr-row .dist {
-    font-size: 8px; color: #9aa8ba; text-align: right; grid-column: 2; grid-row: 2;
+    font-size: 9px; color: #b0becf; text-align: right; grid-column: 2; grid-row: 2;
+    font-weight: 500;
+  }
+  #infoPanel .ig-arr-row.soonest {
+    box-shadow: inset 0 0 0 1px rgba(240,213,160,0.35), 0 0 18px rgba(240,213,160,0.08);
+  }
+  #infoPanel .ig-arr-row .next-tag {
+    display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 999px;
+    font-size: 7px; letter-spacing: 0.1em; font-weight: 600; vertical-align: 0.15em;
+    color: #0a0e14; background: var(--glow);
   }
   #infoPanel .ig-arr-empty {
     color: var(--muted); font-size: 9px; padding: 4px 0; letter-spacing: 0.04em;
@@ -380,13 +395,13 @@
   #landingChip {
     position: absolute; bottom: max(14px, env(safe-area-inset-bottom));
     left: 50%; transform: translateX(-50%); z-index: 11; pointer-events: none;
-    display: none; flex-direction: column; align-items: stretch; gap: 3px;
-    background: rgba(8, 11, 18, 0.84);
-    border: 1px solid rgba(240,213,160,0.22); border-radius: 14px;
-    padding: 5px 12px 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    display: none; flex-direction: column; align-items: stretch; gap: 4px;
+    background: rgba(8, 11, 18, 0.9);
+    border: 1px solid rgba(240,213,160,0.35); border-radius: 16px;
+    padding: 8px 16px 9px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 6px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
     font-family: var(--mono); white-space: nowrap;
-    max-width: min(92vw, 340px);
+    max-width: min(94vw, 420px);
   }
   #landingChip.visible { display: flex; }
   #landingChip.at-threshold { border-color: rgba(125,206,160,0.45); }
@@ -394,14 +409,14 @@
     display: flex; align-items: baseline; gap: 8px; justify-content: center;
   }
   #landingChip .lc-label {
-    font-family: var(--font); font-size: 7px; letter-spacing: 0.14em;
+    font-family: var(--font); font-size: 8px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--muted); font-weight: 500;
   }
   #landingChip .lc-dist {
-    font-size: 12px; font-weight: 500; color: var(--glow); letter-spacing: 0.03em;
+    font-size: 16px; font-weight: 600; color: var(--glow); letter-spacing: 0.02em;
   }
   #landingChip .lc-sub {
-    font-size: 9px; color: #9aa8ba; letter-spacing: 0.02em;
+    font-size: 11px; color: #c8d4e2; letter-spacing: 0.02em;
   }
   #landingChip .lc-sub:empty { display: none; }
   #landingChip .lc-rwy {
@@ -425,9 +440,9 @@
       padding: 4px 10px 5px; gap: 2px; border-radius: 12px;
     }
     #landingChip .lc-row { gap: 6px; }
-    #landingChip .lc-dist { font-size: 11px; }
-    #landingChip .lc-label { font-size: 6px; }
-    #landingChip .lc-sub { font-size: 8px; }
+    #landingChip .lc-dist { font-size: 14px; }
+    #landingChip .lc-label { font-size: 7px; }
+    #landingChip .lc-sub { font-size: 10px; }
   }
 
 
@@ -488,7 +503,7 @@
 
 <div id="landingChip" aria-live="polite">
   <div class="lc-row">
-    <div class="lc-label" id="lcLabel">To threshold</div>
+    <div class="lc-label" id="lcLabel">ETA to SFO</div>
     <div class="lc-dist" id="lcDist">—</div>
     <div class="lc-sub" id="lcSub"></div>
     <div class="lc-rwy" id="lcRwy"></div>
@@ -629,7 +644,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v18'; // Left arrivals rail + chrome spacing + KSFO bullseye + bigger planes
+const BUILD_MARK = 'airloom-v18'; // Left FBO rail + chrome + bullseye + big planes + rainbow thick-nose trails + clear ETA
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -660,6 +675,10 @@ window.__AIRLOOM_FEATURES = {
   ksfoBullseye: true,
   biggerPlanes: true,
   chromeNoOverlap: true,
+  trailThickNose: true,
+  trailRainbow: true,
+  etaToSfoClear: true,
+  fboArrivalsFocus: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1061,11 +1080,11 @@ function timeToClosestApproachMin(lat, lon, track, gsKt, fieldLat, fieldLon) {
 
 
 function altColor(altM) {
-  // Refined altitude palette (champagne → gold → jade → steel → violet)
-  const t = Math.max(0, Math.min(1, (altM || 0) / 12000));
-  const hue = 0.06 + t * 0.70; // warm gold through cool violet
+  // Vivid altitude rainbow: red/orange (low) → yellow → green → cyan → blue → violet (high)
+  const t = Math.max(0, Math.min(1, (altM || 0) / 11000));
+  const hue = 0.02 + t * 0.78;
   const c = new THREE.Color();
-  c.setHSL(hue, 0.62, 0.58); // restrained saturation
+  c.setHSL(hue, 0.92, 0.56);
   return c;
 }
 
@@ -2979,10 +2998,10 @@ function formatLdgDist(info, opts) {
   if (atThr && distThr < 0.14 && nmRaw < 0.18) {
     return {
       dist: 'AT THRESHOLD',
-      sub: '',
+      sub: 'arriving FBO',
       rwy,
       atThreshold: true,
-      label: 'Landing',
+      label: 'Landing · FBO',
       hide: false,
       barPct: 100,
     };
@@ -2990,10 +3009,10 @@ function formatLdgDist(info, opts) {
   if (atThr || onFinalNear) {
     return {
       dist: 'ON FINAL',
-      sub: '',
+      sub: 'to FBO',
       rwy,
       atThreshold: true,
-      label: 'On final',
+      label: 'On final → FBO',
       hide: false,
       barPct: Math.max(barPct, 88),
     };
@@ -3024,11 +3043,17 @@ function formatLdgDist(info, opts) {
   } else if (info.etaMin != null && info.etaMin < 90 && info.gsKt != null && info.gsKt >= 35) {
     shownEta = Math.max(1, Math.round(info.etaMin));
   }
-  if (shownEta != null && shownEta < 90) sub = '~' + shownEta + ' min';
-
-  const label = info.confidence === 'final' ? 'On final'
-    : (info.rwy ? 'To threshold' : 'To KSFO');
-  return { dist, sub, rwy, atThreshold: false, label, hide: false, barPct };
+  // ETA is the hero; distance rides as secondary ("~12 min to SFO" / "8.2 nm")
+  let etaTxt = '';
+  if (shownEta != null && shownEta < 90) {
+    etaTxt = '~' + shownEta + ' min to SFO';
+  }
+  const label = info.confidence === 'final' ? 'On final → FBO'
+    : (info.rwy ? 'To threshold' : 'Inbound to FBO');
+  // Swap: primary line = ETA (or dist if no ETA); sub = the other
+  const primary = etaTxt || dist;
+  const secondary = etaTxt ? dist : '';
+  return { dist: primary, sub: secondary, rwy, atThreshold: false, label, hide: false, barPct, etaMin: shownEta };
 }
 
 function buildLandingCues() {
@@ -4636,11 +4661,14 @@ function buildIgCardHtml(rec, badge) {
   );
 }
 
-function formatOrbitEta(min) {
+function formatOrbitEta(min, opts) {
   if (min == null || !Number.isFinite(min)) return '—';
-  if (min < 1) return '<1m';
-  if (min < 90) return '~' + Math.max(1, Math.round(min)) + 'm';
-  return '>90m';
+  const toSfo = !!(opts && opts.toSfo);
+  let core;
+  if (min < 1) core = '<1 min';
+  else if (min < 90) core = '~' + Math.max(1, Math.round(min)) + ' min';
+  else core = '>90 min';
+  return toSfo ? (core + ' to SFO') : core;
 }
 
 function formatOrbitDist(nm) {
@@ -4703,9 +4731,9 @@ function updateInfoPanel() {
 
   if (!list.length) {
     igP.innerHTML =
-      `<div class="ig-arr-head"><div class="ig-arr-title">KSFO arrivals</div>` +
+      `<div class="ig-arr-head"><div class="ig-arr-title">FBO · arrivals</div>` +
       `<div style="display:flex;align-items:center;gap:6px"><div class="ig-arr-count">60m</div>${closeBtn}</div></div>` +
-      `<div class="ig-arr-empty">No clear ADS-B inbounds in ~60–90 min</div>`;
+      `<div class="ig-arr-empty">No clear inbounds to KSFO FBO in ~60 min</div>`;
     return;
   }
 
@@ -4717,18 +4745,21 @@ function updateInfoPanel() {
       : formatOrbitDist(s.nm);
     const hoverCls = (orbitHoverPreview === s.icao || selectedId === s.icao) ? ' hovering' : '';
     const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : ''].filter(Boolean).join(' ') + hoverCls;
+    const nextTag = i === 0 ? '<span class="next-tag">NEXT</span>' : '';
+    const etaCore = formatOrbitEta(s.etaMin);
+    const etaHtml = `<div class="eta">${etaCore}<span class="eta-to">to SFO</span></div>`;
     return `<div class="${cls}" data-icao="${s.icao}">` +
-      `<div class="cs">${s.callsign}</div>` +
-      `<div class="eta">${formatOrbitEta(s.etaMin)}</div>` +
+      `<div class="cs">${s.callsign}${nextTag}</div>` +
+      etaHtml +
       `<div class="meta">${typ}${rwy}</div>` +
       `<div class="dist">${mi}</div>` +
       `</div>`;
   }).join('');
 
   igP.innerHTML =
-    `<div class="ig-arr-head"><div class="ig-arr-title">KSFO · next ~60 min</div>` +
+    `<div class="ig-arr-head"><div class="ig-arr-title">FBO · next ~60 min</div>` +
     `<div style="display:flex;align-items:center;gap:6px"><div class="ig-badge">${badge}</div>${closeBtn}</div></div>` +
-    `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} arrival${list.length === 1 ? '' : 's'}</div>` +
+    `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} to KSFO · soonest first</div>` +
     `<div class="ig-arr-list">${rows}</div>`;
 }
 
@@ -4852,8 +4883,8 @@ function isArrival(p) {
 
 // ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 200;
-const TRAIL_HALF_W = 1.05;    // meters — thinner so KSFO bullseye + planes win
-const TRAIL_HALF_W_LOW = 0.55; // taxi / very low alt
+const TRAIL_HALF_W = 2.4;     // meters at aircraft nose (wake tapers thin)
+const TRAIL_HALF_W_LOW = 0.85; // taxi / very low alt (still thicker at nose)
 const TRAIL_SAMPLE_MS = 650;  // live stream cadence between ADS-B polls
 const TRAIL_SAMPLE_M = 90;    // or when DR tip has moved this far
 const _tA = new THREE.Vector3();
@@ -5189,11 +5220,11 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.62,
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.NormalBlending, // soft trail — defer to bullseye + planes
+      blending: THREE.NormalBlending, // vivid rainbow, thick-at-nose taper
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -5316,7 +5347,7 @@ function setLabelInfo(rec) {
     }
     if (etaMin != null && Number.isFinite(etaMin) && etaMin > 0 && etaMin < 180) {
       const em = etaMin < 1.5 ? Math.max(1, Math.round(etaMin)) : Math.round(etaMin);
-      parts.push('~' + em + ' min');
+      parts.push('~' + em + ' min to SFO');
     }
     line1 = parts.join(' · ');
     // Keep meta tiny: alt / gs only (no second panel)
@@ -5478,11 +5509,12 @@ function fillTrailCenter(rec, tp, i, n, out, o) {
 }
 
 function trailHalfWidthForAlt(altM, u) {
-  // u: 0 = oldest (tip), 1 = aircraft (base)
+  // u: 0 = oldest wake (behind), 1 = aircraft nose (front) — thick front, thin wake
   const low = Math.max(0, Math.min(1, 1 - (altM || 0) / 180)); // < ~600 ft → squeeze
-  const base = TRAIL_HALF_W * (1 - 0.72 * low) + TRAIL_HALF_W_LOW * low;
-  // taper toward oldest tip; slightly fuller near aircraft
-  return base * (0.22 + 0.78 * u);
+  const base = TRAIL_HALF_W * (1 - 0.55 * low) + TRAIL_HALF_W_LOW * low;
+  // Reverse taper: fat at nose, hairline behind
+  const nose = Math.pow(Math.max(0, Math.min(1, u)), 0.55);
+  return base * (0.06 + 0.94 * nose);
 }
 
 function updateTrail(rec) {
@@ -5502,11 +5534,11 @@ function updateTrail(rec) {
   }
   rec.trail.visible = true;
 
-  // Opacity: soft so KSFO bullseye + airframes stay primary
+  // Opacity: readable rainbow without washing out bullseye/planes
   const mat = rec.trail.material;
-  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.18;
-  else if (tipAlt < 120) mat.opacity = 0.30;
-  else mat.opacity = 0.40;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.28;
+  else if (tipAlt < 120) mat.opacity = 0.48;
+  else mat.opacity = 0.62;
 
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
@@ -5541,7 +5573,8 @@ function updateTrail(rec) {
     const u = i / Math.max(1, n - 1);
     const altM = pts[start + i].altM || 0;
     const halfW = trailHalfWidthForAlt(altM, u);
-    const fade = Math.pow(u, 1.05) * (tipAlt < 50 ? 0.55 : 1);
+    // Keep rainbow vivid along path; only soft-dim the far wake
+    const fade = (0.42 + 0.58 * Math.pow(u, 0.65)) * (tipAlt < 50 ? 0.65 : 1);
     const c = altColor(altM);
     const cr = c.r * fade, cg = c.g * fade, cb = c.b * fade;
     const lo = i * 6;

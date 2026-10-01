@@ -122,6 +122,8 @@ Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated
 
 ### airloom-v18
 - Chrome no-overlap (HUD / camBar / ☰)
-- Slim left ~60m arrivals rail (default open on Orbit)
+- Slim left ~60m FBO arrivals rail (default open on Orbit; NEXT + ETA to SFO)
 - Bigger planes (SIZE_MULT 4.5)
-- KSFO bullseye destination marker; softer trails
+- KSFO bullseye destination marker
+- Rainbow altitude trails thick at nose / thin wake
+- Clearer ETA chip (“~12 min to SFO”)
