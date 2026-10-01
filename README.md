@@ -127,3 +127,5 @@ Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated
 - KSFO bullseye destination marker
 - Rainbow altitude trails thick at nose / thin wake
 - Clearer ETA chip (“~12 min to SFO”)
+- Always focus closest KSFO inbound (Orbit); restore after hover
+- Darker richer Orbit/Follow basemap (less whitewash)

@@ -353,6 +353,10 @@
   #infoPanel .ig-arr-row.soonest {
     box-shadow: inset 0 0 0 1px rgba(240,213,160,0.35), 0 0 18px rgba(240,213,160,0.08);
   }
+  #infoPanel .ig-arr-row.focus {
+    border-color: rgba(125,206,160,0.55);
+    background: rgba(62,207,142,0.16);
+  }
   #infoPanel .ig-arr-row .next-tag {
     display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 999px;
     font-size: 7px; letter-spacing: 0.1em; font-weight: 600; vertical-align: 0.15em;
@@ -644,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v18'; // Left FBO rail + chrome + bullseye + big planes + rainbow thick-nose trails + clear ETA
+const BUILD_MARK = 'airloom-v18'; // FBO rail + closest focus + dark map + bullseye + big planes + rainbow trails + clear ETA
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -679,6 +683,8 @@ window.__AIRLOOM_FEATURES = {
   trailRainbow: true,
   etaToSfoClear: true,
   fboArrivalsFocus: true,
+  alwaysShowClosest: true,
+  darkBasemapRich: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -2243,9 +2249,10 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       const imgData = ctx.getImageData(0, 0, size, size);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
-        d[i] = Math.min(255, d[i] * 1.10 + 10);
-        d[i + 1] = Math.min(255, d[i + 1] * 1.12 + 12);
-        d[i + 2] = Math.min(255, d[i + 2] * 1.06 + 6);
+        // Mild contrast — avoid chalk/whitewashed sat
+        d[i] = Math.min(255, d[i] * 0.96 + 2);
+        d[i + 1] = Math.min(255, d[i + 1] * 0.98 + 3);
+        d[i + 2] = Math.min(255, d[i + 2] * 0.94 + 1);
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) { /* tainted */ }
@@ -2265,15 +2272,25 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       ctx.putImageData(imgData, 0, 0);
     } catch (_) {}
   }
-  // ESRI Dark Gray is very ink-heavy; lift midtones so coastline/roads read on OLED/Safari
+  // Rich dark Orbit: deepen mids, keep road/label filaments — no pale whitewash
   if (opts.orbitLift) {
     try {
       const imgData = ctx.getImageData(0, 0, size, size);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
-        d[i] = Math.min(255, d[i] * 1.28 + 14);
-        d[i + 1] = Math.min(255, d[i + 1] * 1.30 + 16);
-        d[i + 2] = Math.min(255, d[i + 2] * 1.36 + 22);
+        let r = d[i], g = d[i + 1], b = d[i + 2];
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        // Crush blacks / mids; preserve brighter filaments (roads, labels)
+        const t = lum / 255;
+        const crush = Math.pow(Math.max(0, t), 1.22);
+        const gain = lum > 150 ? 0.88 : (lum > 90 ? 0.70 : 0.55);
+        r = Math.min(255, r * gain * 0.78 + crush * 28);
+        g = Math.min(255, g * gain * 0.82 + crush * 36);
+        b = Math.min(255, b * gain * 0.95 + crush * 52);
+        // Cool navy tint, not chalk haze
+        d[i] = r * 0.92;
+        d[i + 1] = g * 0.94;
+        d[i + 2] = Math.min(255, b * 1.02 + 4);
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) {}
@@ -2309,6 +2326,8 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
     polygonOffset: overlay,
     polygonOffsetFactor: overlay ? -1 : 0,
     polygonOffsetUnits: overlay ? -1 : 0,
+    // Runtime tint: Orbit darker/richer; Follow slightly muted
+    color: opts.orbitLift ? 0x9aa8b8 : (brighten ? 0xd8e0d4 : 0xffffff),
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
@@ -3493,21 +3512,21 @@ function applySceneTheme(mode) {
     }
   }
   if (follow) {
-    // Clean daylight frame around photoreal sat (not washed void)
-    renderer.setClearColor(0x6e8fa8);
-    scene.fog = new THREE.FogExp2(0xa8c0cc, 0.00000032); // airloom-v6: less far-field wash
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.22;
-    sun.intensity = 1.45;
-    hemi.intensity = 0.75;
-    fill.intensity = 0.45;
+    // Richer sat — less chalk haze in chase
+    renderer.setClearColor(0x4a6578);
+    scene.fog = new THREE.FogExp2(0x6a8494, 0.00000028);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.02;
+    sun.intensity = 1.22;
+    hemi.intensity = 0.58;
+    fill.intensity = 0.32;
   } else {
-    // Luxury dark Orbit — readable ink (not black void), cool rim
-    renderer.setClearColor(0x070a12);
-    scene.fog = new THREE.FogExp2(0x0a0e18, 0.00000072);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.08;
-    sun.intensity = 0.52;
-    hemi.intensity = 0.36;
-    fill.intensity = 0.28;
+    // Premium dark Orbit — deep ink, cool rim, no whitewash
+    renderer.setClearColor(0x05070e);
+    scene.fog = new THREE.FogExp2(0x070a12, 0.00000085);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 0.88;
+    sun.intensity = 0.42;
+    hemi.intensity = 0.28;
+    fill.intensity = 0.20;
   }
 }
 
@@ -3611,6 +3630,8 @@ let orbitUserFramed = false; // user dragged OrbitControls — pause auto refram
 let orbitHoverPreview = null; // icao under arrivals-row hover (top-down peek)
 let orbitHoverSaved = null;   // { pos, target, userFramed } to restore on leave
 let orbitHoverLocked = false; // click selected — keep framing until leave+click elsewhere
+let orbitFocusId = null; // auto closest/soonest KSFO inbound (FBO clarity)
+let orbitUserPickId = null; // user-clicked override; null → stick to closest
 controls.addEventListener('start', () => {
   if (settings.cameraMode !== 'orbit') return;
   if (orbitHoverPreview) clearOrbitHoverPreview(false); // user takes over
@@ -3663,15 +3684,14 @@ function clearOrbitHoverPreview(restore) {
       el.classList.remove('hovering');
     });
   } catch (_) {}
-  if (restore && orbitHoverSaved && settings.cameraMode === 'orbit') {
+  orbitHoverSaved = null;
+  // After peek: restore to closest (or user pick) — never lose FBO focus
+  if (restore && settings.cameraMode === 'orbit') {
     try {
-      camera.position.copy(orbitHoverSaved.pos);
-      controls.target.copy(orbitHoverSaved.target);
-      orbitUserFramed = !!orbitHoverSaved.userFramed;
-      controls.update();
+      orbitUserFramed = false;
+      frameClosestOrbitInbound(true);
     } catch (_) {}
   }
-  orbitHoverSaved = null;
   return had;
 }
 
@@ -3727,6 +3747,7 @@ function bindArrivalsSidebarEvents() {
     if (!row || !igP.contains(row)) return;
     const id = row.getAttribute('data-icao');
     selectedId = id;
+    orbitUserPickId = id; // user override — keep until they clear / pick another
     orbitHoverLocked = true;
     beginOrbitHoverPreview(id);
     const rec = aircraft.get(id);
@@ -3735,7 +3756,10 @@ function bindArrivalsSidebarEvents() {
       orbitUserFramed = true;
       clearTimeout(controls._orbitResumeT);
       controls._orbitResumeT = setTimeout(() => {
-        if (!orbitHoverPreview) orbitUserFramed = false;
+        if (!orbitHoverPreview) {
+          orbitUserFramed = false;
+          try { frameClosestOrbitInbound(true); } catch (_) {}
+        }
       }, 14000);
     }
   });
@@ -3838,6 +3862,13 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Escape') return;
   if (orbitHoverPreview) { clearOrbitHoverPreview(true); return; }
   if (isDrawerOpen()) { setDrawerOpen(false); return; }
+  if (orbitUserPickId && settings.cameraMode === 'orbit') {
+    orbitUserPickId = null;
+    syncOrbitClosestFocus();
+    frameClosestOrbitInbound(true);
+    updateInfoPanel();
+    return;
+  }
   if (arrivalsSidebarOpen && settings.cameraMode === 'orbit') {
     setArrivalsSidebarOpen(false);
   }
@@ -3965,6 +3996,7 @@ function frameOrbitOverview() {
       frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, true);
       return;
     }
+    if (frameClosestOrbitInbound(true)) return;
     const pack = orbitArrivalRecsForFrame();
     if (pack.length) {
       frameArrivalCluster(pack, true);
@@ -4145,15 +4177,63 @@ function collectOrbitArrivals(fromList) {
     scored.push(s);
   }
   scored.sort((a, b) => {
-    // Tier: finals → GA/private → airline (matches FA private-heavy board; ETA within tier)
+    // FBO clarity: closest to field first; soft prefer final / GA; ETA as tie-break
+    const distKey = (s) => {
+      const nm = (s.nm != null && Number.isFinite(s.nm)) ? s.nm : (s.distNm || 999);
+      return s.onFinal ? nm * 0.82 : nm;
+    };
+    const da = distKey(a), db = distKey(b);
+    if (Math.abs(da - db) > 0.75) return da - db;
+    if (Math.abs(a.etaMin - b.etaMin) > 0.45) return a.etaMin - b.etaMin;
     const tier = (s) => (s.onFinal ? 0 : (s.isGa ? 1 : 2));
     const ta = tier(a), tb = tier(b);
     if (ta !== tb) return ta - tb;
-    if (Math.abs(a.etaMin - b.etaMin) > 0.4) return a.etaMin - b.etaMin;
     return a.sortKey - b.sortKey;
   });
   orbitArrivalsCache = scored;
   return scored;
+}
+
+/** Closest / soonest KSFO inbound for Orbit focus (prefer distance-to-field). */
+function pickClosestOrbitArrival() {
+  const scored = orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals();
+  return scored.length ? scored[0] : null;
+}
+
+function syncOrbitClosestFocus() {
+  if (settings.cameraMode !== 'orbit') return null;
+  const closest = pickClosestOrbitArrival();
+  orbitFocusId = closest ? closest.icao : null;
+  // Keep user pick if still a valid arrival; else lock onto closest
+  if (orbitUserPickId) {
+    const still = orbitArrivalsCache.some((s) => s.icao === orbitUserPickId) && aircraft.has(orbitUserPickId);
+    if (!still) orbitUserPickId = null;
+  }
+  const focusId = orbitUserPickId || orbitFocusId;
+  if (focusId && aircraft.has(focusId)) {
+    selectedId = focusId;
+    const rec = aircraft.get(focusId);
+    if (rec) updateSelPanel(rec);
+  }
+  return focusId;
+}
+
+/** Frame Orbit on closest (or user-picked) inbound + KSFO — always show the plane. */
+function frameClosestOrbitInbound(snap) {
+  if (settings.cameraMode !== 'orbit') return false;
+  const id = orbitUserPickId || orbitFocusId || (pickClosestOrbitArrival() || {}).icao;
+  const rec = id ? aircraft.get(id) : null;
+  if (rec && rec.display && Number.isFinite(rec.display.x)) {
+    frameTopDownPreview(rec, snap !== false);
+    return true;
+  }
+  const pack = orbitArrivalRecsForFrame();
+  if (pack.length) {
+    frameArrivalCluster(pack, snap !== false);
+    return true;
+  }
+  frameApproachCorridor(snap !== false);
+  return false;
 }
 
 /** Live aircraft records for Orbit cluster framing (soonest pack). */
@@ -4285,6 +4365,10 @@ function setCameraMode(mode, opts) {
     if (btn) { btn.classList.remove('visible', 'active'); }
   } else {
     setArrivalsSidebarOpen(arrivalsSidebarOpen); // sync button + panel class
+    try {
+      syncOrbitClosestFocus();
+      if (!orbitHoverPreview) frameClosestOrbitInbound(true);
+    } catch (_) {}
   }
   updateInfoPanel();
 }
@@ -4743,8 +4827,9 @@ function updateInfoPanel() {
     const mi = (s.mi != null && Number.isFinite(s.mi))
       ? (s.mi < 10 ? s.mi.toFixed(1) : Math.round(s.mi)) + ' mi'
       : formatOrbitDist(s.nm);
-    const hoverCls = (orbitHoverPreview === s.icao || selectedId === s.icao) ? ' hovering' : '';
-    const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : ''].filter(Boolean).join(' ') + hoverCls;
+    const isFocus = (selectedId === s.icao) || (orbitFocusId === s.icao && !orbitUserPickId && i === 0);
+    const hoverCls = (orbitHoverPreview === s.icao || isFocus) ? ' hovering' : '';
+    const cls = ['ig-arr-row', i === 0 ? 'soonest' : '', s.isGa ? 'ga' : '', isFocus ? 'focus' : ''].filter(Boolean).join(' ') + hoverCls;
     const nextTag = i === 0 ? '<span class="next-tag">NEXT</span>' : '';
     const etaCore = formatOrbitEta(s.etaMin);
     const etaHtml = `<div class="eta">${etaCore}<span class="eta-to">to SFO</span></div>`;
@@ -5318,10 +5403,14 @@ function setLabelInfo(rec) {
     (cockpitPrimaryId && rec.icao === cockpitPrimaryId) ||
     (selectedId && rec.icao === selectedId)
   );
+  const isOrbitFocus = settings.cameraMode === 'orbit' && !rec.onGround && (
+    (selectedId && rec.icao === selectedId) ||
+    (orbitFocusId && rec.icao === orbitFocusId)
+  );
 
   let line1 = ident;
   let line2;
-  if (isFollowPrimary && !rec.onGround) {
+  if ((isFollowPrimary || isOrbitFocus) && !rec.onGround) {
     // Compact Follow tag: N724PB · C25B · 42 mi · ~15 min (clamped in-frame via updateLabelScreen)
     const parts = [ident];
     if (type) parts.push(type);
@@ -5435,7 +5524,8 @@ function updateLabelScreen(rec, cam, view) {
   el.classList.remove('hidden');
   el.classList.toggle('dim', dist > LABEL_MAX_DIST * 0.55);
   const isPrimary = !!(cockpitPrimaryId && rec.icao === cockpitPrimaryId)
-    || (!!selectedId && rec.icao === selectedId && settings.cameraMode === 'follow');
+    || (!!selectedId && rec.icao === selectedId)
+    || (!!orbitFocusId && rec.icao === orbitFocusId && settings.cameraMode === 'orbit' && !orbitUserPickId);
   el.classList.toggle('primary', isPrimary);
   // view = {x,y,w,h} in CSS px (y from top). Defaults to full window.
   const vx = view ? view.x : 0;
@@ -5945,12 +6035,11 @@ function ingest(data) {
       if (scored) cockpitPrimaryId = sel.icao;
     }
   }
-  // Snap Orbit frame onto new pack after each poll (unless user drag / hover peek)
+  // Always lock Orbit selection onto closest inbound (unless user picked another)
+  try { syncOrbitClosestFocus(); } catch (_) {}
+  // Snap Orbit onto closest plane + KSFO (unless user drag / hover peek / dual)
   if (settings.cameraMode === 'orbit' && !orbitUserFramed && !dualFinalActive && !orbitHoverPreview) {
-    try {
-      const pack = orbitArrivalRecsForFrame();
-      if (pack.length) frameArrivalCluster(pack, true);
-    } catch (_) {}
+    try { frameClosestOrbitInbound(true); } catch (_) {}
   }
   updateInfoPanel();
 }
@@ -6137,7 +6226,7 @@ function animate() {
         } else if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
           frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false);
         } else if (!orbitUserFramed && orbitArrivalsCache.length) {
-          frameArrivalCluster(orbitArrivalRecsForFrame(), false);
+          frameClosestOrbitInbound(false);
         } else {
           controls.update();
         }
