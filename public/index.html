@@ -32,7 +32,7 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
-    position: absolute; top: 12px; left: 16px; right: 16px; z-index: 5; pointer-events: none;
+    position: absolute; top: max(12px, env(safe-area-inset-top)); left: 56px; right: 16px; z-index: 14; pointer-events: none;
     display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
     padding: 12px 18px 13px;
     background: linear-gradient(165deg, rgba(14,18,28,0.94), rgba(6,9,14,0.97));
@@ -121,13 +121,13 @@
     background: rgba(62, 207, 142, 0.28); border-color: var(--accent); color: #fff;
   }
   #toggleDrawer {
-    position: absolute; top: 12px; left: 300px; z-index: 11;
+    position: absolute; top: max(14px, env(safe-area-inset-top)); left: 300px; z-index: 16;
     width: auto; padding: 6px 10px; transition: left 0.25s ease;
   }
   #drawer.collapsed + #toggleDrawer { left: 12px; }
-  /* Compact ~60m arrivals sidebar toggle (Orbit) */
+  /* Compact ~60m arrivals rail toggle (Orbit) — left, under HUD */
   #btnArrivalsSide {
-    position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
+    position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 78px); left: 12px; right: auto;
     z-index: 13; width: auto; padding: 7px 11px;
     border-radius: 999px; letter-spacing: 0.1em; font-size: 10px;
     font-family: var(--font); text-transform: uppercase; font-weight: 500;
@@ -151,8 +151,8 @@
   }
   @media (max-width: 720px) {
     #btnArrivalsSide {
-      top: max(52px, calc(env(safe-area-inset-top) + 44px));
-      right: 8px; padding: 6px 9px; font-size: 9px;
+      top: calc(max(10px, env(safe-area-inset-top)) + 64px);
+      left: 8px; right: auto; padding: 6px 9px; font-size: 9px;
     }
   }
   #sel {
@@ -218,9 +218,9 @@
   .ac-label.dim { opacity: 0.32; }
   .ac-label.hidden { display: none; }
 
-  /* Camera mode control */
+  /* Camera mode control — below HUD so chrome never stacks */
   #camBar {
-    position: absolute; top: max(16px, env(safe-area-inset-top)); left: 50%;
+    position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 78px); left: 50%;
     transform: translateX(-50%); z-index: 12; pointer-events: auto;
     display: flex; gap: 0; border-radius: 999px; overflow: hidden;
     background: rgba(8, 11, 18, 0.9); border: 1px solid var(--border-strong);
@@ -240,9 +240,9 @@
   }
   #camBar button:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.03); }
 
-  /* Dual-final Orbit HUD (top-right). Hidden in Follow — plane tag + bottom chip only. */
+  /* Arrivals / dual HUD. Orbit rail docks LEFT; Follow hides panel. */
   #infoPanel {
-    position: absolute; top: max(16px, env(safe-area-inset-top)); right: 14px;
+    position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 78px); right: 14px;
     z-index: 12; pointer-events: none; width: auto; max-width: min(220px, calc(100vw - 28px));
   }
   body.follow-mode #infoPanel { display: none !important; }
@@ -289,8 +289,23 @@
   }
   #infoPanel.hidden, #infoPanel .ig-card.hidden { display: none; }
 
-  /* Orbit ~60 min arrivals list (compact cards) */
-  #infoPanel.orbit-arrivals { max-width: min(268px, calc(100vw - 24px)); }
+  /* Orbit ~60 min arrivals list — slim LEFT rail, always easy to find */
+  #infoPanel.orbit-arrivals {
+    left: 12px; right: auto;
+    max-width: min(228px, calc(100vw - 24px));
+    top: calc(max(12px, env(safe-area-inset-top)) + 78px);
+  }
+  body.drawer-open #infoPanel.orbit-arrivals { left: 304px; }
+  body.drawer-open #btnArrivalsSide { left: 304px; }
+  @media (max-width: 720px) {
+    body.drawer-open #infoPanel.orbit-arrivals,
+    body.drawer-open #btnArrivalsSide { left: calc(min(86vw, 320px) + 8px); }
+  }
+  #infoPanel.orbit-arrivals .ig-card {
+    padding: 7px 9px 8px;
+    max-height: min(52vh, 420px);
+    overflow: hidden;
+  }
   #infoPanel .ig-arr-head {
     display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
     margin-bottom: 6px;
@@ -332,10 +347,14 @@
     color: var(--muted); font-size: 9px; padding: 4px 0; letter-spacing: 0.04em;
   }
   @media (max-width: 720px) {
-    #infoPanel.orbit-arrivals { max-width: min(200px, calc(100vw - 20px)); right: 8px; }
+    #infoPanel.orbit-arrivals {
+      left: 8px; right: auto;
+      max-width: min(178px, calc(100vw - 20px));
+      top: calc(max(10px, env(safe-area-inset-top)) + 64px);
+    }
     #infoPanel .ig-arr-row .cs { font-size: 10px; }
     #infoPanel .ig-arr-row .eta { font-size: 11px; }
-    #infoPanel .ig-arr-list { max-height: min(36vh, 240px); }
+    #infoPanel .ig-arr-list { max-height: min(34vh, 220px); }
   }
 
   /* Landing distance chip (Follow) */
@@ -421,7 +440,7 @@
     }
     #camBar button { padding: 9px 14px; font-size: 12px; }
     #infoPanel {
-      top: max(52px, calc(env(safe-area-inset-top) + 44px));
+      top: calc(max(10px, env(safe-area-inset-top)) + 64px);
       right: 8px; max-width: min(150px, calc(100vw - 56px));
     }
     #infoPanel .ig-cs { font-size: 10px; }
@@ -609,8 +628,8 @@ const POLL_MS = 12000;
 const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
-const SIZE_MULT = 2.0; // noticebly smaller vs ground (was 4.0); TYPE_DIMS stay real meters
-const BUILD_MARK = 'airloom-v17'; // Closed arrivals sidebar + hover top-down preview
+const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
+const BUILD_MARK = 'airloom-v18'; // Left arrivals rail + chrome spacing + KSFO bullseye + bigger planes
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -636,7 +655,11 @@ window.__AIRLOOM_FEATURES = {
   orbitUsefulWindowMin: 60,
   arrivalsSidebarToggle: true,
   arrivalsHoverTopDown: true,
+  arrivalsLeftRailDefaultOpen: true,
   drawerClosedDefault: true,
+  ksfoBullseye: true,
+  biggerPlanes: true,
+  chromeNoOverlap: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -3021,41 +3044,68 @@ function buildLandingCues() {
     });
   }
 
-  // Airport beacon pillar + champagne marker disc
+  // KSFO bullseye — prominent destination rings (readable from Orbit)
   const apt = enu(ORIGIN.lat, ORIGIN.lon, 0);
-  const beacon = new THREE.Mesh(
-    new THREE.CylinderGeometry(18, 28, 420, 12),
+  const bullseye = new THREE.Group();
+  bullseye.name = 'ksfoBullseye';
+  const ringSpec = [
+    { inner: 28, outer: 78, color: 0xf5e6c8, opacity: 0.92, y: 10 },
+    { inner: 120, outer: 190, color: 0x7dcea0, opacity: 0.62, y: 9 },
+    { inner: 260, outer: 350, color: 0xf0d5a0, opacity: 0.48, y: 8 },
+    { inner: 460, outer: 560, color: 0x9bb8d4, opacity: 0.32, y: 7 },
+    { inner: 780, outer: 920, color: 0xf0d5a0, opacity: 0.20, y: 6 },
+    { inner: 1400, outer: 1580, color: 0x7dcea0, opacity: 0.12, y: 5 },
+  ];
+  for (const r of ringSpec) {
+    const mesh = new THREE.Mesh(
+      new THREE.RingGeometry(r.inner, r.outer, 72),
+      new THREE.MeshBasicMaterial({
+        color: r.color, transparent: true, opacity: r.opacity,
+        side: THREE.DoubleSide, depthWrite: false,
+      })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(apt.x, r.y, apt.z);
+    mesh.renderOrder = 5;
+    bullseye.add(mesh);
+  }
+  const center = new THREE.Mesh(
+    new THREE.CircleGeometry(30, 36),
     new THREE.MeshBasicMaterial({
-      color: 0xf0d5a0, transparent: true, opacity: 0.55, depthWrite: false,
+      color: 0xf5e6c8, transparent: true, opacity: 0.95,
+      side: THREE.DoubleSide, depthWrite: false,
     })
   );
-  beacon.position.set(apt.x, 210, apt.z);
+  center.rotation.x = -Math.PI / 2;
+  center.position.set(apt.x, 11, apt.z);
+  center.renderOrder = 6;
+  bullseye.add(center);
+  // Crosshair arms (N-S / E-W) for quick "target" read
+  const armMat = new THREE.MeshBasicMaterial({
+    color: 0xf0d5a0, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide,
+  });
+  for (const [sx, sz, len] of [[1, 0, 1100], [0, 1, 1100]]) {
+    const arm = new THREE.Mesh(new THREE.PlaneGeometry(sx ? len : 28, sz ? len : 28), armMat.clone());
+    arm.rotation.x = -Math.PI / 2;
+    arm.position.set(apt.x, 4.5, apt.z);
+    arm.renderOrder = 4;
+    bullseye.add(arm);
+  }
+  landingCueGroup.add(bullseye);
+
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(14, 22, 520, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0xf0d5a0, transparent: true, opacity: 0.62, depthWrite: false,
+    })
+  );
+  beacon.position.set(apt.x, 260, apt.z);
   beacon.renderOrder = 4;
   landingCueGroup.add(beacon);
 
-  const disc = new THREE.Mesh(
-    new THREE.RingGeometry(90, 220, 48),
-    new THREE.MeshBasicMaterial({
-      color: 0xf0d5a0, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false,
-    })
-  );
-  disc.rotation.x = -Math.PI / 2;
-  disc.position.set(apt.x, 6, apt.z);
-  landingCueGroup.add(disc);
-
-  const inner = new THREE.Mesh(
-    new THREE.CircleGeometry(70, 32),
-    new THREE.MeshBasicMaterial({
-      color: 0x7dcea0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
-    })
-  );
-  inner.rotation.x = -Math.PI / 2;
-  inner.position.set(apt.x, 7, apt.z);
-  landingCueGroup.add(inner);
-
-  const aptLabel = makeBillboardLabel(['KSFO', 'LANDING'], 90, { color: 'rgba(245,230,200,0.98)' });
-  aptLabel.userData.screenPx = 28;
-  aptLabel.position.set(apt.x, 520, apt.z);
+  const aptLabel = makeBillboardLabel(['KSFO', '◎ TARGET'], 110, { color: 'rgba(245,230,200,0.98)' });
+  aptLabel.userData.screenPx = 32;
+  aptLabel.position.set(apt.x, 620, apt.z);
   aptLabel.userData.kind = 'aptLabel';
   landingCueGroup.add(aptLabel);
 
@@ -3080,7 +3130,7 @@ function buildLandingCues() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     const line = new THREE.Line(geo, new THREE.LineDashedMaterial({
-      color: 0xf0d5a0, transparent: true, opacity: 0.28,
+      color: 0xf0d5a0, transparent: true, opacity: 0.16,
       dashSize: 280, gapSize: 220, depthWrite: false,
     }));
     line.computeLineDistances();
@@ -3707,7 +3757,7 @@ $('btnClear').onclick = () => {
 };
 // Drawer + arrivals sidebar: closed by default, persist via localStorage
 const LS_DRAWER = 'airloom.drawerOpen';
-const LS_ARRIVALS = 'airloom.arrivalsOpen';
+const LS_ARRIVALS = 'airloom.arrivalsRail.v18'; // bump key so v17 closed default does not stick
 function readLsBool(key, defaultVal) {
   try {
     const v = localStorage.getItem(key);
@@ -3722,6 +3772,7 @@ function setDrawerOpen(open) {
   const d = $('drawer');
   if (!d) return;
   d.classList.toggle('collapsed', !open);
+  document.body.classList.toggle('drawer-open', !!open);
   writeLsBool(LS_DRAWER, !!open);
 }
 function isDrawerOpen() {
@@ -3748,7 +3799,7 @@ function setArrivalsSidebarOpen(open) {
   }
   if (settings.cameraMode === 'orbit') updateInfoPanel();
 }
-let arrivalsSidebarOpen = readLsBool(LS_ARRIVALS, false); // default CLOSED
+let arrivalsSidebarOpen = readLsBool(LS_ARRIVALS, true); // default OPEN on Orbit (slim left rail)
 setDrawerOpen(readLsBool(LS_DRAWER, false)); // default CLOSED (all viewports)
 $('toggleDrawer').onclick = () => setDrawerOpen(!isDrawerOpen());
 if ($('btnCloseDrawer')) $('btnCloseDrawer').onclick = () => setDrawerOpen(false);
@@ -4616,7 +4667,7 @@ function updateInfoPanel() {
     return;
   }
 
-  // Orbit: compact ~60 min arrivals sidebar — only when user opens it
+  // Orbit: compact ~60 min arrivals LEFT rail — default open, closable via ✕
   if (btnSide) {
     btnSide.classList.toggle('visible', !arrivalsSidebarOpen);
     btnSide.classList.remove('active');
@@ -4801,7 +4852,7 @@ function isArrival(p) {
 
 // ─── Premium altitude trails (thin stable ribbon / tube-like) ─────────────────
 const TRAIL_MAX_PTS = 200;
-const TRAIL_HALF_W = 1.6;     // meters — refined filament
+const TRAIL_HALF_W = 1.05;    // meters — thinner so KSFO bullseye + planes win
 const TRAIL_HALF_W_LOW = 0.55; // taxi / very low alt
 const TRAIL_SAMPLE_MS = 650;  // live stream cadence between ADS-B polls
 const TRAIL_SAMPLE_M = 90;    // or when DR tip has moved this far
@@ -5138,11 +5189,11 @@ function createAircraft(icao, typeHint) {
     new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.42,
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.NormalBlending, // restrained bloom (no neon wash)
+      blending: THREE.NormalBlending, // soft trail — defer to bullseye + planes
       polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
@@ -5451,11 +5502,11 @@ function updateTrail(rec) {
   }
   rec.trail.visible = true;
 
-  // Opacity: softer on ground
+  // Opacity: soft so KSFO bullseye + airframes stay primary
   const mat = rec.trail.material;
-  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.28;
-  else if (tipAlt < 120) mat.opacity = 0.48;
-  else mat.opacity = 0.68;
+  if (tipAlt < 40 || rec.onGround) mat.opacity = 0.18;
+  else if (tipAlt < 120) mat.opacity = 0.30;
+  else mat.opacity = 0.40;
 
   const start = pts.length - n;
   for (let i = 0; i < n; i++) {
@@ -5920,7 +5971,7 @@ function animate() {
         ? cockpitCam.position : camera.position;
       const dist = rec.display.distanceTo(eye);
       const isFollow = settings.cameraMode === 'follow';
-      const LOD_MESH_M = 14000; // show airframe inside ~14 km
+      const LOD_MESH_M = 32000; // show airframe farther so type/shape reads in Orbit
       const showMesh = isFollow || dist < LOD_MESH_M;
       if (rec.model) rec.model.visible = showMesh;
       if (rec.velLine) rec.velLine.visible = showMesh && settings.showVelVec;

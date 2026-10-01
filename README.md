@@ -119,3 +119,9 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   Orbit keeps screen-constant ticks on finals (never giant blurry walls).
 
 Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated only.
+
+### airloom-v18
+- Chrome no-overlap (HUD / camBar / ☰)
+- Slim left ~60m arrivals rail (default open on Orbit)
+- Bigger planes (SIZE_MULT 4.5)
+- KSFO bullseye destination marker; softer trails
