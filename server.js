@@ -416,14 +416,23 @@ async function backgroundRefresh() {
 }
 
 
-/** Same-origin Orbit basemap proxy — Safari often fails mass cross-origin
- *  Image loads to arcgisonline (ACAO * + credentials). Server fetch has no CORS. */
-const ORBIT_UPSTREAMS = [
-  (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
-  (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
-];
+/** Same-origin basemap proxies — Safari often fails mass cross-origin
+ *  Image loads to arcgisonline (ACAO * + credentials). Server fetch has no CORS.
+ *  orbit = World Dark Gray Base; relief = World Hillshade Dark (terrain). */
+const TILE_UPSTREAMS = {
+  orbit: [
+    (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
+  ],
+  relief: [
+    (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${z}/${y}/${x}`,
+  ],
+};
+const ORBIT_UPSTREAMS = TILE_UPSTREAMS.orbit; // back-compat alias
 const tileProxyCache = new Map(); // key -> { buf, ct, at }
-const TILE_CACHE_MAX = 800;
+const TILE_CACHE_MAX = 2400;
 const TILE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function fetchUpstreamTile(url) {
@@ -458,8 +467,13 @@ function fetchUpstreamTile(url) {
   });
 }
 
-async function handleOrbitTile(z, y, x, res) {
-  const key = z + '/' + y + '/' + x;
+async function handleProxiedTile(kind, z, y, x, res) {
+  const upstreams = TILE_UPSTREAMS[kind];
+  if (!upstreams) {
+    res.writeHead(404).end('unknown tile kind');
+    return;
+  }
+  const key = kind + ':' + z + '/' + y + '/' + x;
   const cached = tileProxyCache.get(key);
   if (cached && (Date.now() - cached.at) < TILE_CACHE_TTL_MS) {
     res.writeHead(200, {
@@ -467,12 +481,13 @@ async function handleOrbitTile(z, y, x, res) {
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=86400',
       'X-AirLoom-Tile': 'cache',
+      'X-AirLoom-Kind': kind,
     });
     res.end(cached.buf);
     return;
   }
   let lastErr = null;
-  for (const mk of ORBIT_UPSTREAMS) {
+  for (const mk of upstreams) {
     try {
       const { buf, ct } = await fetchUpstreamTile(mk(z, y, x));
       if (!buf || buf.length < 64) throw new Error('short');
@@ -490,6 +505,7 @@ async function handleOrbitTile(z, y, x, res) {
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'public, max-age=86400',
         'X-AirLoom-Tile': 'miss',
+        'X-AirLoom-Kind': kind,
       });
       res.end(buf);
       return;
@@ -497,9 +513,13 @@ async function handleOrbitTile(z, y, x, res) {
       lastErr = e;
     }
   }
-  log('orbit tile fail ' + key + ' ' + (lastErr && lastErr.message), 'WARN');
+  log(kind + ' tile fail ' + z + '/' + y + '/' + x + ' ' + (lastErr && lastErr.message), 'WARN');
   res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('tile upstream failed');
+}
+
+async function handleOrbitTile(z, y, x, res) {
+  return handleProxiedTile('orbit', z, y, x, res);
 }
 
 
@@ -553,17 +573,18 @@ const server = http.createServer(async (req, res) => {
     }
 
 
-    // Same-origin Orbit tiles (z/y/x ArcGIS order) — avoids Safari CORS flake
+    // Same-origin Orbit + relief tiles (z/y/x ArcGIS order) — Safari CORS-safe
     {
-      const m = pathname.match(/^\/tiles\/orbit\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
+      const m = pathname.match(/^\/tiles\/(orbit|relief)\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
       if (m) {
-        const z = Number(m[1]), y = Number(m[2]), x = Number(m[3]);
+        const kind = m[1];
+        const z = Number(m[2]), y = Number(m[3]), x = Number(m[4]);
         if (!Number.isFinite(z) || !Number.isFinite(y) || !Number.isFinite(x)
             || z < 0 || z > 18 || x < 0 || y < 0 || x >= (1 << z) || y >= (1 << z)) {
           res.writeHead(400).end('bad tile');
           return;
         }
-        await handleOrbitTile(z, y, x, res);
+        await handleProxiedTile(kind, z, y, x, res);
         return;
       }
     }

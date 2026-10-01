@@ -648,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v18'; // FBO rail + closest focus + dark map + bullseye + big planes + rainbow trails + clear ETA
+const BUILD_MARK = 'airloom-v19'; // SFO 100mi ultra-HD resident + hillshade topo + local contrast
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -2186,6 +2186,31 @@ const ORBIT_TILE_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_ORBIT_TILE = ORBIT_TILE_TMPL;
 window.__AIRLOOM_ORBIT_TILE_DIRECT = ORBIT_TILE_DIRECT_TMPL;
+/** Terrain hillshade — Orbit uses same-origin dark hillshade proxy (Safari);
+ *  Follow composites keyless World_Hillshade over imagery for relief. */
+const RELIEF_TILE_TMPL = '/tiles/relief/{z}/{y}/{x}';
+const RELIEF_TILE_URL = (zz, ty, tx) => `/tiles/relief/${zz}/${ty}/${tx}`;
+const RELIEF_TILE_DIRECT_URL = (zz, ty, tx) =>
+  `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/${zz}/${ty}/${tx}`;
+const RELIEF_FOLLOW_URL = (zz, ty, tx) =>
+  `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${zz}/${ty}/${tx}`;
+window.__AIRLOOM_RELIEF_TILE = RELIEF_TILE_TMPL;
+
+/** ~100 statute miles ≈ 87 nm — always-resident ultra-HD ring around KSFO. */
+const SFO_HD_RADIUS_NM = 87;
+/** Safari iOS canvas often caps near 4096px; span 7 → 15*256 = 3840. */
+const MAX_MOSAIC_SPAN = 7;
+
+function approxTileNm(z, lat) {
+  const lonDeg = 360 / Math.pow(2, z);
+  const cosLat = Math.max(0.2, Math.cos((lat || ORIGIN.lat) * Math.PI / 180));
+  return lonDeg * 60 * cosLat;
+}
+function spanForRadiusNm(z, radiusNm, maxSpan) {
+  const cap = Number.isFinite(maxSpan) ? maxSpan : MAX_MOSAIC_SPAN;
+  const t = Math.max(0.05, approxTileNm(z));
+  return Math.max(1, Math.min(cap, Math.ceil(radiusNm / t - 0.5)));
+}
 
 async function runPool(items, limit, worker) {
   const n = items.length;
@@ -2204,9 +2229,22 @@ async function runPool(items, limit, worker) {
   await Promise.all(runners);
 }
 
+function loadTileImage(url, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!url) { resolve(null); return; }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const t = setTimeout(() => { try { img.src = ''; } catch (_) {} resolve(null); }, timeoutMs || 12000);
+    img.onload = () => { clearTimeout(t); resolve(img); };
+    img.onerror = () => { clearTimeout(t); resolve(null); };
+    img.src = url;
+  });
+}
+
 async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   opts = opts || {};
   const tileUrlFn = opts.tileUrl || FOLLOW_TILE_URL;
+  const reliefUrlFn = opts.reliefUrl || null;
   const cLat = Number.isFinite(opts.lat) ? opts.lat : ORIGIN.lat;
   const cLon = Number.isFinite(opts.lon) ? opts.lon : ORIGIN.lon;
   const center = latLonToTile(cLat, cLon, z);
@@ -2214,11 +2252,12 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   const size = 256 * n;
   const cvs = document.createElement('canvas');
   cvs.width = size; cvs.height = size;
-  const ctx = cvs.getContext('2d');
+  const ctx = cvs.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = fillCss;
   ctx.fillRect(0, 0, size, size);
 
   let loaded = 0;
+  let reliefLoaded = 0;
   const total = n * n;
   const jobs = [];
   for (let dy = -span; dy <= span; dy++) {
@@ -2226,22 +2265,36 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       const tx = center.x + dx;
       const ty = center.y + dy;
       const url = tileUrlFn(z, ty, tx);
+      const reliefUrl = reliefUrlFn ? reliefUrlFn(z, ty, tx) : null;
       const px = (dx + span) * 256;
       const py = (dy + span) * 256;
-      jobs.push({ url, px, py });
+      jobs.push({ url, reliefUrl, px, py });
     }
   }
   // Safari iOS drops many parallel cross-origin Image loads; cap concurrency.
   const poolLimit = opts.poolLimit || (opts.sameOrigin ? 16 : 8);
-  await runPool(jobs, poolLimit, ({ url, px, py }) => new Promise((resolve) => {
-    const img = new Image();
-    // Same-origin proxy tiles don't need CORS; still set anonymous for canvas safety.
-    img.crossOrigin = 'anonymous';
-    const t = setTimeout(() => resolve(), opts.tileTimeoutMs || 12000);
-    img.onload = () => { clearTimeout(t); try { ctx.drawImage(img, px, py); loaded++; } catch (_) {} resolve(); };
-    img.onerror = () => { clearTimeout(t); resolve(); };
-    img.src = url;
-  }));
+  const timeoutMs = opts.tileTimeoutMs || 12000;
+  const reliefAlpha = Number.isFinite(opts.reliefAlpha) ? opts.reliefAlpha : 0.62;
+  const reliefMode = opts.reliefMode || 'overlay';
+  await runPool(jobs, poolLimit, async ({ url, reliefUrl, px, py }) => {
+    const [img, rel] = await Promise.all([
+      loadTileImage(url, timeoutMs),
+      reliefUrlFn ? loadTileImage(reliefUrl, timeoutMs) : Promise.resolve(null),
+    ]);
+    if (img) {
+      try { ctx.drawImage(img, px, py); loaded++; } catch (_) {}
+    }
+    if (rel) {
+      try {
+        ctx.save();
+        ctx.globalCompositeOperation = reliefMode;
+        ctx.globalAlpha = reliefAlpha;
+        ctx.drawImage(rel, px, py);
+        ctx.restore();
+        reliefLoaded++;
+      } catch (_) {}
+    }
+  });
   if (loaded < total * 0.12) return null;
 
   if (brighten) {
@@ -2249,10 +2302,25 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       const imgData = ctx.getImageData(0, 0, size, size);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
-        // Mild contrast — avoid chalk/whitewashed sat
-        d[i] = Math.min(255, d[i] * 0.96 + 2);
-        d[i + 1] = Math.min(255, d[i + 1] * 0.98 + 3);
-        d[i + 2] = Math.min(255, d[i + 2] * 0.94 + 1);
+        // Local contrast + sat boost — crisp Follow sat without chalk wash
+        let r = d[i], g = d[i + 1], b = d[i + 2];
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const t = lum / 255;
+        // Gentle S-curve: deepen shadows, punch mids, hold highlights
+        const curve = t < 0.5 ? 2.15 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2.15;
+        const target = curve * 255;
+        const delta = (target - lum) * 0.72;
+        r = Math.min(255, Math.max(0, r + delta));
+        g = Math.min(255, Math.max(0, g + delta));
+        b = Math.min(255, Math.max(0, b + delta));
+        const avg = (r + g + b) / 3;
+        const sat = 1.22;
+        r = Math.min(255, Math.max(0, avg + (r - avg) * sat));
+        g = Math.min(255, Math.max(0, avg + (g - avg) * sat));
+        b = Math.min(255, Math.max(0, avg + (b - avg) * sat * 0.96));
+        d[i] = r * 0.98 + 1;
+        d[i + 1] = g * 0.99 + 1;
+        d[i + 2] = b * 0.97;
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) { /* tainted */ }
@@ -2264,15 +2332,15 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       for (let i = 0; i < d.length; i += 4) {
         // High-contrast dark basemap (keep roads/labels as light filaments)
         const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-        const v = Math.min(255, Math.pow(lum / 255, 0.72) * 255 * 0.55 + 8);
-        d[i] = v * 0.55 + 6;
-        d[i + 1] = v * 0.62 + 10;
-        d[i + 2] = v * 0.78 + 18;
+        const v = Math.min(255, Math.pow(lum / 255, 0.68) * 255 * 0.62 + 10);
+        d[i] = v * 0.58 + 8;
+        d[i + 1] = v * 0.66 + 12;
+        d[i + 2] = v * 0.82 + 20;
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) {}
   }
-  // Rich dark Orbit: deepen mids, keep road/label filaments — no pale whitewash
+  // Rich dark Orbit: local contrast + sat so detail reads; stay ink-dark (not pale)
   if (opts.orbitLift) {
     try {
       const imgData = ctx.getImageData(0, 0, size, size);
@@ -2280,17 +2348,23 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       for (let i = 0; i < d.length; i += 4) {
         let r = d[i], g = d[i + 1], b = d[i + 2];
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        // Crush blacks / mids; preserve brighter filaments (roads, labels)
         const t = lum / 255;
-        const crush = Math.pow(Math.max(0, t), 1.22);
-        const gain = lum > 150 ? 0.88 : (lum > 90 ? 0.70 : 0.55);
-        r = Math.min(255, r * gain * 0.78 + crush * 28);
-        g = Math.min(255, g * gain * 0.82 + crush * 36);
-        b = Math.min(255, b * gain * 0.95 + crush * 52);
-        // Cool navy tint, not chalk haze
-        d[i] = r * 0.92;
-        d[i + 1] = g * 0.94;
-        d[i + 2] = Math.min(255, b * 1.02 + 4);
+        // S-curve contrast in dark space — hills/roads pop without whitewash
+        const curve = t < 0.5 ? 2.35 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2.05;
+        const shaped = Math.pow(Math.max(0, curve), 0.92);
+        const gain = lum > 160 ? 0.95 : (lum > 100 ? 0.82 : (lum > 55 ? 0.70 : 0.58));
+        r = Math.min(255, r * gain * 0.86 + shaped * 42);
+        g = Math.min(255, g * gain * 0.90 + shaped * 50);
+        b = Math.min(255, b * gain * 1.02 + shaped * 64);
+        const avg = (r + g + b) / 3;
+        const sat = 1.18;
+        r = Math.min(255, Math.max(0, avg + (r - avg) * sat));
+        g = Math.min(255, Math.max(0, avg + (g - avg) * sat));
+        b = Math.min(255, Math.max(0, avg + (b - avg) * sat * 1.05));
+        // Cool navy floor — richer than v18 crush, still dark
+        d[i] = r * 0.94 + 2;
+        d[i + 1] = g * 0.96 + 3;
+        d[i + 2] = Math.min(255, b * 1.04 + 6);
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) {}
@@ -2307,8 +2381,10 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
   // Base mosaics keep mipmaps; overlays use linear to avoid mip shimmer/seams on stacks
+  // High-z resident overlays: no mipmaps + max anisotropy → sharper when framing arrivals
   const overlay = !!opts.overlay;
-  if (overlay) {
+  const hiZ = (z || 0) >= 12;
+  if (overlay || hiZ) {
     tex.generateMipmaps = false;
     tex.minFilter = THREE.LinearFilter;
   } else {
@@ -2326,8 +2402,8 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
     polygonOffset: overlay,
     polygonOffsetFactor: overlay ? -1 : 0,
     polygonOffsetUnits: overlay ? -1 : 0,
-    // Runtime tint: Orbit darker/richer; Follow slightly muted
-    color: opts.orbitLift ? 0x9aa8b8 : (brighten ? 0xd8e0d4 : 0xffffff),
+    // Runtime tint: Orbit cool readable; Follow slightly warm crisp
+    color: opts.orbitLift ? 0xb4c2d0 : (brighten ? 0xe4ecdf : 0xffffff),
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
@@ -2337,7 +2413,8 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   mesh.userData.tileSpan = span;
   mesh.userData.tileCenter = { x: center.x, y: center.y, z };
   mesh.userData.overlay = overlay;
-  return { mesh, width, height, loaded, total, z, span };
+  mesh.userData.reliefLoaded = reliefLoaded;
+  return { mesh, width, height, loaded, total, z, span, reliefLoaded };
 }
 
 const satGroundGroup = new THREE.Group();
@@ -2365,13 +2442,17 @@ scene.add(trailHudGroup);
 window.__AIRLOOM_TILE_LEVELS = {
   followStatic: [8, 10, 11, 12, 13, 14, 15, 16],
   followChase: [13, 14, 15, 16],
-  orbitDark: [8, 10, 12, 14],
+  orbitDark: [8, 10, 11, 12, 13, 14, 15],
+  sfoHdRadiusNm: SFO_HD_RADIUS_NM,
+  maxMosaicSpan: MAX_MOSAIC_SPAN,
   source: FOLLOW_TILE_TMPL,
   fallback: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   maxUsgsZ: 16,
-  densify: 'airloom-v9-exclusive-stable',
+  densify: 'airloom-v19-sfo-hd-resident',
   orbitSource: ORBIT_TILE_TMPL,
   orbitSourceDirect: ORBIT_TILE_DIRECT_TMPL,
+  reliefOrbit: RELIEF_TILE_TMPL,
+  reliefFollow: 'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
 };
 
 function disposeMeshTree(root) {
@@ -2388,9 +2469,37 @@ function disposeMeshTree(root) {
 
 async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extraOpts) {
   const base = { lat, lon, ...(extraOpts || {}) };
+  // Default Follow relief: light World_Hillshade over imagery (terrain reads, sat still dominates)
+  if (base.reliefUrl == null && base.relief !== false) {
+    base.reliefUrl = RELIEF_FOLLOW_URL;
+    if (base.reliefAlpha == null) base.reliefAlpha = 0.38;
+    if (!base.reliefMode) base.reliefMode = 'overlay';
+  }
   let layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_URL });
   if (!layer) layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_FALLBACK_URL });
   return layer;
+}
+
+/**
+ * Extra mosaic centers so span-capped layers still cover ~radiusNm (SFO HD ring).
+ * Caps patch count for startup cost; center always included.
+ */
+function residentPatchCenters(z, span, radiusNm, maxPatches) {
+  const coverNm = (span + 0.5) * approxTileNm(z);
+  const centers = [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
+  if (coverNm >= radiusNm * 0.92) return centers;
+  const cap = Math.max(1, maxPatches || 7);
+  // One ring of patches at ~0.62 * remaining gap so union reaches radius
+  const ringNm = Math.min(radiusNm * 0.72, coverNm * 1.55);
+  const n = Math.min(cap - 1, Math.max(4, Math.ceil((2 * Math.PI * ringNm) / (coverNm * 1.5))));
+  for (let i = 0; i < n; i++) {
+    const brg = (i / n) * 2 * Math.PI;
+    const dLat = (ringNm / 60) * Math.cos(brg);
+    const cosLat = Math.max(0.2, Math.cos(ORIGIN.lat * Math.PI / 180));
+    const dLon = (ringNm / (60 * cosLat)) * Math.sin(brg);
+    centers.push({ lat: ORIGIN.lat + dLat, lon: ORIGIN.lon + dLon });
+  }
+  return centers;
 }
 
 let chaseInsetGen = 0;
@@ -2421,6 +2530,8 @@ window.__AIRLOOM_DIAG = function () {
     satChildren: satGroundGroup?.children?.length,
     chaseVisible: chaseHiZGroup?.visible,
     orbitTile: ORBIT_TILE_TMPL,
+    reliefTile: RELIEF_TILE_TMPL,
+    sfoHdNm: SFO_HD_RADIUS_NM,
     darkMeshes,
     clear: renderer?.getClearColor?.(new THREE.Color())?.getHexString?.(),
   };
@@ -2513,7 +2624,8 @@ async function refreshChaseInset(lat, lon, trackDeg) {
   }
 }
 
-/** Photoreal USGS ImageryOnly (NAIP-class) — Follow chase. Keyless / CORS-*. */
+/** Photoreal USGS ImageryOnly (NAIP-class) — Follow chase. Keyless / CORS-*.
+ *  airloom-v19: always-resident ultra-HD within ~100 mi of KSFO + hillshade relief. */
 async function loadSatBasemap() {
   chaseInsetGen++;
   chaseInsetTileKey = '';
@@ -2522,26 +2634,43 @@ async function loadSatBasemap() {
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
   satGroundGroup.add(chaseHiZGroup);
-  // airloom-v6/v9: wider radius + zoom ladder; overlays depth-stable
+  // Resident ladder: full ~100 mi through z10–z11; denser z12–z16 near field
   const layers = [
-    { z: 8,  span: 5, y: 0,    fill: '#2f4a55', overlay: false },
-    { z: 10, span: 5, y: 0.35, fill: '#334f50', overlay: true },
-    { z: 11, span: 5, y: 0.55, fill: '#355548', overlay: true },
-    { z: 12, span: 4, y: 0.75, fill: '#3a5848', overlay: true },
-    { z: 13, span: 4, y: 0.95, fill: '#3d5c48', overlay: true },
-    { z: 14, span: 3, y: 1.15, fill: '#416648', overlay: true },
-    { z: 15, span: 3, y: 1.35, fill: '#456a4c', overlay: true },
-    { z: 16, span: 2, y: 1.55, fill: '#4a6e50', overlay: true },
+    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#2f4a55', overlay: false },
+    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.30, fill: '#334f50', overlay: true },
+    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.50, fill: '#355548', overlay: true },
+    // z12 span-capped (~31 nm) + patch ring → union covers ~100 mi
+    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.70, fill: '#3a5848', overlay: true, patches: true, maxPatches: 5 },
+    { z: 13, span: 6, y: 0.90, fill: '#3d5c48', overlay: true },
+    { z: 14, span: 5, y: 1.10, fill: '#416648', overlay: true },
+    { z: 15, span: 4, y: 1.30, fill: '#456a4c', overlay: true },
+    { z: 16, span: 3, y: 1.50, fill: '#4a6e50', overlay: true },
   ];
   for (const L of layers) {
-    const layer = await fetchLayerWithFallback(
-      L.z, L.span, L.fill, true, ORIGIN.lat, ORIGIN.lon, { overlay: !!L.overlay }
-    );
-    if (layer) {
-      layer.mesh.position.y = L.y;
-      satGroundGroup.add(layer.mesh);
+    const centers = L.patches
+      ? residentPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 5)
+      : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
+    let yi = 0;
+    for (const c of centers) {
+      const layer = await fetchLayerWithFallback(
+        L.z, L.span, L.fill, true, c.lat, c.lon, {
+          overlay: !!L.overlay,
+          reliefAlpha: L.z >= 12 ? 0.42 : 0.34,
+        }
+      );
+      if (layer) {
+        layer.mesh.position.y = L.y + yi * 0.02;
+        if (centers.length > 1) layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
+        satGroundGroup.add(layer.mesh);
+      }
+      yi++;
     }
   }
+  window.__AIRLOOM_SFO_HD = {
+    radiusNm: SFO_HD_RADIUS_NM,
+    follow: layers.map((L) => ({ z: L.z, span: L.span, patches: !!L.patches })),
+    at: Date.now(),
+  };
   // Seed chase inset at KSFO only when Follow is the active mode
   if (settings.cameraMode === 'follow') {
     refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
@@ -2551,25 +2680,44 @@ async function loadSatBasemap() {
 
 /** Dark high-contrast stylized basemap — Air Loom Orbit overview.
  *  airloom-v8: ESRI World Dark Gray Base (keyless). USGS ImageryOnly stays Follow-only.
- *  airloom-v9: dispose + exclusive visibility + depth-stable overlays. */
+ *  airloom-v9: dispose + exclusive visibility + depth-stable overlays.
+ *  airloom-v19: ~100 mi ultra-HD resident + World_Hillshade_Dark topography. */
 async function loadDarkBasemap() {
   disposeMeshTree(darkGroundGroup);
   makeEarthBase(darkGroundGroup, true);
-  const addDark = async (z, span, y, fill, overlay) => {
-    // 1) same-origin proxy (Safari-safe)
+  const addDark = async (z, span, y, fill, overlay, lat, lon, reliefAlpha) => {
+    const commonRelief = {
+      reliefUrl: RELIEF_TILE_URL,
+      reliefAlpha: Number.isFinite(reliefAlpha) ? reliefAlpha : (z >= 12 ? 0.72 : 0.58),
+      reliefMode: 'overlay',
+    };
+    const pos = {
+      lat: Number.isFinite(lat) ? lat : ORIGIN.lat,
+      lon: Number.isFinite(lon) ? lon : ORIGIN.lon,
+    };
+    // 1) same-origin proxy (Safari-safe) + same-origin dark hillshade
     let layer = await fetchTileLayer(z, span, fill, false, {
       tileUrl: ORBIT_TILE_URL, overlay, sameOrigin: true, orbitLift: true, poolLimit: 16,
+      ...pos, ...commonRelief,
     });
-    // 2) direct ESRI (Chrome / desktop)
+    // 2) direct ESRI (Chrome / desktop) + direct dark hillshade
     if (!layer) {
       layer = await fetchTileLayer(z, span, fill, false, {
         tileUrl: ORBIT_TILE_DIRECT_URL, overlay, orbitLift: true, poolLimit: 8,
+        reliefUrl: RELIEF_TILE_DIRECT_URL,
+        reliefAlpha: commonRelief.reliefAlpha,
+        reliefMode: 'overlay',
+        ...pos,
       });
     }
-    // 3) stylized World Imagery so Orbit is never an empty ink disc
+    // 3) stylized World Imagery + hillshade so Orbit is never an empty ink disc
     if (!layer) {
       layer = await fetchTileLayer(z, span, fill, false, {
         tileUrl: FOLLOW_TILE_FALLBACK_URL, overlay, darkStylize: true, poolLimit: 8,
+        reliefUrl: RELIEF_FOLLOW_URL,
+        reliefAlpha: 0.55,
+        reliefMode: 'overlay',
+        ...pos,
       });
     }
     if (!layer) return null;
@@ -2577,18 +2725,48 @@ async function loadDarkBasemap() {
     darkGroundGroup.add(layer.mesh);
     return layer;
   };
-  const wide = await addDark(8, 5, 0, '#05070c', false);
-  if (!wide) {
-    console.warn('dark basemap: wide mosaic failed');
+
+  const layers = [
+    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#05070c', overlay: false },
+    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#060910', overlay: true },
+    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.48, fill: '#070b12', overlay: true },
+    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.68, fill: '#080c14', overlay: true, patches: true, maxPatches: 5 },
+    { z: 13, span: 6, y: 0.88, fill: '#090e16', overlay: true },
+    { z: 14, span: 5, y: 1.08, fill: '#0a1018', overlay: true },
+    { z: 15, span: 4, y: 1.28, fill: '#0c141c', overlay: true },
+  ];
+
+  let any = false;
+  for (const L of layers) {
+    const centers = L.patches
+      ? residentPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 5)
+      : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
+    let yi = 0;
+    for (const c of centers) {
+      const layer = await addDark(
+        L.z, L.span, L.y + yi * 0.02, L.fill, L.overlay, c.lat, c.lon,
+        L.z >= 12 ? 0.74 : 0.58
+      );
+      if (layer) {
+        any = true;
+        if (centers.length > 1) layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
+      }
+      yi++;
+    }
   }
-  await addDark(10, 4, 0.4, '#060910', true);
-  await addDark(12, 4, 0.7, '#080c14', true);
-  await addDark(14, 3, 1.0, '#0a1018', true);
+  if (!any) console.warn('dark basemap: wide mosaic failed');
+
+  window.__AIRLOOM_SFO_HD_ORBIT = {
+    radiusNm: SFO_HD_RADIUS_NM,
+    layers: layers.map((L) => ({ z: L.z, span: L.span, patches: !!L.patches })),
+    relief: RELIEF_TILE_TMPL,
+    at: Date.now(),
+  };
 
   // Subtle grid ribs over dark map
   const grid = new THREE.GridHelper(GROUND_M * 0.9, 48, 0xffffff, 0xffffff);
   grid.material.transparent = true;
-  grid.material.opacity = 0.035;
+  grid.material.opacity = 0.028;
   grid.material.depthWrite = false;
   grid.position.y = 2.2;
   grid.renderOrder = 30;
@@ -3512,21 +3690,21 @@ function applySceneTheme(mode) {
     }
   }
   if (follow) {
-    // Richer sat — less chalk haze in chase
-    renderer.setClearColor(0x4a6578);
-    scene.fog = new THREE.FogExp2(0x6a8494, 0.00000028);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.02;
-    sun.intensity = 1.22;
-    hemi.intensity = 0.58;
-    fill.intensity = 0.32;
+    // Richer sat — contrasty terrain, no chalk haze
+    renderer.setClearColor(0x3f5a6c);
+    scene.fog = new THREE.FogExp2(0x5e7888, 0.00000024);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 1.06;
+    sun.intensity = 1.28;
+    hemi.intensity = 0.52;
+    fill.intensity = 0.30;
   } else {
-    // Premium dark Orbit — deep ink, cool rim, no whitewash
+    // Premium dark Orbit — ink base with readable relief (v19 local contrast)
     renderer.setClearColor(0x05070e);
-    scene.fog = new THREE.FogExp2(0x070a12, 0.00000085);
-    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 0.88;
-    sun.intensity = 0.42;
-    hemi.intensity = 0.28;
-    fill.intensity = 0.20;
+    scene.fog = new THREE.FogExp2(0x070a12, 0.00000072);
+    if ('toneMappingExposure' in renderer) renderer.toneMappingExposure = 0.96;
+    sun.intensity = 0.48;
+    hemi.intensity = 0.30;
+    fill.intensity = 0.22;
   }
 }
 
