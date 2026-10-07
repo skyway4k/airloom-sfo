@@ -5,7 +5,14 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v23)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v24)
+
+## airloom-v24
+
+- **Soon bar (≤30 min)**: Compact bottom strip above Air Loom / Follow pills. Rows: **Tail · ICAO type · ETA · time on base** only. Reuses KSFO inbound scoring; window ≤30 min (not 60). Soonest first; BLOCKED/PIA ok as tail.
+- **Time on base**: approach / along-final ETA clock; on final near threshold → `on base` / `now`.
+- **Visual ETA (mobile)**: large `~N min` countdown + **thick green progress bar** per row (fuller = sooner); Follow landing chip bar fattened too.
+- **CT47 / iOS Safari / Android Chrome**: monospace-ish rows, ≥44px tap targets, `viewport-fit=cover` + safe-area (`constant()`/`env()`), no h-scroll, portrait ~480–800px.
 
 ## airloom-v23
 

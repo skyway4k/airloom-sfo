@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="mobile-web-app-capable" content="yes" />
+<meta name="format-detection" content="telephone=no" />
 <meta name="theme-color" content="#0a0e14" />
 <meta name="application-name" content="AirLoom SFO" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230a0e14'/%3E%3Cpath fill='%234ecdc4' d='M54 30.5L38 28l-8-14h-4l5 14H16l-6-5H8l3 8-3 8h2l6-5h15l-5 14h4l8-14 16-2.5z'/%3E%3C/svg%3E" />
@@ -29,7 +31,11 @@
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font);
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+    -webkit-touch-callout: none;
+  }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
     position: absolute; top: max(12px, env(safe-area-inset-top)); left: 56px; right: 16px; z-index: 14; pointer-events: none;
@@ -453,10 +459,7 @@
   #stats.compact-hud { opacity: 0.92; }
 
   @media (max-width: 720px) {
-    #camBar {
-      top: auto; bottom: max(72px, calc(env(safe-area-inset-bottom) + 64px));
-      left: 50%;
-    }
+    /* camBar position owned by #camStack (bottom) for CT47 */
     #camBar button { padding: 9px 14px; font-size: 12px; }
     #infoPanel {
       top: calc(max(10px, env(safe-area-inset-top)) + 64px);
@@ -465,6 +468,208 @@
     #infoPanel .ig-cs { font-size: 10px; }
     #infoPanel .ig-metrics .v { font-size: 9px; }
     #hud #stats { display: none; }
+  }
+
+
+  /* ── Soon bar: next 30 min KSFO arrivals (CT47 + iOS/Android) ── */
+  #camStack {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: max(10px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom));
+    z-index: 13; pointer-events: none;
+    display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+    width: min(100vw - 16px, 720px);
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
+  }
+  #camStack > * { pointer-events: auto; }
+  #soonBar {
+    display: none; flex-direction: column; gap: 0;
+    background: rgba(8, 11, 18, 0.94);
+    border: 1px solid var(--border-strong); border-radius: 12px;
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+    overflow: hidden;
+    font-family: var(--mono);
+    max-height: min(42vh, 280px);
+  }
+  #soonBar.visible { display: flex; }
+  #soonBar .sb-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 5px 10px 4px;
+    border-bottom: 1px solid rgba(180,195,220,0.12);
+    flex: 0 0 auto;
+  }
+  #soonBar .sb-title {
+    font-family: var(--font); font-size: 9px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+  }
+  #soonBar .sb-count {
+    font-size: 10px; color: var(--glow); letter-spacing: 0.04em; font-weight: 500;
+  }
+  #soonBar .sb-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.65fr) minmax(0, 0.95fr) minmax(0, 0.85fr);
+    gap: 0 6px; padding: 2px 10px 3px;
+    font-family: var(--font); font-size: 8px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: #6e7f94; flex: 0 0 auto;
+  }
+  #soonBar .sb-cols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #soonBar .sb-cols .c-eta, #soonBar .sb-cols .c-base { text-align: right; }
+  #soonBar .sb-list {
+    display: flex; flex-direction: column;
+    overflow-x: hidden; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    max-height: min(32vh, 220px);
+  }
+  #soonBar .sb-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.65fr) minmax(0, 0.95fr) minmax(0, 0.85fr);
+    grid-template-rows: auto auto;
+    gap: 0 6px; align-items: center;
+    min-height: 44px; padding: 7px 10px 6px;
+    border-top: 1px solid rgba(180,195,220,0.08);
+    cursor: pointer; touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    color: var(--text);
+  }
+  #soonBar .sb-row:first-child { border-top: none; }
+  #soonBar .sb-row:active, #soonBar .sb-row:hover {
+    background: rgba(62, 207, 142, 0.12);
+  }
+  #soonBar .sb-row.soonest {
+    background: rgba(240, 213, 160, 0.08);
+    min-height: 52px; padding-top: 8px; padding-bottom: 7px;
+  }
+  #soonBar .sb-row .tail {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; grid-column: 1; grid-row: 1;
+  }
+  #soonBar .sb-row.soonest .tail { color: #f5e6c8; font-size: 13px; }
+  #soonBar .sb-row .icao {
+    font-size: 11px; color: var(--cyan); letter-spacing: 0.04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; grid-column: 2; grid-row: 1;
+  }
+  #soonBar .sb-row .eta {
+    grid-column: 3; grid-row: 1; justify-self: end; text-align: right;
+    min-width: 0; display: flex; flex-direction: column; align-items: flex-end;
+    line-height: 1.05;
+  }
+  #soonBar .sb-row .eta .eta-n {
+    font-size: 16px; font-weight: 700; color: #7dcea0; letter-spacing: -0.02em;
+  }
+  #soonBar .sb-row .eta .eta-u {
+    font-family: var(--font); font-size: 8px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #8b9aaf; font-weight: 500;
+  }
+  #soonBar .sb-row.soonest .eta .eta-n {
+    font-size: 22px; color: #8febab;
+  }
+  #soonBar .sb-row.soonest .eta .eta-u { font-size: 9px; color: #a8c4b0; }
+  #soonBar .sb-row .eta.eta-now .eta-n { color: #f0d5a0; }
+  #soonBar .sb-row .base {
+    font-size: 11px; text-align: right; letter-spacing: 0.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; color: #c8d4e2;
+    grid-column: 4; grid-row: 1; justify-self: end;
+  }
+  #soonBar .sb-row .base.onbase { color: var(--accent); font-weight: 700; font-size: 12px; }
+  /* Thick green ETA progress — glanceable on mobile */
+  #soonBar .sb-row .sb-prog {
+    grid-column: 1 / -1; grid-row: 2;
+    height: 7px; margin-top: 5px; border-radius: 4px;
+    background: rgba(155, 174, 196, 0.16);
+    overflow: hidden;
+  }
+  #soonBar .sb-row .sb-prog > i {
+    display: block; height: 100%; width: 0%; border-radius: 4px;
+    background: linear-gradient(90deg, #3ecf8e, #7dcea0 55%, #a8e6c1);
+    box-shadow: 0 0 8px rgba(62, 207, 142, 0.45);
+    transition: width 0.4s ease-out;
+  }
+  #soonBar .sb-row.soonest .sb-prog { height: 9px; margin-top: 6px; }
+  #soonBar .sb-row.soonest .sb-prog > i {
+    background: linear-gradient(90deg, #2db87a, #7dcea0 40%, #c5f0d4);
+    box-shadow: 0 0 10px rgba(125, 206, 160, 0.55);
+  }
+  #soonBar .sb-empty {
+    padding: 10px 12px; font-size: 11px; color: var(--muted);
+    text-align: center; letter-spacing: 0.02em;
+  }
+  /* camBar in #camStack (bottom) — FOV clear; large touch targets */
+  #camStack #camBar {
+    position: static; left: auto; top: auto; bottom: auto;
+    transform: none; width: 100%;
+    justify-content: stretch;
+  }
+  #camStack #camBar button {
+    flex: 1 1 0; min-height: 44px; padding: 11px 12px; font-size: 11px;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  /* Follow landing chip: thicker green ETA bar on mobile */
+  #landingChip .lc-bar { height: 3px; }
+  body.has-soon-stack #landingChip {
+    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+  }
+  body.has-soon-stack #sel {
+    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+  }
+  body.has-soon-stack a.credits {
+    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+    left: 10px; font-size: 9px; max-width: 42vw;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  @media (max-width: 800px) {
+    #camStack {
+      width: calc(100vw - 12px); max-width: calc(100vw - 12px);
+      bottom: max(8px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom));
+      gap: 5px;
+    }
+    #soonBar { border-radius: 10px; max-height: min(40vh, 260px); }
+    #soonBar .sb-head { padding: 4px 8px 3px; }
+    #soonBar .sb-title { font-size: 8px; letter-spacing: 0.12em; }
+    #soonBar .sb-cols { padding: 1px 8px 2px; font-size: 7px; gap: 0 4px; }
+    #soonBar .sb-list { max-height: min(30vh, 200px); }
+    #soonBar .sb-row {
+      min-height: 46px; padding: 6px 8px 5px; gap: 0 4px;
+    }
+    #soonBar .sb-row.soonest { min-height: 56px; }
+    #soonBar .sb-row .tail { font-size: 12px; }
+    #soonBar .sb-row.soonest .tail { font-size: 13px; }
+    #soonBar .sb-row .icao { font-size: 11px; }
+    #soonBar .sb-row .eta .eta-n { font-size: 18px; }
+    #soonBar .sb-row.soonest .eta .eta-n { font-size: 26px; }
+    #soonBar .sb-row .eta .eta-u { font-size: 8px; }
+    #soonBar .sb-row .base { font-size: 11px; }
+    #soonBar .sb-row .sb-prog { height: 8px; margin-top: 5px; }
+    #soonBar .sb-row.soonest .sb-prog { height: 10px; }
+    #camStack #camBar button { min-height: 44px; padding: 10px 10px; font-size: 11px; }
+    /* Follow chip: fat green progress + large countdown */
+    #landingChip .lc-bar { height: 6px; border-radius: 3px; }
+    #landingChip .lc-dist { font-size: 18px; font-weight: 700; }
+    body.has-soon-stack #landingChip {
+      bottom: max(148px, calc(constant(safe-area-inset-bottom) + 136px), calc(env(safe-area-inset-bottom) + 136px));
+      padding: 6px 12px 7px; gap: 4px; border-radius: 12px;
+    }
+    body.has-soon-stack #landingChip .lc-dist { font-size: 18px; }
+    body.has-soon-stack #landingChip .lc-label { font-size: 8px; }
+    body.has-soon-stack #landingChip .lc-sub { font-size: 12px; }
+    body.has-soon-stack #toast {
+      bottom: max(148px, calc(env(safe-area-inset-bottom) + 136px));
+      right: 8px; max-width: min(70vw, 260px);
+    }
+  }
+  @media (max-width: 480px) {
+    #soonBar .sb-cols .c-base { letter-spacing: 0.06em; }
+    #soonBar .sb-row .tail { font-size: 11px; }
+    #soonBar .sb-row .icao { font-size: 10px; }
+    #soonBar .sb-row .eta .eta-n { font-size: 17px; }
+    #soonBar .sb-row.soonest .eta .eta-n { font-size: 24px; }
+    #soonBar .sb-row .base { font-size: 10px; }
+    #soonBar .sb-row .sb-prog { height: 8px; }
+    #soonBar .sb-row.soonest .sb-prog { height: 10px; }
   }
 
   #toast.visible { display: block; }
@@ -486,18 +691,42 @@
     #stats .meta { font-size: 8px; }
     #sel { bottom: max(18px, env(safe-area-inset-bottom)); }
     a.credits { bottom: max(10px, env(safe-area-inset-bottom)); }
+    /* CT47: keep sel/credits above bottom camStack */
+    body.has-soon-stack #sel {
+      bottom: max(156px, calc(env(safe-area-inset-bottom) + 144px));
+      max-width: min(92vw, 360px); min-width: 0;
+    }
+    body.has-soon-stack a.credits {
+      bottom: max(156px, calc(env(safe-area-inset-bottom) + 144px));
+      left: 8px; max-width: 40vw;
+    }
   }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
-<body>
+<body class="has-soon-stack">
 <canvas id="c"></canvas>
 <div id="acLabels" aria-hidden="true"></div>
 
-<div id="camBar" role="group" aria-label="Camera mode">
-  <button type="button" id="btnOrbit" class="ghost" title="Air Loom · KSFO arrivals next ~60–90 min">Air Loom</button>
-  <button type="button" id="btnFollow" class="active">Follow</button>
+<div id="camStack" aria-label="Camera and arrivals">
+  <div id="soonBar" aria-live="polite" aria-label="Arrivals next 30 minutes">
+    <div class="sb-head">
+      <div class="sb-title">Next 30 min · KSFO</div>
+      <div class="sb-count" id="sbCount">—</div>
+    </div>
+    <div class="sb-cols" aria-hidden="true">
+      <span class="c-tail">Tail</span>
+      <span class="c-icao">ICAO</span>
+      <span class="c-eta">ETA</span>
+      <span class="c-base">On base</span>
+    </div>
+    <div class="sb-list" id="sbList"></div>
+  </div>
+  <div id="camBar" role="group" aria-label="Camera mode">
+    <button type="button" id="btnOrbit" class="ghost" title="Air Loom · KSFO arrivals next ~60–90 min">Air Loom</button>
+    <button type="button" id="btnFollow" class="active">Follow</button>
+  </div>
 </div>
 
 <div id="infoPanel" class="hidden user-closed">
@@ -648,7 +877,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v23'; // FAA/ADS-B type truth + Safari sat tiles + bizjet silhouettes
+const BUILD_MARK = 'airloom-v24'; // 30-min soon bar + visual ETA bars (CT47/iOS/Android)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -699,6 +928,10 @@ window.__AIRLOOM_FEATURES = {
   piaVisibleAdsB: true,
   privacyOverrideHook: true,
   strongerFollowTopo: true,
+  soonBar30m: true,
+  soonBarCt47: true,
+  soonBarEtaProgress: true,
+  mobileEtaVisual: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -4168,7 +4401,11 @@ let dualFinalBand = []; // on-final within ~5–7 mi band (dual Orbit framing)
 let dualFinalActive = false;
 const ORBIT_ARRIVAL_WINDOW_MIN = 90; // ~60–90 min pack; enroute cruise may extend to ~110
 const ORBIT_ARRIVAL_HUD_MAX = 12;
+const SOON_WINDOW_MIN = 30; // bottom strip: arrivals ≤30 min (not 60)
+const SOON_BAR_MAX = 8; // CT47: keep list short; vertical scroll only
 let orbitArrivalsCache = []; // scored KSFO arrivals for Orbit HUD / framing
+let soonArrivalsCache = []; // ≤30 min subset for bottom soon bar
+let _soonBarSig = '';
 let orbitUserFramed = false; // user dragged OrbitControls — pause auto reframe briefly
 let orbitHoverPreview = null; // icao under arrivals-row hover (top-down peek)
 let orbitHoverSaved = null;   // { pos, target, userFramed } to restore on leave
@@ -4815,6 +5052,166 @@ function collectOrbitArrivals(fromList) {
   return scored;
 }
 
+/**
+ * Bottom soon bar: KSFO inbounds arriving in the next ≤30 minutes.
+ * Reuses scoreOrbitArrival / collectOrbitArrivals; strict ETA window (not 60).
+ * Sorted soonest-first. Privacy BLOCKED/PIA ok (displayIdent as tail).
+ */
+function collectSoonArrivals(fromList) {
+  const src = fromList
+    ? collectOrbitArrivals(fromList)
+    : (orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals());
+  // slice so soonest-first sort does not reorder Orbit HUD cache
+  const scored = src
+    .filter((s) => s && s.etaMin != null && Number.isFinite(s.etaMin) && s.etaMin <= SOON_WINDOW_MIN)
+    .slice();
+  scored.sort((a, b) => {
+    if (Math.abs(a.etaMin - b.etaMin) > 0.2) return a.etaMin - b.etaMin;
+    // tie: on-final / nearer along
+    if (a.onFinal !== b.onFinal) return a.onFinal ? -1 : 1;
+    const na = (a.nm != null) ? a.nm : 999, nb = (b.nm != null) ? b.nm : 999;
+    return na - nb;
+  });
+  soonArrivalsCache = scored;
+  return scored;
+}
+
+/** Clock time for ETA minutes from now (user-local, short). */
+function formatEtaClock(etaMin) {
+  if (etaMin == null || !Number.isFinite(etaMin)) return '—';
+  const d = new Date(Date.now() + Math.max(0, etaMin) * 60000);
+  try {
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch (_) {
+    let h = d.getHours(), m = d.getMinutes();
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+  }
+}
+
+/**
+ * Time on base = estimated over/at field/threshold.
+ * Uses approach ETA / along-final (same as scoreOrbitArrival etaMin).
+ * Already on final near threshold → "on base" / "now".
+ */
+function formatTimeOnBase(s) {
+  if (!s) return { text: '—', onBase: false };
+  const nm = (s.nm != null && Number.isFinite(s.nm)) ? s.nm : null;
+  const eta = (s.etaMin != null && Number.isFinite(s.etaMin)) ? s.etaMin : null;
+  // On final and essentially at/over field
+  if (s.onFinal && nm != null && nm < 0.55) return { text: 'on base', onBase: true };
+  if (s.conf === 'final' && nm != null && nm < 0.55) return { text: 'on base', onBase: true };
+  if (eta != null && eta < 0.75) return { text: 'now', onBase: true };
+  if (eta == null) return { text: '—', onBase: false };
+  return { text: formatEtaClock(eta), onBase: false };
+}
+
+/** Large glanceable countdown parts for soon bar ETA cell. */
+function formatSoonEtaParts(etaMin) {
+  if (etaMin == null || !Number.isFinite(etaMin)) return { n: '—', u: '', now: false };
+  if (etaMin < 0.75) return { n: 'now', u: '', now: true };
+  if (etaMin < 1) return { n: '<1', u: 'min', now: false };
+  return { n: '~' + Math.max(1, Math.round(etaMin)), u: 'min', now: false };
+}
+
+/** Progress 0–100 within 30-min window (full = imminent / on base). */
+function soonEtaProgressPct(etaMin, onBase) {
+  if (onBase) return 100;
+  if (etaMin == null || !Number.isFinite(etaMin)) return 0;
+  const w = SOON_WINDOW_MIN;
+  const pct = Math.round((1 - Math.min(w, Math.max(0, etaMin)) / w) * 100);
+  return Math.max(4, Math.min(100, pct)); // keep a sliver visible
+}
+
+function updateSoonBar() {
+  const bar = $('soonBar');
+  const listEl = $('sbList');
+  const countEl = $('sbCount');
+  if (!bar || !listEl) return;
+  document.body.classList.add('has-soon-stack');
+
+  const list = collectSoonArrivals().slice(0, SOON_BAR_MAX);
+  const sig = list.map((s) =>
+    s.icao + ':' + Math.round((s.etaMin || 0) * 4) + ':' + (s.type || '') + ':' + (s.onFinal ? 1 : 0)
+  ).join('|') + '#' + (selectedId || '') + '#' + (cockpitPrimaryId || '');
+  if (sig === _soonBarSig && listEl.childElementCount) {
+    // Update progress widths in place (smooth tick without DOM wipe)
+    listEl.querySelectorAll('.sb-row').forEach((row, i) => {
+      const s = list[i];
+      if (!s) return;
+      const base = formatTimeOnBase(s);
+      const fill = row.querySelector('.sb-prog > i');
+      if (fill) fill.style.width = soonEtaProgressPct(s.etaMin, base.onBase) + '%';
+      const etaN = row.querySelector('.eta .eta-n');
+      const etaU = row.querySelector('.eta .eta-u');
+      const parts = formatSoonEtaParts(s.etaMin);
+      if (etaN) etaN.textContent = parts.n;
+      if (etaU) etaU.textContent = parts.u;
+      const etaEl = row.querySelector('.eta');
+      if (etaEl) etaEl.classList.toggle('eta-now', parts.now);
+      const baseEl = row.querySelector('.base');
+      if (baseEl) {
+        baseEl.textContent = base.text;
+        baseEl.classList.toggle('onbase', base.onBase);
+      }
+    });
+    bar.classList.add('visible');
+    return;
+  }
+  _soonBarSig = sig;
+
+  bar.classList.add('visible');
+  if (countEl) countEl.textContent = list.length ? (list.length + ' ac') : 'none';
+
+  if (!list.length) {
+    listEl.innerHTML = '<div class="sb-empty">No KSFO arrivals ≤30 min</div>';
+    return;
+  }
+
+  listEl.innerHTML = list.map((s, i) => {
+    const tail = s.callsign || '————';
+    const icao = (s.type && String(s.type).trim()) ? String(s.type).trim().toUpperCase() : '————';
+    const parts = formatSoonEtaParts(s.etaMin);
+    const base = formatTimeOnBase(s);
+    const pct = soonEtaProgressPct(s.etaMin, base.onBase);
+    const cls = ['sb-row', i === 0 ? 'soonest' : ''].filter(Boolean).join(' ');
+    const etaCls = 'eta' + (parts.now ? ' eta-now' : '');
+    const baseCls = 'base' + (base.onBase ? ' onbase' : '');
+    return `<div class="${cls}" data-icao="${s.icao}" role="button" tabindex="0">` +
+      `<span class="tail">${tail}</span>` +
+      `<span class="icao">${icao}</span>` +
+      `<span class="${etaCls}"><span class="eta-n">${parts.n}</span><span class="eta-u">${parts.u}</span></span>` +
+      `<span class="${baseCls}">${base.text}</span>` +
+      `<div class="sb-prog" aria-hidden="true"><i style="width:${pct}%"></i></div>` +
+      `</div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.sb-row').forEach((row) => {
+    const pick = () => {
+      const id = row.getAttribute('data-icao');
+      if (!id || !aircraft.has(id)) return;
+      selectedId = id;
+      const rec = aircraft.get(id);
+      if (!rec) return;
+      updateSelPanel(rec);
+      if (settings.cameraMode === 'follow' && !rec.onGround) {
+        cockpitPrimaryId = id;
+        _ckSmoothInit = false;
+      } else if (settings.cameraMode === 'orbit') {
+        orbitUserPickId = id;
+        try { frameClosestOrbitInbound(true); } catch (_) {}
+      }
+      updateInfoPanel();
+      updateSoonBar();
+    };
+    row.addEventListener('click', pick);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
+    });
+  });
+}
+
 /** Closest / soonest KSFO inbound for Orbit focus (prefer distance-to-field). */
 function pickClosestOrbitArrival() {
   const scored = orbitArrivalsCache.length ? orbitArrivalsCache : collectOrbitArrivals();
@@ -5006,6 +5403,7 @@ $('sAuto').onchange = (e) => {
   if (settings.cameraMode === 'orbit') controls.autoRotate = e.target.checked;
 };
 setCameraMode(settings.cameraMode);
+try { updateSoonBar(); } catch (_) {}
 
 /** Score whether private/GA is a genuine KSFO inbound / approach / final (Follow chase). */
 function scoreInboundGa(p) {
@@ -5387,6 +5785,7 @@ function updateInfoPanel() {
   const panel = $('infoPanel');
   const igP = $('igPrimary');
   const btnSide = $('btnArrivalsSide');
+  try { updateSoonBar(); } catch (_) {}
   // Follow: no top-right panel — plane tag + bottom chip only (clear FOV)
   if (settings.cameraMode === 'follow') {
     panel.classList.add('hidden');
@@ -6101,15 +6500,26 @@ function refreshLabelSafeArea(vw, vh) {
   // Fallback if HUD temporarily collapsed / offscreen
   if (!Number.isFinite(top) || top < 40) top = 72;
   let bottom = vh - 20;
-  const camBar = document.getElementById('camBar');
-  if (camBar) {
-    const r = camBar.getBoundingClientRect();
-    if (r.height > 0 && r.top > vh * 0.35) bottom = Math.min(bottom, r.top - 6);
+  const camStack = document.getElementById('camStack');
+  if (camStack) {
+    const r = camStack.getBoundingClientRect();
+    if (r.height > 0 && r.top > vh * 0.25) bottom = Math.min(bottom, r.top - 6);
+  } else {
+    const camBar = document.getElementById('camBar');
+    if (camBar) {
+      const r = camBar.getBoundingClientRect();
+      if (r.height > 0 && r.top > vh * 0.35) bottom = Math.min(bottom, r.top - 6);
+    }
   }
   const chip = document.getElementById('landingChip');
   if (chip && chip.classList.contains('visible')) {
     const r = chip.getBoundingClientRect();
     if (r.height > 0 && r.top > vh * 0.35) bottom = Math.min(bottom, r.top - 6);
+  }
+  const soonBar = document.getElementById('soonBar');
+  if (soonBar && soonBar.classList.contains('visible')) {
+    const r = soonBar.getBoundingClientRect();
+    if (r.height > 0 && r.top > vh * 0.25) bottom = Math.min(bottom, r.top - 6);
   }
   _labelSafe.top = top;
   _labelSafe.bottom = Math.max(top + 36, bottom);
