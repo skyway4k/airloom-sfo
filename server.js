@@ -152,14 +152,18 @@ function extractAcList(data) {
   return [];
 }
 
+// adsb.fi rejects some large radii (HTTP 400 around 360nm); keep it ≤250 like Skyway.
+const ADSB_FI_MAX_DIST_NM = 250;
 const SOURCES = [
   {
     id: 'adsb.lol',
+    maxDist: 400,
     url: (lat, lon, dist) =>
       `https://api.adsb.lol/v2/lat/${encodeURIComponent(lat)}/lon/${encodeURIComponent(lon)}/dist/${dist}`,
   },
   {
     id: 'adsb.fi',
+    maxDist: ADSB_FI_MAX_DIST_NM,
     url: (lat, lon, dist) =>
       `https://opendata.adsb.fi/api/v2/lat/${encodeURIComponent(lat)}/lon/${encodeURIComponent(lon)}/dist/${dist}`,
   },
@@ -199,7 +203,8 @@ async function fetchOneSource(src, lat, lon, dist) {
   if (now < st.backoffUntil) {
     return { ok: false, error: 'backoff', payload: null };
   }
-  const url = src.url(lat, lon, dist);
+  const cappedDist = Math.max(1, Math.min(Number(src.maxDist) || dist, dist));
+  const url = src.url(lat, lon, cappedDist);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
