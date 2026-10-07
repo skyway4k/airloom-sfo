@@ -732,7 +732,7 @@
     "G700": "largecabin",
     "GL7T": "largecabin",
     "GLOBAL": "largecabin",
-    "E545": "lightjet",
+    "E545": "midjet",
     "EC130": "heli",
     "EC135": "heli",
     "EC145": "heli",
@@ -749,7 +749,8 @@
     "H500": "heli",
     "H600": "heli",
     "CRJ1": "crj",
-    "MD90": "b757"
+    "MD90": "b757",
+    "GA5C": "largecabin"
   },
   "prefixes": [
     [
@@ -758,6 +759,10 @@
     ],
     [
       "C50",
+      "lightjet"
+    ],
+    [
+      "C52",
       "lightjet"
     ],
     [
@@ -785,6 +790,18 @@
       "midjet"
     ],
     [
+      "GL7",
+      "largecabin"
+    ],
+    [
+      "GL6",
+      "largecabin"
+    ],
+    [
+      "GL5",
+      "largecabin"
+    ],
+    [
       "GLF",
       "largecabin"
     ],
@@ -793,19 +810,19 @@
       "largecabin"
     ],
     [
-      "GL5",
+      "GA7",
       "largecabin"
     ],
     [
-      "GL6",
+      "GA6",
       "largecabin"
     ],
     [
-      "GL7",
+      "GA5",
       "largecabin"
     ],
     [
-      "G15",
+      "G28",
       "midjet"
     ],
     [
@@ -813,7 +830,71 @@
       "midjet"
     ],
     [
-      "G28",
+      "G15",
+      "midjet"
+    ],
+    [
+      "GAL",
+      "midjet"
+    ],
+    [
+      "CL3",
+      "midjet"
+    ],
+    [
+      "CL6",
+      "midjet"
+    ],
+    [
+      "CL2",
+      "midjet"
+    ],
+    [
+      "E55",
+      "lightjet"
+    ],
+    [
+      "E50",
+      "lightjet"
+    ],
+    [
+      "E54",
+      "lightjet"
+    ],
+    [
+      "LJ",
+      "lightjet"
+    ],
+    [
+      "FA7",
+      "largecabin"
+    ],
+    [
+      "FA8",
+      "largecabin"
+    ],
+    [
+      "FA6",
+      "largecabin"
+    ],
+    [
+      "FA5",
+      "midjet"
+    ],
+    [
+      "FA2",
+      "midjet"
+    ],
+    [
+      "FA1",
+      "lightjet"
+    ],
+    [
+      "F2T",
+      "midjet"
+    ],
+    [
+      "F90",
       "midjet"
     ],
     [
@@ -837,47 +918,7 @@
       "largecabin"
     ],
     [
-      "LJ",
-      "lightjet"
-    ],
-    [
-      "FA7",
-      "largecabin"
-    ],
-    [
-      "FA8",
-      "largecabin"
-    ],
-    [
-      "FA6",
-      "largecabin"
-    ],
-    [
-      "FA2",
-      "midjet"
-    ],
-    [
-      "FA5",
-      "midjet"
-    ],
-    [
-      "FA1",
-      "lightjet"
-    ],
-    [
       "FA",
-      "midjet"
-    ],
-    [
-      "CL3",
-      "midjet"
-    ],
-    [
-      "CL6",
-      "midjet"
-    ],
-    [
-      "CL2",
       "midjet"
     ],
     [
@@ -1133,20 +1174,8 @@
       "heli"
     ],
     [
-      "E50",
-      "lightjet"
-    ],
-    [
-      "E55",
-      "midjet"
-    ],
-    [
       "E35",
       "midjet"
-    ],
-    [
-      "E54",
-      "lightjet"
     ],
     [
       "B73",
@@ -1351,6 +1380,7 @@
       "lightjet",
       "midjet",
       "turboprop"
-    ]
+    ],
+    "airloom": "v21-bizjet-audit"
   }
 }

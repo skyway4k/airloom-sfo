@@ -126,6 +126,7 @@ function buildAdsbPayload(list, sourceName) {
       hex: String(ac.hex || '').toLowerCase(),
       reg: ac.r || null,
       type: ac.t || null,
+      desc: ac.desc || null,
       flight: (ac.flight || '').trim() || null,
       lat: typeof ac.lat === 'number' ? ac.lat : null,
       lon: typeof ac.lon === 'number' ? ac.lon : null,

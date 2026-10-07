@@ -648,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v20'; // ESRI World Imagery same-origin + z17–z18 chase LOD
+const BUILD_MARK = 'airloom-v21'; // accurate bizjet ICAO + HD z17–z19 + stronger topo
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -686,11 +686,16 @@ window.__AIRLOOM_FEATURES = {
   alwaysShowClosest: true,
   darkBasemapRich: true,
   followEsriSat: true,
-  followMaxZ: 18,
+  followMaxZ: 19,
   followSameOriginSat: true,
   chaseZ18: true,
+  chaseZ19: true,
   bayHdResident: true,
   bayHdWarmCache: true,
+  bayHdZ19: true,
+  accurateBizjetTypes: true,
+  typeShortLabels: true,
+  strongerFollowTopo: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -737,6 +742,7 @@ const BAY_FIELDS = [
 const TYPE_PLAIN = {
   C152: 'Cessna 152', C172: 'Cessna 172 Skyhawk', C182: 'Cessna 182 Skylane',
   C206: 'Cessna 206', C208: 'Cessna 208 Caravan', C210: 'Cessna 210',
+  // Citations — C25B = CJ3, C25C = CJ4 (never Global / Gulfstream)
   C25A: 'Citation CJ2', C25B: 'Citation CJ3', C25C: 'Citation CJ4', C25M: 'Citation M2',
   C525: 'Citation Jet', C550: 'Citation II', C560: 'Citation V', C56X: 'Citation Excel',
   C680: 'Citation Sovereign', C68A: 'Citation Latitude', C700: 'Citation Longitude',
@@ -752,17 +758,129 @@ const TYPE_PLAIN = {
   LJ31: 'Learjet 31', LJ35: 'Learjet 35', LJ40: 'Learjet 40', LJ45: 'Learjet 45',
   LJ55: 'Learjet 55', LJ60: 'Learjet 60', LJ70: 'Learjet 70', LJ75: 'Learjet 75',
   CL30: 'Challenger 300', CL35: 'Challenger 350', CL60: 'Challenger 600',
-  GLF4: 'Gulfstream IV', GLF5: 'Gulfstream V', GLF6: 'Gulfstream G650',
-  GL5T: 'Gulfstream G550', GL6T: 'Gulfstream G650', GLEX: 'Global Express',
-  GA6C: 'Global 6000', GA7C: 'Global 7500',
-  FA50: 'Falcon 50', FA7X: 'Falcon 7X', FA8X: 'Falcon 8X', F2TH: 'Falcon 2000',
-  F900: 'Falcon 900', GALX: 'Gulfstream G200', G150: 'Gulfstream G150',
+  CL604: 'Challenger 604', CL605: 'Challenger 605', CL650: 'Challenger 650',
+  // Gulfstream family (GLF*)
+  GLF2: 'Gulfstream II', GLF3: 'Gulfstream III', GLF4: 'Gulfstream IV',
+  GLF5: 'Gulfstream V', GLF6: 'Gulfstream G650',
+  GALX: 'Gulfstream G200', G150: 'Gulfstream G150',
   G200: 'Gulfstream G200', G280: 'Gulfstream G280',
+  // Bombardier Global family (GL*T / GA*C / GLEX) — NOT Gulfstream, NOT Citation
+  GL5T: 'Global 5000', GL6T: 'Global 6000', GL7T: 'Global 7500',
+  GLEX: 'Global Express', GA5C: 'Global 5000', GA6C: 'Global 6000', GA7C: 'Global 7500',
+  FA50: 'Falcon 50', FA7X: 'Falcon 7X', FA8X: 'Falcon 8X', FA6X: 'Falcon 6X',
+  F2TH: 'Falcon 2000', F900: 'Falcon 900', FA20: 'Falcon 20',
   HA4T: 'HondaJet', H25B: 'Hawker 800', SF50: 'Vision Jet', E50P: 'Phenom 100',
-  E55P: 'Phenom 300', PRM1: 'Premier 1', HDJT: 'HondaJet',
+  E55P: 'Phenom 300', E545: 'Praetor 500', E550: 'Praetor 600',
+  PRM1: 'Premier 1', HDJT: 'HondaJet',
   EC35: 'EC135', EC45: 'EC145', B407: 'Bell 407', B429: 'Bell 429', R44: 'Robinson R44',
   R66: 'Robinson R66', A109: 'AW109', A139: 'AW139', S76: 'S-76',
 };
+
+/** Compact Follow/Orbit tag — prefer these over raw ICAO (C25B→CJ3, GL7T→G7500). */
+const TYPE_SHORT = {
+  C25A: 'CJ2', C25B: 'CJ3', C25C: 'CJ4', C25M: 'M2',
+  C525: 'CJ', C550: 'Citation II', C560: 'Citation V', C56X: 'Excel',
+  C680: 'Sovereign', C68A: 'Latitude', C700: 'Longitude', C750: 'Citation X',
+  LJ40: 'LJ40', LJ45: 'LJ45', LJ60: 'LJ60', LJ70: 'LJ70', LJ75: 'LJ75',
+  CL30: 'CL30', CL35: 'CL35', CL60: 'CL60',
+  GLF4: 'G-IV', GLF5: 'G-V', GLF6: 'G650',
+  GL5T: 'Global 5000', GL6T: 'Global 6000', GL7T: 'Global 7500',
+  GLEX: 'Global', GA5C: 'Global 5000', GA6C: 'Global 6000', GA7C: 'Global 7500',
+  GALX: 'G200', G150: 'G150', G200: 'G200', G280: 'G280',
+  E50P: 'Phenom 100', E55P: 'Phenom 300',
+  FA7X: 'Falcon 7X', FA8X: 'Falcon 8X', F2TH: 'F2000',
+  PC12: 'PC-12', PC24: 'PC-24', SF50: 'Vision Jet', HDJT: 'HondaJet', HA4T: 'HondaJet',
+  BE40: 'Beechjet', H25B: 'Hawker 800',
+};
+
+/**
+ * Known-wrong ADS-B type overrides keyed by registration and/or Mode-S hex.
+ * Prefer live ADS-B `t` / `type` / registration DB; only override verified mistakes.
+ * N100BD / a004d1 is correctly GL7T (Global 7500) per FAA + adsb.fi — do NOT map to CJ3.
+ */
+const TYPE_OVERRIDES_BY_REG = {
+  // example: 'N123AB': 'C25B',
+};
+const TYPE_OVERRIDES_BY_HEX = {
+  // example: 'abcdef': 'C25B',
+};
+
+/** Parse ICAO type from ADS-B desc strings when `t` is missing/garbage. */
+function typeFromDesc(desc) {
+  if (!desc) return null;
+  const d = String(desc).toUpperCase();
+  // Prefer explicit ICAO tokens already in our tables
+  const tok = d.match(/\b(C25[ABCM]|C56X|C68A|C680|C700|C750|C525|GL7T|GL6T|GL5T|GLEX|GA[567]C|GLF[2-6]|G280|GALX|CL[236]0|CL35|E55P|E50P|FA[678]X|F2TH|LJ[457][05]|PC12|PC24|SF50|HDJT)\b/);
+  if (tok) return tok[1];
+  if (/CITATION\s*CJ3|CJ3\+?/.test(d)) return 'C25B';
+  if (/CITATION\s*CJ4/.test(d)) return 'C25C';
+  if (/CITATION\s*CJ2/.test(d)) return 'C25A';
+  if (/CITATION\s*M2/.test(d)) return 'C25M';
+  if (/CITATION\s*LATITUDE/.test(d)) return 'C68A';
+  if (/CITATION\s*LONGITUDE/.test(d)) return 'C700';
+  if (/CITATION\s*SOVEREIGN/.test(d)) return 'C680';
+  if (/CITATION\s*X\b|CITATION\s*750/.test(d)) return 'C750';
+  if (/GLOBAL\s*7500|BD-700-2A12/.test(d)) return 'GL7T';
+  if (/GLOBAL\s*6000|GLOBAL\s*6500/.test(d)) return 'GA6C';
+  if (/GLOBAL\s*5000/.test(d)) return 'GL5T';
+  if (/GLOBAL\s*EXPRESS/.test(d)) return 'GLEX';
+  if (/GULFSTREAM\s*G?650|G-?VI\b/.test(d)) return 'GLF6';
+  if (/GULFSTREAM\s*G?550|GULFSTREAM\s*V\b/.test(d)) return 'GLF5';
+  if (/GULFSTREAM\s*G?280/.test(d)) return 'G280';
+  if (/GULFSTREAM\s*G?200|GALAXY/.test(d)) return 'GALX';
+  if (/CHALLENGER\s*350/.test(d)) return 'CL35';
+  if (/CHALLENGER\s*300/.test(d)) return 'CL30';
+  if (/CHALLENGER\s*6/.test(d)) return 'CL60';
+  if (/PHENOM\s*300/.test(d)) return 'E55P';
+  if (/PHENOM\s*100/.test(d)) return 'E50P';
+  if (/FALCON\s*8X/.test(d)) return 'FA8X';
+  if (/FALCON\s*7X/.test(d)) return 'FA7X';
+  if (/FALCON\s*2000/.test(d)) return 'F2TH';
+  return null;
+}
+
+/**
+ * Resolve canonical ICAO type for display + GLTF.
+ * Priority: reg/hex override → ADS-B `t`/`type` → desc parse → prior.
+ * Never remap C25* Citations onto Global/Gulfstream families.
+ */
+function resolveAircraftType(meta, priorType) {
+  const reg = meta && meta.reg ? String(meta.reg).toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+  const hex = meta && meta.hex ? String(meta.hex).toLowerCase() : '';
+  if (reg && TYPE_OVERRIDES_BY_REG[reg]) return TYPE_OVERRIDES_BY_REG[reg];
+  if (hex && TYPE_OVERRIDES_BY_HEX[hex]) return TYPE_OVERRIDES_BY_HEX[hex];
+  let t = meta && meta.type ? String(meta.type).toUpperCase().trim() : '';
+  if (t === 'NULL' || t === 'NONE' || t === '????' || t === '0000') t = '';
+  // Guard: if feed says Global/Gulfstream but desc clearly Citation CJ*, trust desc
+  const desc = meta && meta.desc ? String(meta.desc) : '';
+  const fromDesc = typeFromDesc(desc);
+  if (t && fromDesc) {
+    const tIsGlobal = /^(GL7T|GL6T|GL5T|GLEX|GA[567]C|GLF[2-6]|G280|GALX)$/.test(t);
+    const dIsCj = /^C25[ABCM]$/.test(fromDesc);
+    if (tIsGlobal && dIsCj) t = fromDesc;
+    const tIsCj = /^C25[ABCM]$/.test(t);
+    const dIsGlobal = /^(GL7T|GL6T|GL5T|GLEX|GA[567]C)$/.test(fromDesc);
+    // Keep ADS-B t when both agree on family; prefer t for Globals (N100BD)
+    if (tIsCj && dIsGlobal) {/* keep t — rare */ }
+  }
+  if (!t && fromDesc) t = fromDesc;
+  if (!t && priorType) t = String(priorType).toUpperCase().trim();
+  return t || null;
+}
+
+function shortTypeName(icaoType) {
+  if (!icaoType) return null;
+  const t = String(icaoType).toUpperCase().trim();
+  if (TYPE_SHORT[t]) return TYPE_SHORT[t];
+  const plain = plainTypeName(t);
+  if (plain) {
+    // Compact: "Citation CJ3" → "CJ3", else first two words
+    const m = plain.match(/\b(CJ[234]|M2|G\d{2,3}|Global\s*\d{4}|Phenom\s*\d+|Falcon\s*\w+)/i);
+    if (m) return m[1].replace(/\s+/g, ' ');
+    return plain;
+  }
+  return t;
+}
 
 function plainTypeName(icaoType) {
   if (!icaoType) return null;
@@ -775,12 +893,16 @@ function plainTypeName(icaoType) {
     }
   }
   if (/^C25/.test(t)) return 'Citation CJ';
-  if (/^C56|^C68|^C75/.test(t)) return 'Cessna Citation';
-  if (/^GLF|^GL[56]|^GLE/.test(t)) return 'Gulfstream';
+  if (/^C56|^C68|^C70|^C75/.test(t)) return 'Cessna Citation';
+  // Bombardier Global BEFORE Gulfstream (GL7T/GL5T/GL6T/GLEX/GA*C)
+  if (/^GL[567]T|^GLEX|^GA[567]C/.test(t)) return 'Bombardier Global';
+  if (/^GLF|^G280|^G150|^G200|^GALX/.test(t)) return 'Gulfstream';
   if (/^LJ/.test(t)) return 'Learjet';
-  if (/^CL3|^CL6/.test(t)) return 'Challenger';
+  if (/^CL3|^CL6|^CL2/.test(t)) return 'Challenger';
   if (/^FA|^F2TH|^F900/.test(t)) return 'Dassault Falcon';
+  if (/^E50|^E55/.test(t)) return 'Embraer Phenom';
   if (/^PC1/.test(t)) return 'Pilatus PC-12';
+  if (/^PC2/.test(t)) return 'Pilatus PC-24';
   if (/^TBM/.test(t)) return 'Daher TBM';
   if (/^BE2|^B35/.test(t)) return 'King Air';
   if (/^SR2/.test(t)) return 'Cirrus SR';
@@ -1245,6 +1367,10 @@ const TYPE_DIMS = {
   GLEX: { len: 30.30, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
   GL5T: { len: 28.65, span: 28.65, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.1 },
   GL6T: { len: 30.30, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
+  GL7T: { len: 33.80, span: 31.70, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.2 },
+  GA5C: { len: 28.65, span: 28.65, fuseR: 1.30, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.1 },
+  GA6C: { len: 30.30, span: 28.70, fuseR: 1.35, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.15 },
+  GA7C: { len: 33.80, span: 31.70, fuseR: 1.40, engines: 2, mount: 'rear', ttail: true, sweep: 30, wingZ: 0.0, chordFrac: 0.12, finH: 0.22, engScale: 1.2 },
   FA7X: { len: 26.30, span: 26.21, fuseR: 1.25, engines: 3, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.0 },
   FA8X: { len: 27.35, span: 26.21, fuseR: 1.25, engines: 3, mount: 'rear', ttail: true, sweep: 28, wingZ: 0.0, chordFrac: 0.13, finH: 0.22, engScale: 1.05 },
   FA50: { len: 18.86, span: 18.86, fuseR: 1.05, engines: 3, mount: 'rear', ttail: true, sweep: 25, wingZ: 0.0, chordFrac: 0.14, finH: 0.22, engScale: 0.8 },
@@ -1277,7 +1403,7 @@ function classifyType(icaoType) {
   if (/^E1[789]|^E2[09]|^CRJ|^DH8|^AT[457]|^SF3|^RJ/.test(t)) return 'regional';
   // Broad GA / bizjet / turboprop / VLJ patterns (private-aircraft focus).
   // Note: avoid bare C1/C5/C17 — those collide with military transports (C17, C130, C5M).
-  if (/^(C15|C16|C17[0-9]|C18|C19|C20[6-9]|C21|C22|C25|C30[0-9]|C31|C33|C34|C35|C36|C37|C40|C41|C42|C44|C45|C46|C50|C51|C52|C55|C56|C57|C60|C68|C70|C75|PA|P28|P32|P46|BE[1-9]|SR|DA[1-6]|PC1|PC2|TBM|GLF|GL[56]|GLEX|LJ|CL[236]|FA|F2TH|F900|H25|HA4|E50|E55|G1[58]|G2[08]|GALX|PAY|MU2|AC9|EPIC|EVOT|SF50|HDJT|PRM)/.test(t)) return 'light';
+  if (/^(C15|C16|C17[0-9]|C18|C19|C20[6-9]|C21|C22|C25|C30[0-9]|C31|C33|C34|C35|C36|C37|C40|C41|C42|C44|C45|C46|C50|C51|C52|C55|C56|C57|C60|C68|C70|C75|PA|P28|P32|P46|BE[1-9]|SR|DA[1-6]|PC1|PC2|TBM|GLF|GL[567]T?|GLEX|GA[567]C|LJ|CL[236]|FA|F2TH|F900|H25|HA4|E50|E55|G1[58]|G2[08]|GALX|PAY|MU2|AC9|EPIC|EVOT|SF50|HDJT|PRM)/.test(t)) return 'light';
   if (/^(EC|R2|R4|R6|UH|B06|B4[0-3]|B50|A10|A13|A16|A18|S76|S92|AS[356]|EXPL|H6|MI|AW|BK17|BO10)/.test(t)) return 'heli';
   return 'unknown';
 }
@@ -2395,9 +2521,9 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   const cz = (nwE.z + seE.z) / 2;
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
-  // Never soft-mip high-z sat under chase — Linear + max anisotropy only
+  // Never soft-mip mid/high-z sat — Linear + max anisotropy kills LOD mush/seams
   const overlay = !!opts.overlay;
-  const hiZ = (z || 0) >= 12;
+  const hiZ = (z || 0) >= 10;
   if (overlay || hiZ) {
     tex.generateMipmaps = false;
     tex.minFilter = THREE.LinearFilter;
@@ -2413,8 +2539,8 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
     depthWrite: !overlay,
     depthTest: true,
     polygonOffset: overlay,
-    polygonOffsetFactor: overlay ? -1 : 0,
-    polygonOffsetUnits: overlay ? -1 : 0,
+    polygonOffsetFactor: overlay ? -2 : 0,
+    polygonOffsetUnits: overlay ? -2 : 0,
     // Orbit cool; Follow near-neutral so ESRI contrast is not washed green
     color: opts.orbitLift ? 0xb4c2d0 : (brighten ? 0xf4f6f0 : 0xffffff),
   });
@@ -2453,8 +2579,8 @@ groundGroup.add(landingCueGroup);
 scene.add(trailHudGroup);
 
 window.__AIRLOOM_TILE_LEVELS = {
-  followStatic: [8, 10, 11, 12, 13, 14, 15, 16, 17, 18],
-  followChase: [14, 15, 16, 17, 18],
+  followStatic: [8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+  followChase: [15, 16, 17, 18, 19],
   orbitDark: [8, 10, 11, 12, 13, 14, 15, 16],
   sfoHdRadiusNm: SFO_HD_RADIUS_NM,
   maxMosaicSpan: MAX_MOSAIC_SPAN,
@@ -2463,7 +2589,7 @@ window.__AIRLOOM_TILE_LEVELS = {
   fallbackUsgs: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
   maxEsriZ: 19,
   maxUsgsZ: 16,
-  densify: 'airloom-v20-esri-sat-z18',
+  densify: 'airloom-v21-esri-sat-z19-topo',
   orbitSource: ORBIT_TILE_TMPL,
   orbitSourceDirect: ORBIT_TILE_DIRECT_TMPL,
   reliefOrbit: RELIEF_TILE_TMPL,
@@ -2484,13 +2610,14 @@ function disposeMeshTree(root) {
 
 async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extraOpts) {
   const base = { lat, lon, ...(extraOpts || {}) };
-  // Light hillshade under sat — low alpha so streets/runways stay crisp (not pale wash)
+  // Stronger Follow hillshade/DEM relief — hills read under sat without chalk wash
   if (base.reliefUrl == null && base.relief !== false) {
     base.reliefUrl = RELIEF_FOLLOW_URL;
     if (base.reliefAlpha == null) {
-      base.reliefAlpha = z >= 17 ? 0.16 : (z >= 15 ? 0.22 : (z >= 13 ? 0.28 : 0.32));
+      // v21: raise mid/far topo; keep z19 slightly softer so runway paint stays sharp
+      base.reliefAlpha = z >= 19 ? 0.26 : (z >= 17 ? 0.34 : (z >= 15 ? 0.40 : (z >= 13 ? 0.46 : 0.52)));
     }
-    if (!base.reliefMode) base.reliefMode = 'overlay';
+    if (!base.reliefMode) base.reliefMode = 'soft-light';
   }
   // 1) same-origin ESRI World Imagery (Safari + high-z)
   let layer = await fetchTileLayer(z, span, fillCss, brighten, {
@@ -2525,7 +2652,7 @@ function bayHdPatchCenters(z, span, radiusNm, maxPatches) {
   const centers = [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
   if (!(radiusNm > 0) || coverNm >= radiusNm * 0.92) return centers;
   const cap = Math.max(1, maxPatches || 24);
-  const stepNm = Math.max(coverNm * 0.82, coverNm * 0.75);
+  const stepNm = Math.max(coverNm * 0.72, coverNm * 0.68); // v21: denser overlap → fewer LOD seams
   const rowH = stepNm * 0.8660254;
   const cosLat = Math.max(0.2, Math.cos(ORIGIN.lat * Math.PI / 180));
   let row = 0;
@@ -2615,9 +2742,9 @@ function offsetAlongTrack(lat, lon, trackDeg, aheadNm) {
 }
 
 /**
- * Ultra-HD inset under + ahead of chase — z15–z18 ESRI, look-ahead prefetch.
- * Double-buffer swap; hysteresis on z16 so LOD does not thrash.
- * Bay-wide z15–z18 also lives in satGroundGroup (always resident).
+ * Ultra-HD inset under + ahead of chase — z15–z19 ESRI, look-ahead prefetch.
+ * Double-buffer swap; hysteresis on z17 so LOD does not thrash.
+ * Bay-wide z15–z19 also lives in satGroundGroup (always resident).
  */
 async function refreshChaseInset(lat, lon, trackDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -2626,42 +2753,45 @@ async function refreshChaseInset(lat, lon, trackDeg) {
   if (chaseInsetBusy) return;
   if (now - chaseInsetLastTry < 1100) return;
   chaseInsetLastTry = now;
-  const ahead = offsetAlongTrack(lat, lon, trackDeg, 4.5);
+  const ahead = offsetAlongTrack(lat, lon, trackDeg, 5.5);
   const focusLat = (lat + ahead.lat) * 0.5;
   const focusLon = (lon + ahead.lon) * 0.5;
-  const t16 = latLonToTile(focusLat, focusLon, 16);
+  const t17 = latLonToTile(focusLat, focusLon, 17);
   if (chaseInsetTileKey) {
     const parts = chaseInsetTileKey.split(':');
     const px = Number(parts[1]), py = Number(parts[2]);
     if (Number.isFinite(px) && Number.isFinite(py)) {
-      if (Math.abs(t16.x - px) < 2 && Math.abs(t16.y - py) < 2) return;
+      if (Math.abs(t17.x - px) < 2 && Math.abs(t17.y - py) < 2) return;
     }
   }
-  const key = `16:${t16.x}:${t16.y}`;
+  const key = `17:${t17.x}:${t17.y}`;
   if (key === chaseInsetTileKey) return;
   chaseInsetBusy = true;
   const gen = ++chaseInsetGen;
   const pending = [];
   try {
-    const mid = await fetchLayerWithFallback(15, 4, '#426848', true, focusLat, focusLon, { overlay: true });
+    const mid = await fetchLayerWithFallback(15, 5, '#426848', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const sharp = await fetchLayerWithFallback(16, 3, '#4a6e50', true, focusLat, focusLon, { overlay: true });
+    const sharp = await fetchLayerWithFallback(16, 4, '#4a6e50', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
     const fine = await fetchLayerWithFallback(17, 3, '#4e7254', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const ultra = await fetchLayerWithFallback(18, 2, '#527856', true, lat, lon, { overlay: true });
+    const ultra = await fetchLayerWithFallback(18, 3, '#527856', true, lat, lon, { overlay: true });
+    if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
+    const nano = await fetchLayerWithFallback(19, 2, '#567c5a', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
 
     if (mid) { mid.mesh.position.y = 1.55; mid.mesh.renderOrder = 40; pending.push(mid.mesh); }
     if (sharp) { sharp.mesh.position.y = 1.65; sharp.mesh.renderOrder = 41; pending.push(sharp.mesh); }
-    if (fine) { fine.mesh.position.y = 1.75; fine.mesh.renderOrder = 42; pending.push(fine.mesh); }
-    if (ultra) { ultra.mesh.position.y = 1.85; ultra.mesh.renderOrder = 43; pending.push(ultra.mesh); }
+    if (fine) { fine.mesh.position.y = 1.78; fine.mesh.renderOrder = 42; pending.push(fine.mesh); }
+    if (ultra) { ultra.mesh.position.y = 1.88; ultra.mesh.renderOrder = 43; pending.push(ultra.mesh); }
+    if (nano) { nano.mesh.position.y = 1.96; nano.mesh.renderOrder = 44; pending.push(nano.mesh); }
     if (!pending.length) return;
     disposeMeshTree(chaseHiZGroup);
     for (const m of pending) chaseHiZGroup.add(m);
     chaseInsetTileKey = key;
     window.__AIRLOOM_CHASE_TILE = {
-      z: [15, 16, 17, 18], key, lat, lon, focusLat, focusLon, aheadNm: 4.5, at: Date.now(),
+      z: [15, 16, 17, 18, 19], key, lat, lon, focusLat, focusLon, aheadNm: 5.5, at: Date.now(),
     };
   } catch (e) {
     console.warn('chase inset', e);
@@ -2675,8 +2805,8 @@ async function refreshChaseInset(lat, lon, trackDeg) {
 
 /**
  * Follow photoreal — ESRI World Imagery (same-origin /tiles/sat).
- * airloom-v20: Bay-wide always-resident high-z (Marin–South Bay–East Bay–Peninsula
- * ~100 mi of KSFO) so views never fall back to soft low-z mush; chase adds z17–z18.
+ * airloom-v21: Bay-wide always-resident high-z (Marin–South Bay–East Bay–Peninsula
+ * ~100 mi of KSFO) denser z17–z19 farther out; chase adds z15–z19 + stronger topo.
  */
 async function loadSatBasemap() {
   chaseInsetGen++;
@@ -2737,11 +2867,12 @@ async function loadSatBasemap() {
   // Phase B — Bay-wide high-z always resident (background; does not block Follow)
   const phaseB = [
     // Full ~100 mi at z15–z16 (hex patches; underlay keeps gaps readable)
-    { z: 15, span: 4, y: 1.18, fill: '#456a4c', overlay: true, patches: true, maxPatches: 36, radiusNm: SFO_HD_RADIUS_NM },
-    { z: 16, span: 3, y: 1.32, fill: '#4a6e50', overlay: true, patches: true, maxPatches: 48, radiusNm: SFO_HD_RADIUS_NM },
-    // Core Bay ultra (Marin–SFO–South Bay–East Bay) z17–z18 always loaded
-    { z: 17, span: 3, y: 1.44, fill: '#4e7254', overlay: true, patches: true, maxPatches: 40, radiusNm: 48 },
-    { z: 18, span: 2, y: 1.52, fill: '#527856', overlay: true, patches: true, maxPatches: 48, radiusNm: 36 },
+    { z: 15, span: 4, y: 1.18, fill: '#456a4c', overlay: true, patches: true, maxPatches: 40, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 16, span: 3, y: 1.32, fill: '#4a6e50', overlay: true, patches: true, maxPatches: 56, radiusNm: SFO_HD_RADIUS_NM },
+    // Core Bay ultra denser + farther (v21): z17–z19 resident
+    { z: 17, span: 3, y: 1.46, fill: '#4e7254', overlay: true, patches: true, maxPatches: 56, radiusNm: 62 },
+    { z: 18, span: 2, y: 1.56, fill: '#527856', overlay: true, patches: true, maxPatches: 64, radiusNm: 48 },
+    { z: 19, span: 2, y: 1.64, fill: '#567c5a', overlay: true, patches: true, maxPatches: 48, radiusNm: 28 },
   ];
   const metaB = [];
   for (const L of phaseB) {
@@ -2755,12 +2886,12 @@ async function loadSatBasemap() {
     radiusNm: SFO_HD_RADIUS_NM,
     phase: 'B',
     follow: metaA.concat(metaB),
-    bayCoreNm: { z17: 48, z18: 36 },
+    bayCoreNm: { z17: 62, z18: 48, z19: 28 },
     at: Date.now(),
   };
 }
 
-/** Fire-and-forget Image fetches so Bay z15–z18 tiles hit HTTP + /tiles/sat proxy cache. */
+/** Fire-and-forget Image fetches so Bay z15–z19 tiles hit HTTP + /tiles/sat proxy cache. */
 async function warmBaySatTileCache() {
   const jobs = [];
   const pushDisk = (z, radiusNm, stride) => {
@@ -2776,11 +2907,12 @@ async function warmBaySatTileCache() {
       }
     }
   };
-  // Strided warm: denser near field, coarser out to 100 mi
+  // Strided warm: denser near field, coarser out to 100 mi (v21: z17–z19 farther)
   pushDisk(15, SFO_HD_RADIUS_NM, 2);
   pushDisk(16, SFO_HD_RADIUS_NM, 2);
-  pushDisk(17, 48, 2);
-  pushDisk(18, 36, 2);
+  pushDisk(17, 62, 2);
+  pushDisk(18, 48, 2);
+  pushDisk(19, 28, 2);
   window.__AIRLOOM_TILE_WARM = { n: jobs.length, at: Date.now() };
   await runPool(jobs, 10, async (url) => { await loadTileImage(url, 8000); });
 }
@@ -2795,7 +2927,7 @@ async function loadDarkBasemap() {
   const addDark = async (z, span, y, fill, overlay, lat, lon, reliefAlpha) => {
     const commonRelief = {
       reliefUrl: RELIEF_TILE_URL,
-      reliefAlpha: Number.isFinite(reliefAlpha) ? reliefAlpha : (z >= 12 ? 0.72 : 0.58),
+      reliefAlpha: Number.isFinite(reliefAlpha) ? reliefAlpha : (z >= 12 ? 0.82 : 0.68),
       reliefMode: 'overlay',
     };
     const pos = {
@@ -4186,7 +4318,7 @@ const PRIVATE_GA_TYPES = new Set([
   'C25A','C25B','C25C','C25M','C500','C525','C550','C560','C56X','C680','C68A','C700','C750',
   'LJ31','LJ35','LJ40','LJ45','LJ55','LJ60','LJ70','LJ75',
   'CL30','CL35','CL60','CL60','CL2T',
-  'GLF2','GLF3','GLF4','GLF5','GLF6','GL5T','GL6T','GLEX','GA6C','GA7C',
+  'GLF2','GLF3','GLF4','GLF5','GLF6','GL5T','GL6T','GL7T','GLEX','GA5C','GA6C','GA7C',
   'FA50','FA7X','FA8X','FA20','FA10','F2TH','F900','GALX','G150','G200','G280',
   'BE40','HA4T','H25B','PC24','E50P','E55P','E545','E550','PRM1','HDJT','SF50',
   // heli
@@ -5162,7 +5294,7 @@ function updateSelPanel(rec) {
   const kt = spdKt(rec);
   const spd = kt != null ? kt + ' kt' : '—';
   const track = rec.track != null ? Math.round(rec.track) + '°' : '—';
-  const typ = rec.type || '—';
+  const typ = rec.type ? (shortTypeName(rec.type) || rec.type) : '—';
   const reg = rec.reg || '—';
   const cat = rec.cat || classifyType(rec.type);
   const dist = rec.dist != null ? rec.dist.toFixed(1) + ' nm' : '—';
@@ -5202,7 +5334,7 @@ function renderArrivalsList(arrs) {
     const finalTag = a.isOnFinal ? ` · FINAL ${a.finalInfo?.rwy || a.finalRwy || ''}`.trim() : '';
     return `<div class="arr-row${sel}" data-icao="${a.icao}">` +
       `<div><div class="cs">${a.callsign || a.icao}${a.isOnFinal ? ' ✈' : ''}</div>` +
-      `<div class="meta">${a.type || '????'} · ${a.cat || ''}${finalTag}</div></div>` +
+      `<div class="meta">${a.type ? (shortTypeName(a.type) || a.type) : '????'} · ${a.cat || ''}${finalTag}</div></div>` +
       `<div class="nums">${altFt.toLocaleString()} ft<br>${kt != null ? kt + ' kt' : '—'} · ${a.dist.toFixed(1)} nm</div>` +
       `</div>`;
   }).join('');
@@ -5681,7 +5813,8 @@ function setLabelInfo(rec) {
   const el = rec.label;
   if (!el) return;
   const ident = displayIdent(rec);
-  const type = (rec.type && String(rec.type).trim()) || '';
+  const typeRaw = (rec.type && String(rec.type).trim()) || '';
+  const type = typeRaw ? (shortTypeName(typeRaw) || typeRaw) : '';
   const altFt = Math.round((rec.altM || 0) / FT_M);
   const gs = rec.gsKt != null ? Math.round(rec.gsKt)
     : (rec.vel != null ? Math.round(rec.vel / KT_MS) : null);
@@ -5697,7 +5830,7 @@ function setLabelInfo(rec) {
   let line1 = ident;
   let line2;
   if ((isFollowPrimary || isOrbitFocus) && !rec.onGround) {
-    // Compact Follow tag: N724PB · C25B · 42 mi · ~15 min (clamped in-frame via updateLabelScreen)
+    // Compact Follow tag: N724PB · CJ3 · 42 mi · ~15 min (shortTypeName; clamped via updateLabelScreen)
     const parts = [ident];
     if (type) parts.push(type);
     const ldg = distToLanding(rec);
@@ -6147,8 +6280,9 @@ function ingest(data) {
     const altM = (geo != null && geo > 0) ? geo : (baro != null ? baro : 0);
     const dist = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
     const meta = metaByHex.get(icao);
-    const type = meta && meta.type ? String(meta.type).toUpperCase() : null;
     const reg = meta && meta.reg ? String(meta.reg).toUpperCase() : null;
+    const prior = aircraft.get(icao);
+    const type = resolveAircraftType(meta, prior && prior.type) || null;
     let gsKt = null;
     if (meta && meta.gs != null && !isNaN(Number(meta.gs))) gsKt = Number(meta.gs);
     if ((vel == null || isNaN(vel)) && gsKt != null) vel = gsKt * KT_MS;

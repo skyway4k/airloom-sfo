@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v19)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v21)
 
 ## Local
 
@@ -40,12 +40,11 @@ Switch to **Arrivals** (KSFO arrivals) or **All traffic** in the drawer.
   (lower elevation, more behind — not cockpit / not overhead) on the **soonest
   arriving** clear KSFO inbound / final private/GA. Wheel/pinch zoom + drag orbit
   around the target.
-  Basemap is **USGS ImageryOnly** ultra-HD (keyless, CORS-ok NAIP-class; ESRI World
-  Imagery fallback) with **World_Hillshade** relief composite. Always-resident
-  **~100 mi / 87 nm** stack **z8 / z10–z16** (Safari-safe spans + z12 patch ring)
-  around KSFO plus denser **z13–z16 chase inset** with look-ahead prefetch.
-  Template:
-  `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`
+  Basemap is **ESRI World Imagery** via same-origin `/tiles/sat` (Safari-safe,
+  keyless, z19) with stronger **World_Hillshade** topo composite. Always-resident
+  **~100 mi / 87 nm** stack **z8 / z10–z19** (Safari-safe spans + dense Bay patches:
+  z17≈62 nm, z18≈48 nm, z19≈28 nm) plus chase inset **z15–z19** look-ahead.
+  Soft mips disabled from z10+ to cut LOD seams. USGS ImageryOnly remains fallback.
 - **Air Loom** (Orbit): dark high-contrast **ESRI World Dark Gray Base** +
   **World_Hillshade_Dark** topography (keyless; z8 / z10–z15, ~100 mi resident)
   via same-origin `/tiles/orbit` + `/tiles/relief` proxies.
@@ -137,3 +136,4 @@ Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated
 - Stronger local contrast/saturation after v18 darkening (detail without pale wash)
 - Prominent topography: World_Hillshade_Dark (Orbit, `/tiles/relief`) + World_Hillshade (Follow)
 - Safari Orbit proxy kept; exclusive basemap / arrivals rail / bullseye / trails unchanged
+
