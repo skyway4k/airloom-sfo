@@ -648,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v21'; // accurate bizjet ICAO + HD z17–z19 + stronger topo
+const BUILD_MARK = 'airloom-v22'; // BLOCKED/PIA privacy display + keep ADS-B tracks
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -695,6 +695,9 @@ window.__AIRLOOM_FEATURES = {
   bayHdZ19: true,
   accurateBizjetTypes: true,
   typeShortLabels: true,
+  privacyBlockedIdent: true,
+  piaVisibleAdsB: true,
+  privacyOverrideHook: true,
   strongerFollowTopo: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
@@ -4355,6 +4358,15 @@ function isPrivateOrGa(p) {
     const cs = (p.callsign || '').trim().toUpperCase();
     if (cs && !AIRLINE_CS_RE.test(cs)) return true;
   }
+  // Privacy / BLOCKED / PIA with ADS-B track: keep on GA board (visible, masked ident)
+  if (p.isBlocked || p.pia || resolvePrivacyMode(p)) {
+    // Avoid pulling heavy airliners solely via privacy bit
+    if (cat === 'light' || cat === 'heli' || cat === 'unknown' || !typ) return true;
+    if (typ && PRIVATE_GA_TYPES.has(typ)) return true;
+    if (typ && PRIVATE_GA_PREFIXES.some((pref) => typ.startsWith(pref))) return true;
+    const fam = resolveFamilyId(typ, cat);
+    if (fam && GA_FAMILY_IDS.has(fam)) return true;
+  }
   return false;
 }
 
@@ -4425,15 +4437,84 @@ function frameOrbitOverview() {
 }
 
 /**
+ * Explicit privacy / blocked overrides (hex → mode).
+ * mode: 'PIA' | 'BLOCKED' | 'public' (force show reg) | 'suppress' (drop entirely — unused for now).
+ * User will supply a concrete list later; keep this table as the single hook.
+ * Keys are lowercase Mode-S hex without "~".
+ */
+const PRIVACY_OVERRIDES = {
+  // e.g. 'a1b2c3': 'PIA',
+  // e.g. 'abcdef': 'BLOCKED',
+};
+/** Hook for tomorrow’s explicit PIA/BLOCKED hex list — mutate or replace at runtime. */
+window.__AIRLOOM_PRIVACY_OVERRIDES = PRIVACY_OVERRIDES;
+
+/** Fractional / charter operator callsigns — prefer CS for FA Ident overlap. */
+const FRACTIONAL_CS_PREFIX_RE = /^(EJA|EJM|LXJ|TWY|TIV|XSR|OPT|JTL|GAJ|RSP|DPJ|NJE|CTT|SIS|PXT)\d/;
+
+function normalizeHexKey(hex) {
+  return String(hex || '').toLowerCase().replace(/^~/, '').replace(/[^a-f0-9]/g, '');
+}
+
+function looksLikeUsTailClient(s) {
+  const t = String(s || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return /^N[0-9][A-Z0-9]{0,5}$/.test(t);
+}
+
+/**
+ * Resolve privacy display mode from feed flags + optional override table.
+ * Returns null (public), 'PIA', or 'BLOCKED'. Never invents a civil tail.
+ */
+function resolvePrivacyMode(p, meta) {
+  const hex = normalizeHexKey(p && p.icao ? p.icao : (meta && meta.hex));
+  const ov = hex && PRIVACY_OVERRIDES[hex];
+  if (ov === 'public') return null;
+  if (ov === 'PIA' || ov === 'BLOCKED') return ov;
+  // suppress reserved for future — treat as BLOCKED display for now if ever set
+  if (ov === 'suppress') return 'BLOCKED';
+
+  const pia = !!(p && p.pia) || !!(meta && meta.pia);
+  const ladd = !!(p && p.ladd) || !!(meta && meta.ladd);
+  const blocked = !!(p && p.blocked) || !!(meta && meta.blocked);
+  const flags = Number((p && p.dbFlags) != null ? p.dbFlags : (meta && meta.dbFlags)) || 0;
+  const ownOp = String((p && p.ownOp) || (meta && meta.ownOp) || '').toLowerCase();
+  if (pia || (flags & 4) || /\bpia\b/.test(ownOp)) return 'PIA';
+  if (ladd || blocked || (flags & 8) || /\b(ladd|barr|blocked|privacy)\b/.test(ownOp)) {
+    return 'BLOCKED';
+  }
+  // FA-style: no reg, airborne bizjet / A2–A3 — withhold invented tails
+  const reg = (p && p.reg) || (meta && meta.reg) || '';
+  const typ = String((p && p.type) || (meta && meta.type) || '').toUpperCase();
+  const cat = String((p && p.cat) || (meta && meta.category) || '').toUpperCase();
+  const onGround = !!(p && p.onGround);
+  if (!reg && !onGround) {
+    const jetish = /^(CL[236]0|CL35|GLF[2-6]|GL[567]T|GLEX|GA[567]C|C25[ABCM]|C56X|C68A|C680|C700|C750|C525|C550|C560|FA|F2TH|LJ|G280|GALX|BE40|HA4T|H25B|PC24|E50P|E55P|E545|E550|PRM1|HDJT|SF50)/.test(typ)
+      || /^A[23]$/.test(cat);
+    if (jetish) return 'BLOCKED';
+  }
+  return null;
+}
+
+/**
  * Prefer civil reg / tail (N724PB) when ADS-B flight is empty or mirrors reg.
- * Operator callsigns (LXJ570, EJA187) kept when distinct — matches FA Ident feel.
+ * Fractional CS (EJA/LXJ/…) kept when distinct — matches FA Ident feel.
+ * Privacy: PIA → "PIA"; LADD / FA-style / override → "BLOCKED". Hex kept only for track.
  */
 function displayIdent(p) {
   if (!p) return '—';
+  const mode = resolvePrivacyMode(p);
+  if (mode === 'PIA') return 'PIA';
+  if (mode === 'BLOCKED') return 'BLOCKED';
   const cs = (p.callsign && String(p.callsign).trim().toUpperCase()) || '';
   const regRaw = (p.reg && String(p.reg).trim().toUpperCase()) || '';
   const reg = regRaw.replace(/\s+/g, '');
   const compact = (s) => String(s || '').replace(/[^A-Z0-9]/g, '');
+  // Fractional / charter: prefer operator callsign (FA Ident) when distinct from reg
+  if (cs && FRACTIONAL_CS_PREFIX_RE.test(cs)) {
+    const rc = compact(reg);
+    const cc = compact(cs);
+    if (!rc || cc !== rc) return cs;
+  }
   if (reg) {
     const rc = compact(reg);
     const cc = compact(cs);
@@ -5295,10 +5376,11 @@ function updateSelPanel(rec) {
   const spd = kt != null ? kt + ' kt' : '—';
   const track = rec.track != null ? Math.round(rec.track) + '°' : '—';
   const typ = rec.type ? (shortTypeName(rec.type) || rec.type) : '—';
-  const reg = rec.reg || '—';
+  const ident = displayIdent(rec);
+  const reg = rec.blocked ? (rec.privacyMode || 'BLOCKED') : (rec.reg || '—');
   const cat = rec.cat || classifyType(rec.type);
   const dist = rec.dist != null ? rec.dist.toFixed(1) + ' nm' : '—';
-  $('selCs').textContent = rec.callsign || rec.icao;
+  $('selCs').textContent = ident;
   $('selGrid').innerHTML =
     `<span>hex</span><b>${rec.icao}</b>` +
     `<span>type</span><b>${typ} <span style="color:var(--muted)">(${cat})</span></b>` +
@@ -5314,7 +5396,7 @@ function updateSelPanel(rec) {
   bar.classList.add('visible');
   none.style.display = 'none';
   body.style.display = 'block';
-  body.innerHTML = `<div>${rec.callsign || '—'}</div>` +
+  body.innerHTML = `<div>${ident}</div>` +
     `<div style="color:var(--muted)">${rec.icao} · ${typ} · ${reg}</div>` +
     `<div>${altFt} ft · ${spd} · ${track} · ${dist}</div>`;
 }
@@ -5333,7 +5415,7 @@ function renderArrivalsList(arrs) {
     const sel = selectedId === a.icao ? ' selected' : '';
     const finalTag = a.isOnFinal ? ` · FINAL ${a.finalInfo?.rwy || a.finalRwy || ''}`.trim() : '';
     return `<div class="arr-row${sel}" data-icao="${a.icao}">` +
-      `<div><div class="cs">${a.callsign || a.icao}${a.isOnFinal ? ' ✈' : ''}</div>` +
+      `<div><div class="cs">${displayIdent(a)}${a.isOnFinal ? ' ✈' : ''}</div>` +
       `<div class="meta">${a.type ? (shortTypeName(a.type) || a.type) : '????'} · ${a.cat || ''}${finalTag}</div></div>` +
       `<div class="nums">${altFt.toLocaleString()} ft<br>${kt != null ? kt + ' kt' : '—'} · ${a.dist.toFixed(1)} nm</div>` +
       `</div>`;
@@ -6280,7 +6362,6 @@ function ingest(data) {
     const altM = (geo != null && geo > 0) ? geo : (baro != null ? baro : 0);
     const dist = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
     const meta = metaByHex.get(icao);
-    const reg = meta && meta.reg ? String(meta.reg).toUpperCase() : null;
     const prior = aircraft.get(icao);
     const type = resolveAircraftType(meta, prior && prior.type) || null;
     let gsKt = null;
@@ -6288,7 +6369,28 @@ function ingest(data) {
     if ((vel == null || isNaN(vel)) && gsKt != null) vel = gsKt * KT_MS;
     if (gsKt == null && vel != null) gsKt = vel / KT_MS;
     const cat = classifyType(type);
-    const p = { icao, callsign, lat, lon, altM, onGround, vel, track, vr, dist, source: src, type, reg, gsKt, cat, squawk };
+    const dbFlags = meta && meta.dbFlags != null ? Number(meta.dbFlags) || 0 : 0;
+    const pia = !!(meta && meta.pia) || !!(dbFlags & 4);
+    const ladd = !!(meta && meta.ladd) || !!(dbFlags & 8);
+    const ownOp = meta && meta.ownOp ? String(meta.ownOp) : null;
+    // Seed privacy fields before resolvePrivacyMode (needs p shape)
+    let reg = meta && meta.reg ? String(meta.reg).toUpperCase() : null;
+    let csUse = callsign;
+    const pSeed = {
+      icao, callsign: csUse, reg, type, cat, onGround, pia, ladd,
+      blocked: !!(meta && meta.blocked), dbFlags, ownOp,
+    };
+    const privMode = resolvePrivacyMode(pSeed, meta);
+    const isBlocked = !!privMode; // PIA or BLOCKED — mask public ident, keep track
+    if (isBlocked) {
+      reg = null; // never surface withheld / LADD registry
+      if (looksLikeUsTailClient(csUse)) csUse = '';
+    }
+    const p = {
+      icao, callsign: csUse, lat, lon, altM, onGround, vel, track, vr, dist,
+      source: src, type, reg, gsKt, cat, squawk,
+      dbFlags, ownOp, pia, ladd, blocked: isBlocked, privacyMode: privMode,
+    };
     p.isArrival = isArrival(p);
     parsed.push(p);
   }
@@ -6329,7 +6431,10 @@ function ingest(data) {
     if (settings.trafficMode === 'arrivals' && !p.isKsfo) return false;
     if (settings.filter) {
       const f = settings.filter;
-      if (!(p.callsign.includes(f) || p.icao.toUpperCase().includes(f) || (p.type || '').includes(f))) return false;
+      const ident = displayIdent(p).toUpperCase();
+      if (!(p.callsign.includes(f) || p.icao.toUpperCase().includes(f)
+        || (p.type || '').includes(f) || ident.includes(f)
+        || (p.reg && p.reg.includes(f)))) return false;
     }
     return true;
   });
@@ -6372,12 +6477,18 @@ function ingest(data) {
       callsign: p.callsign, lat: p.lat, lon: p.lon, altM: p.altM,
       onGround: p.onGround, vel: p.vel, track: p.track, vr: p.vr,
       source: p.source, lastPoll: now, alive: true,
-      type: p.type || rec.type, reg: p.reg || rec.reg, gsKt: p.gsKt,
+      type: p.type || rec.type,
+      // Privacy: never keep a prior real N-number once flagged blocked/PIA
+      reg: p.blocked ? null : (p.reg || rec.reg),
+      gsKt: p.gsKt,
       dist: p.dist, isArrival: p.isArrival, isPrivateGa: !!p.isPrivateGa, cat: p.cat || rec.cat,
       squawk: p.squawk || rec.squawk || null,
       nearestField: near.field.short, nearestFieldNm: near.distNm,
       isKsfo: !!p.isKsfo, isOnFinal: !!p.isOnFinal, finalInfo: p.finalInfo || null,
       finalRwy: p.finalInfo ? p.finalInfo.rwy : null,
+      pia: !!p.pia, ladd: !!p.ladd, blocked: !!p.blocked,
+      privacyMode: p.privacyMode || null,
+      dbFlags: p.dbFlags || 0, ownOp: p.ownOp || null,
     });
     // feed closing-distance into score via parsed proxy fields
     p._prevDistField = p._prevDistField;

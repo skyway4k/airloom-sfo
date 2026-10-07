@@ -14,7 +14,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.4 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
+const UA = 'AirLoomSFO/1.5 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
 
 const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 360 }; // ~60–90 min jet cruise box
 const ADSB_CACHE_FRESH_MS = 22000;
@@ -116,23 +116,85 @@ function centerDistToBbox(lat, lon, distNm) {
   };
 }
 
+/**
+ * readsb/adsb.lol dbFlags bitmask:
+ *   military=1, interesting=2, PIA=4, LADD=8
+ * PIA and LADD stay in the feed (track/type/pos). Reg is redacted so the
+ * client shows ident BLOCKED / PIA — never invent a real N-number.
+ */
+const BIZJET_TYPE_RE = /^(CL[236]0|CL35|GLF[2-6]|GL[567]T|GLEX|GA[567]C|C25[ABCM]|C500|C525|C550|C560|C56X|C680|C68A|C700|C750|FA[578]X?|FA20|FA10|F2TH|F900|LJ[34567][0-9]?|G150|G200|G280|GALX|BE40|HA4T|H25B|PC24|E50P|E55P|E545|E550|PRM1|HDJT|SF50)$/i;
+
+function looksLikeUsTail(s) {
+  const t = String(s || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return /^N[0-9][A-Z0-9]{0,5}$/.test(t);
+}
+
+function classifyPrivacy(ac) {
+  const flags = Number(ac.dbFlags) || 0;
+  const ownOp = (ac.ownOp != null ? String(ac.ownOp) : '').trim();
+  const ownLower = ownOp.toLowerCase();
+  const piaFlag = !!(flags & 4) || /\bpia\b/.test(ownLower);
+  const laddFlag = !!(flags & 8) || /\b(ladd|barr|blocked)\b/.test(ownLower)
+    || (/\bprivacy\b/.test(ownLower) && !piaFlag);
+  const regRaw = (ac.r != null ? String(ac.r).trim() : '');
+  const flightRaw = (ac.flight != null ? String(ac.flight).trim() : '');
+  const typ = (ac.t != null ? String(ac.t).trim().toUpperCase() : '');
+  const cat = ac.category != null ? String(ac.category).trim().toUpperCase() : '';
+  const onGround = ac.alt_baro === 'ground' || ac.alt_baro === 'GROUND';
+  const noReg = !regRaw;
+  const jetish = !!(typ && BIZJET_TYPE_RE.test(typ)) || /^A[23]$/.test(cat);
+  // FA-style blocked: airborne jet with no public reg (Mode-S hex still present)
+  const faStyle = noReg && jetish && !onGround;
+  const privacy = piaFlag || laddFlag || faStyle;
+  return {
+    flags,
+    pia: piaFlag,
+    ladd: laddFlag,
+    blocked: privacy, // any privacy withholding of public reg/ident
+    faStyle,
+    regRaw,
+    flightRaw,
+    typ,
+    ownOp: ownOp || null,
+  };
+}
+
 function buildAdsbPayload(list, sourceName) {
   const states = [];
   const acMeta = [];
   for (const ac of list) {
     if (!ac || ac.lat == null || ac.lon == null || !ac.hex) continue;
-    states.push(adsbAcToState(ac));
+    const priv = classifyPrivacy(ac);
+    // Clone lightly so we can redact flight for OpenSky-style state row
+    const acForState = priv.blocked
+      ? Object.assign({}, ac, {
+          // Keep operator CS when it is not a civil tail; blank US-tail flight
+          flight: looksLikeUsTail(priv.flightRaw) ? '' : (priv.flightRaw || ''),
+          r: null,
+        })
+      : ac;
+    states.push(adsbAcToState(acForState));
+    const flightOut = priv.blocked && looksLikeUsTail(priv.flightRaw)
+      ? null
+      : ((ac.flight || '').trim() || null);
     acMeta.push({
       hex: String(ac.hex || '').toLowerCase(),
-      reg: ac.r || null,
+      // Never leak registry for PIA / LADD / FA-style privacy aircraft
+      reg: priv.blocked ? null : (priv.regRaw || null),
       type: ac.t || null,
       desc: ac.desc || null,
-      flight: (ac.flight || '').trim() || null,
+      flight: flightOut,
       lat: typeof ac.lat === 'number' ? ac.lat : null,
       lon: typeof ac.lon === 'number' ? ac.lon : null,
       alt_baro: ac.alt_baro,
       gs: ac.gs,
       track: ac.track,
+      category: ac.category != null ? String(ac.category) : null,
+      dbFlags: priv.flags || 0,
+      ownOp: priv.ownOp,
+      pia: !!priv.pia,
+      ladd: !!priv.ladd,
+      blocked: !!priv.blocked,
       source: sourceName,
     });
   }

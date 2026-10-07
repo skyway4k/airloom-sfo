@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v21)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v22)
 
 ## Local
 
@@ -136,4 +136,17 @@ Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated
 - Stronger local contrast/saturation after v18 darkening (detail without pale wash)
 - Prominent topography: World_Hillshade_Dark (Orbit, `/tiles/relief`) + World_Hillshade (Follow)
 - Safari Orbit proxy kept; exclusive basemap / arrivals rail / bullseye / trails unchanged
+
+### airloom-v22
+- **Privacy / BLOCKED / PIA visible**: ADS-B track, position, type kept for LADD
+  (`dbFlags & 8`), PIA (`dbFlags & 4`), `ownOp` privacy hints, and FA-style
+  no-reg inbound jets. Ident shows **BLOCKED** or **PIA** — never invent a
+  civil N-number. Hex stays internal for tracking only.
+- Registry redacted server-side in `/adsb/states` meta when privacy-flagged.
+- Orbit ~60 min board + Follow still include clear KSFO-inbound privacy traffic.
+- Fractional CS (EJA/LXJ/TWY/…) preferred for FA Ident overlap when public.
+- `PRIVACY_OVERRIDES` hex→mode table hook for tomorrow’s explicit list
+  (`PIA` | `BLOCKED` | `public`).
+- Caveat: schedule-only FA rows (no ADS-B position yet) still need a schedule
+  source for 95%+ list parity; ADS-B completeness covers airborne matches.
 
