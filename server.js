@@ -14,7 +14,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.3 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
+const UA = 'AirLoomSFO/1.4 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
 
 const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 360 }; // ~60–90 min jet cruise box
 const ADSB_CACHE_FRESH_MS = 22000;
@@ -417,8 +417,12 @@ async function backgroundRefresh() {
 
 
 /** Same-origin basemap proxies — Safari often fails mass cross-origin
- *  Image loads to arcgisonline (ACAO * + credentials). Server fetch has no CORS.
- *  orbit = World Dark Gray Base; relief = World Hillshade Dark (terrain). */
+ *  Image loads (esp. USGS ACAO * + credentials). Server fetch has no CORS.
+ *  orbit  = World Dark Gray Base
+ *  relief = World Hillshade Dark (Orbit terrain)
+ *  sat    = ESRI World Imagery (Follow primary; z19; keyless)
+ *  usgs   = USGS ImageryOnly (Follow fallback; max ~z16; pale near SFO)
+ *  hill   = World Hillshade light (Follow relief composite) */
 const TILE_UPSTREAMS = {
   orbit: [
     (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`,
@@ -429,10 +433,22 @@ const TILE_UPSTREAMS = {
     (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/${z}/${y}/${x}`,
     (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${z}/${y}/${x}`,
   ],
+  sat: [
+    (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+  ],
+  usgs: [
+    (z, y, x) => `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${z}/${y}/${x}`,
+  ],
+  hill: [
+    (z, y, x) => `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${z}/${y}/${x}`,
+    (z, y, x) => `https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${z}/${y}/${x}`,
+  ],
 };
 const ORBIT_UPSTREAMS = TILE_UPSTREAMS.orbit; // back-compat alias
 const tileProxyCache = new Map(); // key -> { buf, ct, at }
-const TILE_CACHE_MAX = 2400;
+const TILE_CACHE_MAX = 4800;
 const TILE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function fetchUpstreamTile(url) {
@@ -573,14 +589,15 @@ const server = http.createServer(async (req, res) => {
     }
 
 
-    // Same-origin Orbit + relief tiles (z/y/x ArcGIS order) — Safari CORS-safe
+    // Same-origin Orbit / relief / sat / usgs / hill tiles (z/y/x ArcGIS) — Safari CORS-safe
     {
-      const m = pathname.match(/^\/tiles\/(orbit|relief)\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
+      const m = pathname.match(/^\/tiles\/(orbit|relief|sat|usgs|hill)\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
       if (m) {
         const kind = m[1];
         const z = Number(m[2]), y = Number(m[3]), x = Number(m[4]);
+        const zMax = (kind === 'sat' || kind === 'hill') ? 19 : (kind === 'usgs' ? 16 : 18);
         if (!Number.isFinite(z) || !Number.isFinite(y) || !Number.isFinite(x)
-            || z < 0 || z > 18 || x < 0 || y < 0 || x >= (1 << z) || y >= (1 << z)) {
+            || z < 0 || z > zMax || x < 0 || y < 0 || x >= (1 << z) || y >= (1 << z)) {
           res.writeHead(400).end('bad tile');
           return;
         }

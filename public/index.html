@@ -648,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v19'; // SFO 100mi ultra-HD resident + hillshade topo + local contrast
+const BUILD_MARK = 'airloom-v20'; // ESRI World Imagery same-origin + z17–z18 chase LOD
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -685,6 +685,12 @@ window.__AIRLOOM_FEATURES = {
   fboArrivalsFocus: true,
   alwaysShowClosest: true,
   darkBasemapRich: true,
+  followEsriSat: true,
+  followMaxZ: 18,
+  followSameOriginSat: true,
+  chaseZ18: true,
+  bayHdResident: true,
+  bayHdWarmCache: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -2167,14 +2173,22 @@ function makeEarthBase(parent, dark) {
   }
 }
 
-/** Keyless, CORS-* World Imagery-class tiles (USGS / The National Map). No API key. */
-const FOLLOW_TILE_TMPL = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';
-const FOLLOW_TILE_URL = (zz, ty, tx) =>
-  `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zz}/${ty}/${tx}`;
-/** ESRI fallback if USGS mosaic fails (also keyless / CORS-*). */
-const FOLLOW_TILE_FALLBACK_URL = (zz, ty, tx) =>
+/**
+ * Follow aerial — ESRI World Imagery via same-origin /tiles/sat (Safari-safe, keyless, z19).
+ * USGS ImageryOnly was soft/pale near KSFO (low contrast) and caps at z16; Safari also
+ * rejects USGS ACAO * + credentials on cross-origin Image loads → stretched low-z mush.
+ */
+const FOLLOW_TILE_TMPL = '/tiles/sat/{z}/{y}/{x}';
+const FOLLOW_TILE_URL = (zz, ty, tx) => `/tiles/sat/${zz}/${ty}/${tx}`;
+const FOLLOW_TILE_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz}/${ty}/${tx}`;
+/** @deprecated alias — kept for Orbit emergency stylize path */
+const FOLLOW_TILE_FALLBACK_URL = FOLLOW_TILE_DIRECT_URL;
+const FOLLOW_TILE_USGS_URL = (zz, ty, tx) => `/tiles/usgs/${zz}/${ty}/${tx}`;
+const FOLLOW_TILE_USGS_DIRECT_URL = (zz, ty, tx) =>
+  `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_FOLLOW_TILE = FOLLOW_TILE_TMPL;
+window.__AIRLOOM_FOLLOW_TILE_DIRECT = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 /** Orbit / Air Loom dark basemap.
  *  Prefer same-origin /tiles/orbit proxy — Safari iOS often drops mass cross-origin
  *  Image loads to arcgisonline (ACAO * + Allow-Credentials), leaving Orbit black.
@@ -2186,15 +2200,16 @@ const ORBIT_TILE_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_ORBIT_TILE = ORBIT_TILE_TMPL;
 window.__AIRLOOM_ORBIT_TILE_DIRECT = ORBIT_TILE_DIRECT_TMPL;
-/** Terrain hillshade — Orbit uses same-origin dark hillshade proxy (Safari);
- *  Follow composites keyless World_Hillshade over imagery for relief. */
+/** Terrain hillshade — Orbit: same-origin dark; Follow: same-origin light hill. */
 const RELIEF_TILE_TMPL = '/tiles/relief/{z}/{y}/{x}';
 const RELIEF_TILE_URL = (zz, ty, tx) => `/tiles/relief/${zz}/${ty}/${tx}`;
 const RELIEF_TILE_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/${zz}/${ty}/${tx}`;
-const RELIEF_FOLLOW_URL = (zz, ty, tx) =>
+const RELIEF_FOLLOW_URL = (zz, ty, tx) => `/tiles/hill/${zz}/${ty}/${tx}`;
+const RELIEF_FOLLOW_DIRECT_URL = (zz, ty, tx) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/${zz}/${ty}/${tx}`;
 window.__AIRLOOM_RELIEF_TILE = RELIEF_TILE_TMPL;
+window.__AIRLOOM_HILL_TILE = '/tiles/hill/{z}/{y}/{x}';
 
 /** ~100 statute miles ≈ 87 nm — always-resident ultra-HD ring around KSFO. */
 const SFO_HD_RADIUS_NM = 87;
@@ -2302,25 +2317,25 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       const imgData = ctx.getImageData(0, 0, size, size);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
-        // Local contrast + sat boost — crisp Follow sat without chalk wash
+        // ESRI World Imagery: punch mid contrast / sat; hold highlights (no chalk wash)
         let r = d[i], g = d[i + 1], b = d[i + 2];
         const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         const t = lum / 255;
-        // Gentle S-curve: deepen shadows, punch mids, hold highlights
-        const curve = t < 0.5 ? 2.15 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2.15;
+        const curve = t < 0.5 ? 2.25 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2.1;
         const target = curve * 255;
-        const delta = (target - lum) * 0.72;
+        const delta = (target - lum) * 0.88;
         r = Math.min(255, Math.max(0, r + delta));
         g = Math.min(255, Math.max(0, g + delta));
         b = Math.min(255, Math.max(0, b + delta));
         const avg = (r + g + b) / 3;
-        const sat = 1.22;
+        const sat = 1.16;
         r = Math.min(255, Math.max(0, avg + (r - avg) * sat));
         g = Math.min(255, Math.max(0, avg + (g - avg) * sat));
-        b = Math.min(255, Math.max(0, avg + (b - avg) * sat * 0.96));
-        d[i] = r * 0.98 + 1;
-        d[i + 1] = g * 0.99 + 1;
-        d[i + 2] = b * 0.97;
+        b = Math.min(255, Math.max(0, avg + (b - avg) * sat * 0.98));
+        // Slight warm lift without pale floor
+        d[i] = Math.min(255, r * 0.99 + 2);
+        d[i + 1] = Math.min(255, g * 1.00 + 1);
+        d[i + 2] = Math.min(255, b * 0.97);
       }
       ctx.putImageData(imgData, 0, 0);
     } catch (_) { /* tainted */ }
@@ -2380,8 +2395,7 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   const cz = (nwE.z + seE.z) / 2;
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
-  // Base mosaics keep mipmaps; overlays use linear to avoid mip shimmer/seams on stacks
-  // High-z resident overlays: no mipmaps + max anisotropy → sharper when framing arrivals
+  // Never soft-mip high-z sat under chase — Linear + max anisotropy only
   const overlay = !!opts.overlay;
   const hiZ = (z || 0) >= 12;
   if (overlay || hiZ) {
@@ -2394,7 +2408,6 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
   tex.magFilter = THREE.LinearFilter;
   try { tex.anisotropy = renderer.capabilities.getMaxAnisotropy() || 1; } catch (_) {}
   // Overlays: no depth write + polygonOffset stops z-fight flicker between LOD planes
-  // (near/far spans are huge; even log-depth can shimmer on Safari when y-gaps are cm-scale)
   const mat = new THREE.MeshBasicMaterial({
     map: tex,
     depthWrite: !overlay,
@@ -2402,8 +2415,8 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
     polygonOffset: overlay,
     polygonOffsetFactor: overlay ? -1 : 0,
     polygonOffsetUnits: overlay ? -1 : 0,
-    // Runtime tint: Orbit cool readable; Follow slightly warm crisp
-    color: opts.orbitLift ? 0xb4c2d0 : (brighten ? 0xe4ecdf : 0xffffff),
+    // Orbit cool; Follow near-neutral so ESRI contrast is not washed green
+    color: opts.orbitLift ? 0xb4c2d0 : (brighten ? 0xf4f6f0 : 0xffffff),
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height, 1, 1), mat);
   mesh.rotation.x = -Math.PI / 2;
@@ -2440,19 +2453,21 @@ groundGroup.add(landingCueGroup);
 scene.add(trailHudGroup);
 
 window.__AIRLOOM_TILE_LEVELS = {
-  followStatic: [8, 10, 11, 12, 13, 14, 15, 16],
-  followChase: [13, 14, 15, 16],
-  orbitDark: [8, 10, 11, 12, 13, 14, 15],
+  followStatic: [8, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+  followChase: [14, 15, 16, 17, 18],
+  orbitDark: [8, 10, 11, 12, 13, 14, 15, 16],
   sfoHdRadiusNm: SFO_HD_RADIUS_NM,
   maxMosaicSpan: MAX_MOSAIC_SPAN,
   source: FOLLOW_TILE_TMPL,
-  fallback: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  sourceDirect: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  fallbackUsgs: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+  maxEsriZ: 19,
   maxUsgsZ: 16,
-  densify: 'airloom-v19-sfo-hd-resident',
+  densify: 'airloom-v20-esri-sat-z18',
   orbitSource: ORBIT_TILE_TMPL,
   orbitSourceDirect: ORBIT_TILE_DIRECT_TMPL,
   reliefOrbit: RELIEF_TILE_TMPL,
-  reliefFollow: 'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+  reliefFollow: '/tiles/hill/{z}/{y}/{x}',
 };
 
 function disposeMeshTree(root) {
@@ -2469,37 +2484,71 @@ function disposeMeshTree(root) {
 
 async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extraOpts) {
   const base = { lat, lon, ...(extraOpts || {}) };
-  // Default Follow relief: light World_Hillshade over imagery (terrain reads, sat still dominates)
+  // Light hillshade under sat — low alpha so streets/runways stay crisp (not pale wash)
   if (base.reliefUrl == null && base.relief !== false) {
     base.reliefUrl = RELIEF_FOLLOW_URL;
-    if (base.reliefAlpha == null) base.reliefAlpha = 0.38;
+    if (base.reliefAlpha == null) {
+      base.reliefAlpha = z >= 17 ? 0.16 : (z >= 15 ? 0.22 : (z >= 13 ? 0.28 : 0.32));
+    }
     if (!base.reliefMode) base.reliefMode = 'overlay';
   }
-  let layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_URL });
-  if (!layer) layer = await fetchTileLayer(z, span, fillCss, brighten, { ...base, tileUrl: FOLLOW_TILE_FALLBACK_URL });
+  // 1) same-origin ESRI World Imagery (Safari + high-z)
+  let layer = await fetchTileLayer(z, span, fillCss, brighten, {
+    ...base, tileUrl: FOLLOW_TILE_URL, sameOrigin: true, poolLimit: 16,
+  });
+  // 2) direct ESRI
+  if (!layer) {
+    layer = await fetchTileLayer(z, span, fillCss, brighten, {
+      ...base, tileUrl: FOLLOW_TILE_DIRECT_URL, reliefUrl: RELIEF_FOLLOW_DIRECT_URL, poolLimit: 8,
+    });
+  }
+  // 3) USGS via proxy (max z16; softer/paler near SFO — last resort)
+  if (!layer && z <= 16) {
+    layer = await fetchTileLayer(z, span, fillCss, brighten, {
+      ...base, tileUrl: FOLLOW_TILE_USGS_URL, sameOrigin: true, poolLimit: 12,
+    });
+  }
+  if (!layer && z <= 16) {
+    layer = await fetchTileLayer(z, span, fillCss, brighten, {
+      ...base, tileUrl: FOLLOW_TILE_USGS_DIRECT_URL, reliefUrl: RELIEF_FOLLOW_DIRECT_URL, poolLimit: 6,
+    });
+  }
   return layer;
 }
 
 /**
- * Extra mosaic centers so span-capped layers still cover ~radiusNm (SFO HD ring).
- * Caps patch count for startup cost; center always included.
+ * Hex-lattice mosaic centers covering ~radiusNm (Bay HD resident).
+ * Overlap ~20% so switching Follow views never falls into soft low-z gaps.
  */
-function residentPatchCenters(z, span, radiusNm, maxPatches) {
+function bayHdPatchCenters(z, span, radiusNm, maxPatches) {
   const coverNm = (span + 0.5) * approxTileNm(z);
   const centers = [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
-  if (coverNm >= radiusNm * 0.92) return centers;
-  const cap = Math.max(1, maxPatches || 7);
-  // One ring of patches at ~0.62 * remaining gap so union reaches radius
-  const ringNm = Math.min(radiusNm * 0.72, coverNm * 1.55);
-  const n = Math.min(cap - 1, Math.max(4, Math.ceil((2 * Math.PI * ringNm) / (coverNm * 1.5))));
-  for (let i = 0; i < n; i++) {
-    const brg = (i / n) * 2 * Math.PI;
-    const dLat = (ringNm / 60) * Math.cos(brg);
-    const cosLat = Math.max(0.2, Math.cos(ORIGIN.lat * Math.PI / 180));
-    const dLon = (ringNm / (60 * cosLat)) * Math.sin(brg);
-    centers.push({ lat: ORIGIN.lat + dLat, lon: ORIGIN.lon + dLon });
+  if (!(radiusNm > 0) || coverNm >= radiusNm * 0.92) return centers;
+  const cap = Math.max(1, maxPatches || 24);
+  const stepNm = Math.max(coverNm * 0.82, coverNm * 0.75);
+  const rowH = stepNm * 0.8660254;
+  const cosLat = Math.max(0.2, Math.cos(ORIGIN.lat * Math.PI / 180));
+  let row = 0;
+  for (let n = -radiusNm; n <= radiusNm + 1e-6; n += rowH) {
+    const off = (row % 2) * (stepNm * 0.5);
+    for (let e = -radiusNm - stepNm; e <= radiusNm + stepNm; e += stepNm) {
+      const ee = e + off;
+      if ((ee * ee + n * n) > (radiusNm * radiusNm)) continue;
+      if (Math.abs(ee) < 0.05 && Math.abs(n) < 0.05) continue;
+      centers.push({
+        lat: ORIGIN.lat + (n / 60),
+        lon: ORIGIN.lon + (ee / (60 * cosLat)),
+      });
+      if (centers.length >= cap) return centers;
+    }
+    row++;
   }
   return centers;
+}
+
+/** Thin ring fallback (Orbit / lighter layers). */
+function residentPatchCenters(z, span, radiusNm, maxPatches) {
+  return bayHdPatchCenters(z, span, radiusNm, maxPatches || 7);
 }
 
 let chaseInsetGen = 0;
@@ -2531,7 +2580,10 @@ window.__AIRLOOM_DIAG = function () {
     chaseVisible: chaseHiZGroup?.visible,
     orbitTile: ORBIT_TILE_TMPL,
     reliefTile: RELIEF_TILE_TMPL,
+    followTile: FOLLOW_TILE_TMPL,
     sfoHdNm: SFO_HD_RADIUS_NM,
+    sfoHd: window.__AIRLOOM_SFO_HD,
+    warm: window.__AIRLOOM_TILE_WARM,
     darkMeshes,
     clear: renderer?.getClearColor?.(new THREE.Color())?.getHexString?.(),
   };
@@ -2563,55 +2615,53 @@ function offsetAlongTrack(lat, lon, trackDeg, aheadNm) {
 }
 
 /**
- * Ultra-HD inset under + ahead of chase — denser radius, z13–z16, look-ahead prefetch.
- * airloom-v9: double-buffer swap (no mid-frame wipe), 2-cell hysteresis, longer coalesce
- * so LOD does not thrash / flicker while the chase moves.
+ * Ultra-HD inset under + ahead of chase — z15–z18 ESRI, look-ahead prefetch.
+ * Double-buffer swap; hysteresis on z16 so LOD does not thrash.
+ * Bay-wide z15–z18 also lives in satGroundGroup (always resident).
  */
 async function refreshChaseInset(lat, lon, trackDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   if (settings.cameraMode !== 'follow') return;
   const now = performance.now();
   if (chaseInsetBusy) return;
-  if (now - chaseInsetLastTry < 900) return;
+  if (now - chaseInsetLastTry < 1100) return;
   chaseInsetLastTry = now;
-  const ahead = offsetAlongTrack(lat, lon, trackDeg, 3.5);
+  const ahead = offsetAlongTrack(lat, lon, trackDeg, 4.5);
   const focusLat = (lat + ahead.lat) * 0.5;
   const focusLon = (lon + ahead.lon) * 0.5;
-  const t14 = latLonToTile(focusLat, focusLon, 14);
-  // 2-cell hysteresis: ignore 1-tile jitter that caused inconsistent sharpness
+  const t16 = latLonToTile(focusLat, focusLon, 16);
   if (chaseInsetTileKey) {
     const parts = chaseInsetTileKey.split(':');
     const px = Number(parts[1]), py = Number(parts[2]);
     if (Number.isFinite(px) && Number.isFinite(py)) {
-      if (Math.abs(t14.x - px) < 2 && Math.abs(t14.y - py) < 2) return;
+      if (Math.abs(t16.x - px) < 2 && Math.abs(t16.y - py) < 2) return;
     }
   }
-  const key = `14:${t14.x}:${t14.y}`;
+  const key = `16:${t16.x}:${t16.y}`;
   if (key === chaseInsetTileKey) return;
   chaseInsetBusy = true;
   const gen = ++chaseInsetGen;
   const pending = [];
   try {
-    const context = await fetchLayerWithFallback(13, 4, '#365848', true, focusLat, focusLon, { overlay: true });
+    const mid = await fetchLayerWithFallback(15, 4, '#426848', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const mid = await fetchLayerWithFallback(14, 4, '#3a5848', true, focusLat, focusLon, { overlay: true });
+    const sharp = await fetchLayerWithFallback(16, 3, '#4a6e50', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const sharp = await fetchLayerWithFallback(15, 3, '#426848', true, lat, lon, { overlay: true });
+    const fine = await fetchLayerWithFallback(17, 3, '#4e7254', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const detail = await fetchLayerWithFallback(16, 3, '#4a6e50', true, lat, lon, { overlay: true });
+    const ultra = await fetchLayerWithFallback(18, 2, '#527856', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
 
-    // Double-buffer: assemble fully, then atomic replace (no mid-frame void)
-    if (context) { context.mesh.position.y = 0.9; context.mesh.renderOrder = 23; pending.push(context.mesh); }
-    if (mid) { mid.mesh.position.y = 1.05; mid.mesh.renderOrder = 24; pending.push(mid.mesh); }
-    if (sharp) { sharp.mesh.position.y = 1.2; sharp.mesh.renderOrder = 25; pending.push(sharp.mesh); }
-    if (detail) { detail.mesh.position.y = 1.35; detail.mesh.renderOrder = 26; pending.push(detail.mesh); }
+    if (mid) { mid.mesh.position.y = 1.55; mid.mesh.renderOrder = 40; pending.push(mid.mesh); }
+    if (sharp) { sharp.mesh.position.y = 1.65; sharp.mesh.renderOrder = 41; pending.push(sharp.mesh); }
+    if (fine) { fine.mesh.position.y = 1.75; fine.mesh.renderOrder = 42; pending.push(fine.mesh); }
+    if (ultra) { ultra.mesh.position.y = 1.85; ultra.mesh.renderOrder = 43; pending.push(ultra.mesh); }
     if (!pending.length) return;
     disposeMeshTree(chaseHiZGroup);
     for (const m of pending) chaseHiZGroup.add(m);
     chaseInsetTileKey = key;
     window.__AIRLOOM_CHASE_TILE = {
-      z: [13, 14, 15, 16], key, lat, lon, focusLat, focusLon, aheadNm: 3.5, at: Date.now(),
+      z: [15, 16, 17, 18], key, lat, lon, focusLat, focusLon, aheadNm: 4.5, at: Date.now(),
     };
   } catch (e) {
     console.warn('chase inset', e);
@@ -2619,13 +2669,15 @@ async function refreshChaseInset(lat, lon, trackDeg) {
       try { m.material?.map?.dispose?.(); m.material?.dispose?.(); m.geometry?.dispose?.(); } catch (_) {}
     }
   } finally {
-    if (gen === chaseInsetGen) chaseInsetBusy = false;
-    else chaseInsetBusy = false;
+    chaseInsetBusy = false;
   }
 }
 
-/** Photoreal USGS ImageryOnly (NAIP-class) — Follow chase. Keyless / CORS-*.
- *  airloom-v19: always-resident ultra-HD within ~100 mi of KSFO + hillshade relief. */
+/**
+ * Follow photoreal — ESRI World Imagery (same-origin /tiles/sat).
+ * airloom-v20: Bay-wide always-resident high-z (Marin–South Bay–East Bay–Peninsula
+ * ~100 mi of KSFO) so views never fall back to soft low-z mush; chase adds z17–z18.
+ */
 async function loadSatBasemap() {
   chaseInsetGen++;
   chaseInsetTileKey = '';
@@ -2634,48 +2686,103 @@ async function loadSatBasemap() {
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
   satGroundGroup.add(chaseHiZGroup);
-  // Resident ladder: full ~100 mi through z10–z11; denser z12–z16 near field
-  const layers = [
-    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#2f4a55', overlay: false },
-    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.30, fill: '#334f50', overlay: true },
-    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.50, fill: '#355548', overlay: true },
-    // z12 span-capped (~31 nm) + patch ring → union covers ~100 mi
-    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.70, fill: '#3a5848', overlay: true, patches: true, maxPatches: 5 },
-    { z: 13, span: 6, y: 0.90, fill: '#3d5c48', overlay: true },
-    { z: 14, span: 5, y: 1.10, fill: '#416648', overlay: true },
-    { z: 15, span: 4, y: 1.30, fill: '#456a4c', overlay: true },
-    { z: 16, span: 3, y: 1.50, fill: '#4a6e50', overlay: true },
-  ];
-  for (const L of layers) {
+
+  const addSatLayer = async (L, radiusNm) => {
+    const r = Number.isFinite(L.radiusNm) ? L.radiusNm : radiusNm;
     const centers = L.patches
-      ? residentPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 5)
+      ? bayHdPatchCenters(L.z, L.span, r, L.maxPatches || 12)
       : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
     let yi = 0;
+    let ok = 0;
     for (const c of centers) {
       const layer = await fetchLayerWithFallback(
         L.z, L.span, L.fill, true, c.lat, c.lon, {
           overlay: !!L.overlay,
-          reliefAlpha: L.z >= 12 ? 0.42 : 0.34,
+          // relief alpha left to fetchLayerWithFallback z-scaling
         }
       );
       if (layer) {
-        layer.mesh.position.y = L.y + yi * 0.02;
-        if (centers.length > 1) layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
+        layer.mesh.position.y = L.y + yi * 0.015;
+        layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
         satGroundGroup.add(layer.mesh);
+        ok++;
       }
       yi++;
     }
-  }
+    return { z: L.z, span: L.span, patches: centers.length, loaded: ok, radiusNm: r };
+  };
+
+  // Phase A — wide + mid ladder (paint ASAP)
+  const phaseA = [
+    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#2f4a55', overlay: false },
+    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#334f50', overlay: true },
+    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.46, fill: '#355548', overlay: true },
+    { z: 12, span: Math.min(MAX_MOSAIC_SPAN, spanForRadiusNm(12, SFO_HD_RADIUS_NM)), y: 0.64, fill: '#3a5848', overlay: true, patches: true, maxPatches: 9 },
+    { z: 13, span: 6, y: 0.82, fill: '#3d5c48', overlay: true, patches: true, maxPatches: 16, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 14, span: 5, y: 1.00, fill: '#416648', overlay: true, patches: true, maxPatches: 22, radiusNm: SFO_HD_RADIUS_NM },
+  ];
+  const metaA = [];
+  for (const L of phaseA) metaA.push(await addSatLayer(L, SFO_HD_RADIUS_NM));
+  groundReady = true;
   window.__AIRLOOM_SFO_HD = {
     radiusNm: SFO_HD_RADIUS_NM,
-    follow: layers.map((L) => ({ z: L.z, span: L.span, patches: !!L.patches })),
+    phase: 'A',
+    follow: metaA,
     at: Date.now(),
   };
-  // Seed chase inset at KSFO only when Follow is the active mode
   if (settings.cameraMode === 'follow') {
     refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
   }
-  groundReady = true;
+
+  // Phase B — Bay-wide high-z always resident (background; does not block Follow)
+  const phaseB = [
+    // Full ~100 mi at z15–z16 (hex patches; underlay keeps gaps readable)
+    { z: 15, span: 4, y: 1.18, fill: '#456a4c', overlay: true, patches: true, maxPatches: 36, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 16, span: 3, y: 1.32, fill: '#4a6e50', overlay: true, patches: true, maxPatches: 48, radiusNm: SFO_HD_RADIUS_NM },
+    // Core Bay ultra (Marin–SFO–South Bay–East Bay) z17–z18 always loaded
+    { z: 17, span: 3, y: 1.44, fill: '#4e7254', overlay: true, patches: true, maxPatches: 40, radiusNm: 48 },
+    { z: 18, span: 2, y: 1.52, fill: '#527856', overlay: true, patches: true, maxPatches: 48, radiusNm: 36 },
+  ];
+  const metaB = [];
+  for (const L of phaseB) {
+    try { metaB.push(await addSatLayer(L, L.radiusNm || SFO_HD_RADIUS_NM)); }
+    catch (e) { console.warn('sat phaseB z' + L.z, e); }
+  }
+  // Warm leftover raw tiles into browser + server proxy cache (no mesh)
+  try { warmBaySatTileCache().catch(() => {}); } catch (_) {}
+
+  window.__AIRLOOM_SFO_HD = {
+    radiusNm: SFO_HD_RADIUS_NM,
+    phase: 'B',
+    follow: metaA.concat(metaB),
+    bayCoreNm: { z17: 48, z18: 36 },
+    at: Date.now(),
+  };
+}
+
+/** Fire-and-forget Image fetches so Bay z15–z18 tiles hit HTTP + /tiles/sat proxy cache. */
+async function warmBaySatTileCache() {
+  const jobs = [];
+  const pushDisk = (z, radiusNm, stride) => {
+    const center = latLonToTile(ORIGIN.lat, ORIGIN.lon, z);
+    const tileNm = approxTileNm(z);
+    const half = Math.ceil(radiusNm / Math.max(0.05, tileNm));
+    const step = Math.max(1, stride | 0);
+    for (let dy = -half; dy <= half; dy += step) {
+      for (let dx = -half; dx <= half; dx += step) {
+        if ((dx * dx + dy * dy) > (half * half)) continue;
+        jobs.push(FOLLOW_TILE_URL(z, center.y + dy, center.x + dx));
+        jobs.push(RELIEF_FOLLOW_URL(z, center.y + dy, center.x + dx));
+      }
+    }
+  };
+  // Strided warm: denser near field, coarser out to 100 mi
+  pushDisk(15, SFO_HD_RADIUS_NM, 2);
+  pushDisk(16, SFO_HD_RADIUS_NM, 2);
+  pushDisk(17, 48, 2);
+  pushDisk(18, 36, 2);
+  window.__AIRLOOM_TILE_WARM = { n: jobs.length, at: Date.now() };
+  await runPool(jobs, 10, async (url) => { await loadTileImage(url, 8000); });
 }
 
 /** Dark high-contrast stylized basemap — Air Loom Orbit overview.
@@ -2730,16 +2837,17 @@ async function loadDarkBasemap() {
     { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#05070c', overlay: false },
     { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#060910', overlay: true },
     { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.48, fill: '#070b12', overlay: true },
-    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.68, fill: '#080c14', overlay: true, patches: true, maxPatches: 5 },
-    { z: 13, span: 6, y: 0.88, fill: '#090e16', overlay: true },
-    { z: 14, span: 5, y: 1.08, fill: '#0a1018', overlay: true },
-    { z: 15, span: 4, y: 1.28, fill: '#0c141c', overlay: true },
+    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.68, fill: '#080c14', overlay: true, patches: true, maxPatches: 9 },
+    { z: 13, span: 6, y: 0.88, fill: '#090e16', overlay: true, patches: true, maxPatches: 14 },
+    { z: 14, span: 5, y: 1.08, fill: '#0a1018', overlay: true, patches: true, maxPatches: 18 },
+    { z: 15, span: 4, y: 1.28, fill: '#0c141c', overlay: true, patches: true, maxPatches: 22 },
+    { z: 16, span: 3, y: 1.42, fill: '#0e1820', overlay: true, patches: true, maxPatches: 28 },
   ];
 
   let any = false;
   for (const L of layers) {
     const centers = L.patches
-      ? residentPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 5)
+      ? bayHdPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 12)
       : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
     let yi = 0;
     for (const c of centers) {
@@ -4891,7 +4999,7 @@ function updateCockpitCameras(dt) {
     _ckSmoothInit = false;
     return false;
   }
-  // Keep ultra-HD USGS mosaic under + ahead of chase (z13–z16 look-ahead)
+  // Keep ultra-HD ESRI mosaic under + ahead of chase (z15–z18 look-ahead)
   if (Number.isFinite(prim.lat) && Number.isFinite(prim.lon)) {
     refreshChaseInset(prim.lat, prim.lon, prim.track);
   }
