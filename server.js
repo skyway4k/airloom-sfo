@@ -14,7 +14,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.5 (+https://github.com/skyway4k/airloom-sfo; contact=skyway4k@users.noreply.github.com)';
+const UA = 'AirLoomSFO/1.6 (+https://sfo3d.onrender.com; airloom-sfo)';
 
 const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 360 }; // ~60–90 min jet cruise box
 const ADSB_CACHE_FRESH_MS = 22000;
@@ -181,7 +181,8 @@ function buildAdsbPayload(list, sourceName) {
       hex: String(ac.hex || '').toLowerCase(),
       // Never leak registry for PIA / LADD / FA-style privacy aircraft
       reg: priv.blocked ? null : (priv.regRaw || null),
-      type: ac.t || null,
+      // Prefer ADS-B/FAA ICAO type code (ac.t) — never invent labels server-side
+      type: (ac.t != null && String(ac.t).trim()) ? String(ac.t).trim().toUpperCase() : null,
       desc: ac.desc || null,
       flight: flightOut,
       lat: typeof ac.lat === 'number' ? ac.lat : null,
@@ -214,7 +215,7 @@ function extractAcList(data) {
   return [];
 }
 
-// adsb.fi rejects some large radii (HTTP 400 around 360nm); keep it ≤250 like Skyway.
+// adsb.fi rejects some large radii (HTTP 400 around 360nm); keep it ≤250.
 const ADSB_FI_MAX_DIST_NM = 250;
 const SOURCES = [
   {
@@ -524,10 +525,11 @@ function fetchUpstreamTile(url) {
     const lib = url.startsWith('https') ? require('https') : require('http');
     const req = lib.get(url, {
       headers: {
-        'User-Agent': UA,
-        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (compatible; AirLoomSFO/1.6; +https://sfo3d.onrender.com)',
+        Accept: 'image/avif,image/webp,image/apng,image/jpeg,image/*,*/*;q=0.8',
+        Referer: 'https://sfo3d.onrender.com/',
       },
-      timeout: 12000,
+      timeout: 15000,
     }, (r) => {
       if (r.statusCode && r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
         r.resume();
@@ -563,7 +565,8 @@ async function handleProxiedTile(kind, z, y, x, res) {
     res.writeHead(200, {
       'Content-Type': cached.ct,
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=86400',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Cache-Control': 'public, max-age=86400, immutable',
       'X-AirLoom-Tile': 'cache',
       'X-AirLoom-Kind': kind,
     });
@@ -587,7 +590,8 @@ async function handleProxiedTile(kind, z, y, x, res) {
       res.writeHead(200, {
         'Content-Type': ct,
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=86400',
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'Cache-Control': 'public, max-age=86400, immutable',
         'X-AirLoom-Tile': 'miss',
         'X-AirLoom-Kind': kind,
       });

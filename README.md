@@ -5,7 +5,13 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v22)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v23)
+
+## airloom-v23
+
+- **Type truth**: Prefer ADS-B/FAA ICAO `t` over guessed labels. EJA930 / N930QS = **C68A Citation Latitude** (not CJ3). C25B→CJ3, C25C→CJ4, C68A→Latitude, C700→Longitude.
+- **Safari Follow UHD**: same-origin `/tiles/sat` via `fetch`+ImageBitmap (not mass `Image`+CORS); iOS skips high-z relief doubling; hide muted earth disc once sat paints — fixes solid green ground.
+- **Bizjet silhouettes**: Latitude/Longitude use TYPE_DIMS procedural (shared citation.glb looked like CJ3); Challengers→CRJ GLB; Phenoms→E-Jet GLB; span stretch.
 
 ## Local
 

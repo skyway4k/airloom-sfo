@@ -56,3 +56,10 @@ Family `refLen` values track real-world length so a C172 (~8.3 m) stays clearly
 smaller than a G650 / Global (~30 m) even when they share a Citation-derived mesh
 for mid/large cabin stand-ins. Prefer unique redistributable GA meshes when available;
 ATR-42 is the turboprop stand-in until a dedicated PC-12/King Air GLB is vendored.
+
+## airloom-v23 mapping notes
+
+- Challenger 300/350/600 (`CL30`/`CL35`/`CL60`) → `crj.glb` (Bombardier lineage stand-in).
+- Phenom/Praetor (`E50P`/`E55P`/`E545`/`E550`) → `ejet.glb` (Embraer stand-in).
+- Citation Latitude/Longitude (`C68A`/`C700`) keep procedural TYPE_DIMS silhouettes (FR24 citation.glb is shared with CJ and misreads as CJ3 when only uniformly scaled).
+- No copyrighted photogrammetry scans; only GPLv2 / CC-BY free GLBs already vendored.

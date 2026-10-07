@@ -132,7 +132,8 @@
       "yaw": 0,
       "pitch": 0,
       "roll": 0,
-      "yOffset": 0
+      "yOffset": 0,
+      "notes": " Also Phenom 100/300 + Praetor stand-in (Embraer)."
     },
     "crj": {
       "file": "crj.glb",
@@ -143,7 +144,8 @@
       "yaw": 0,
       "pitch": 0,
       "roll": 0,
-      "yOffset": 0
+      "yOffset": 0,
+      "notes": " Also Challenger 300/350/600 stand-in (Bombardier lineage)."
     },
     "q400": {
       "file": "q400.glb",
@@ -236,7 +238,7 @@
       "pitch": 0,
       "roll": 0,
       "yOffset": 0,
-      "notes": "Citation mesh \u2014 light jets (CJ/M2/Lear 40/45)"
+      "notes": "Citation mesh \u2014 light jets (CJ2/CJ3/CJ4/M2/Lear). C25B=CJ3."
     },
     "midjet": {
       "file": "midjet.glb",
@@ -248,7 +250,7 @@
       "pitch": 0,
       "roll": 0,
       "yOffset": 0,
-      "notes": "Citation mesh scaled \u2014 super-mid (CL30/35, C68A, F2TH)"
+      "notes": "Citation mesh scaled \u2014 Sovereign/Latitude/Longitude (C68A display uses procedural TYPE_DIMS silhouette)."
     },
     "largecabin": {
       "file": "largecabin.glb",
@@ -260,7 +262,7 @@
       "pitch": 0,
       "roll": 0,
       "yOffset": 0,
-      "notes": "Citation mesh scaled \u2014 large cabin (Gulfstream/Global/Falcon 7X/8X)"
+      "notes": "Citation mesh scaled \u2014 Gulfstream/Global/Falcon 7X/8X stand-in; span-stretched per TYPE_DIMS."
     }
   },
   "exact": {
@@ -364,10 +366,10 @@
     "E2": "ejet",
     "EJET": "ejet",
     "E45X": "ejet",
-    "E35L": "midjet",
-    "E55P": "lightjet",
-    "E50P": "lightjet",
-    "E55L": "midjet",
+    "E35L": "ejet",
+    "E55P": "ejet",
+    "E50P": "ejet",
+    "E55L": "ejet",
     "E135": "ejet",
     "E145": "ejet",
     "E45J": "ejet",
@@ -376,10 +378,10 @@
     "CRJ9": "crj",
     "CRJX": "crj",
     "CRJ": "crj",
-    "CL60": "midjet",
-    "CL30": "midjet",
-    "CL35": "midjet",
-    "CL2T": "midjet",
+    "CL60": "crj",
+    "CL30": "crj",
+    "CL35": "crj",
+    "CL2T": "crj",
     "DH8A": "q400",
     "DH8B": "q400",
     "DH8C": "q400",
@@ -673,7 +675,7 @@
     "C77R": "ga",
     "C72R": "ga",
     "P180": "turboprop",
-    "E550": "midjet",
+    "E550": "ejet",
     "TBM850": "turboprop",
     "TBM900": "turboprop",
     "TBM910": "turboprop",
@@ -715,9 +717,9 @@
     "SF50": "lightjet",
     "VERY": "lightjet",
     "VLJ": "lightjet",
-    "CL604": "midjet",
-    "CL605": "midjet",
-    "CL650": "midjet",
+    "CL604": "crj",
+    "CL605": "crj",
+    "CL650": "crj",
     "GALX": "midjet",
     "SBR2": "midjet",
     "GA6C": "largecabin",
@@ -732,7 +734,7 @@
     "G700": "largecabin",
     "GL7T": "largecabin",
     "GLOBAL": "largecabin",
-    "E545": "midjet",
+    "E545": "ejet",
     "EC130": "heli",
     "EC135": "heli",
     "EC145": "heli",
@@ -839,27 +841,27 @@
     ],
     [
       "CL3",
-      "midjet"
+      "crj"
     ],
     [
       "CL6",
-      "midjet"
+      "crj"
     ],
     [
       "CL2",
-      "midjet"
+      "crj"
     ],
     [
       "E55",
-      "lightjet"
+      "ejet"
     ],
     [
       "E50",
-      "lightjet"
+      "ejet"
     ],
     [
       "E54",
-      "lightjet"
+      "ejet"
     ],
     [
       "LJ",
@@ -1369,7 +1371,7 @@
   },
   "stats": {
     "uniqueGlbs": 23,
-    "exactIcaoMapped": 486,
+    "exactIcaoMapped": 487,
     "prefixRules": 144,
     "gaFamilyExact": 310,
     "gaFamilies": [
@@ -1381,6 +1383,7 @@
       "midjet",
       "turboprop"
     ],
-    "airloom": "v21-bizjet-audit"
+    "airloom": "v23-faa-type-safari-sat",
+    "notes": "C25B=CJ3 lightjet; C68A=Latitude midjet/procedural; CL*=crj; E55P=ejet"
   }
 }

@@ -648,7 +648,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v22'; // BLOCKED/PIA privacy display + keep ADS-B tracks
+const BUILD_MARK = 'airloom-v23'; // FAA/ADS-B type truth + Safari sat tiles + bizjet silhouettes
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -808,6 +808,15 @@ const TYPE_OVERRIDES_BY_HEX = {
   // example: 'abcdef': 'C25B',
 };
 
+/**
+ * FAA / ADS-B verified ICAO type by US registration (fleet facts).
+ * Used when feed `t` is missing OR conflicts with a verified fact.
+ * EJA930 / N930QS = C68A Citation Latitude (NOT C25B/CJ3) — confirmed live ADS-B.
+ */
+const REG_TYPE_FACTS = {
+  N930QS: 'C68A',
+};
+
 /** Parse ICAO type from ADS-B desc strings when `t` is missing/garbage. */
 function typeFromDesc(desc) {
   if (!desc) return null;
@@ -852,6 +861,7 @@ function resolveAircraftType(meta, priorType) {
   const hex = meta && meta.hex ? String(meta.hex).toLowerCase() : '';
   if (reg && TYPE_OVERRIDES_BY_REG[reg]) return TYPE_OVERRIDES_BY_REG[reg];
   if (hex && TYPE_OVERRIDES_BY_HEX[hex]) return TYPE_OVERRIDES_BY_HEX[hex];
+  // Prefer live ADS-B / FAA ICAO type code over guessed marketing labels
   let t = meta && meta.type ? String(meta.type).toUpperCase().trim() : '';
   if (t === 'NULL' || t === 'NONE' || t === '????' || t === '0000') t = '';
   // Guard: if feed says Global/Gulfstream but desc clearly Citation CJ*, trust desc
@@ -865,8 +875,16 @@ function resolveAircraftType(meta, priorType) {
     const dIsGlobal = /^(GL7T|GL6T|GL5T|GLEX|GA[567]C)$/.test(fromDesc);
     // Keep ADS-B t when both agree on family; prefer t for Globals (N100BD)
     if (tIsCj && dIsGlobal) {/* keep t — rare */ }
+    // Guard: desc says Latitude/Longitude but feed says CJ* — trust desc ICAO
+    if (tIsCj && /^(C68A|C700|C680)$/.test(fromDesc)) t = fromDesc;
   }
   if (!t && fromDesc) t = fromDesc;
+  // FAA fleet fact: fill missing OR correct verified conflicts (N930QS=C68A Latitude)
+  const fact = reg && REG_TYPE_FACTS[reg];
+  if (fact) {
+    if (!t) t = fact;
+    else if (t !== fact) t = fact;
+  }
   if (!t && priorType) t = String(priorType).toUpperCase().trim();
   return t || null;
 }
@@ -1759,6 +1777,16 @@ function cloneGltfModel(template, icao, targetLen) {
   // Scale from family refLen → this ICAO's length
   const ref = template.userData.refLen || targetLen;
   if (ref > 0 && targetLen > 0) g.scale.multiplyScalar(targetLen / ref);
+  // Non-uniform span (X) so e.g. Latitude/Challenger wings read wider than a CJ
+  try {
+    const info = sizeForType(icao);
+    const refSpan = template.userData.refSpan || ref;
+    if (info && info.span > 0 && refSpan > 0 && targetLen > 0 && ref > 0) {
+      const currentSpan = refSpan * (targetLen / ref);
+      const sx = info.span / Math.max(0.001, currentSpan);
+      g.scale.x *= THREE.MathUtils.clamp(sx, 0.72, 1.55);
+    }
+  } catch (_) {}
   g.userData.bodyMats = [];
   g.userData.finMats = [];
   g.userData.isGltf = true;
@@ -1799,8 +1827,17 @@ function attachGltfToRec(rec, template) {
   orientAircraftModel(rec);
 }
 
+/**
+ * Midsize Citations share the FR24 citation.glb with lightjets — keep TYPE_DIMS
+ * procedural so C68A Latitude / C700 Longitude do not look like a scaled CJ3.
+ * Light CJs (C25*) still use lightjet GLB (correct Citation silhouette).
+ */
+const PROCEDURAL_SILHOUETTE = new Set(['C68A', 'C700', 'C680', 'C750', 'C650']);
+
 function requestGltfForRec(rec) {
   if (!rec || rec.gltfFamily || rec._gltfRequested) return;
+  const typ = rec.type ? String(rec.type).toUpperCase().trim() : '';
+  if (typ && PROCEDURAL_SILHOUETTE.has(typ)) return;
   const famId = resolveFamilyId(rec.type, rec.cat);
   if (!famId) return;
   rec._gltfRequested = famId;
@@ -2281,26 +2318,42 @@ function tileToLatLon(x, y, z) {
   return { lat, lon };
 }
 
-/** Always-present earth disc so Follow never sits in a blue void if tiles lag. */
+/** Always-present earth disc so Follow never sits in a blue void if tiles lag.
+ *  Mute olive (not solid lawn green) — sat mosaics hide these once any layer loads. */
 function makeEarthBase(parent, dark) {
   const r = GROUND_M * 0.55;
   const disc = new THREE.Mesh(
     new THREE.CircleGeometry(r, 96),
-    new THREE.MeshBasicMaterial({ color: dark ? 0x0a0e14 : 0x3d5a42, depthWrite: true })
+    new THREE.MeshBasicMaterial({ color: dark ? 0x0a0e14 : 0x243028, depthWrite: true })
   );
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = -2;
+  disc.userData.earthBase = true;
   parent.add(disc);
   if (!dark) {
     const water = new THREE.Mesh(
       new THREE.CircleGeometry(r * 0.42, 64),
-      new THREE.MeshBasicMaterial({ color: 0x2f5f78, transparent: true, opacity: 0.55, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: 0x1e3a48, transparent: true, opacity: 0.55, depthWrite: false })
     );
     water.rotation.x = -Math.PI / 2;
     water.position.y = -1.5;
+    water.userData.earthBase = true;
     parent.add(water);
   }
 }
+function hideEarthBase(group) {
+  if (!group) return;
+  group.traverse((ch) => {
+    if (ch.userData && ch.userData.earthBase) ch.visible = false;
+  });
+}
+function isIOSSafari() {
+  try {
+    const ua = navigator.userAgent || '';
+    return /iP(hone|ad|od)/.test(ua) || (/Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document);
+  } catch (_) { return false; }
+}
+const IOS_SAFARI = isIOSSafari();
 
 /**
  * Follow aerial — ESRI World Imagery via same-origin /tiles/sat (Safari-safe, keyless, z19).
@@ -2373,12 +2426,59 @@ async function runPool(items, limit, worker) {
   await Promise.all(runners);
 }
 
+function isSameOriginTileUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (url.startsWith('/tiles/')) return true;
+  try {
+    return url.startsWith(location.origin + '/tiles/');
+  } catch (_) { return false; }
+}
+
+/**
+ * Same-origin /tiles/* : fetch→blob→ImageBitmap (Safari iOS safe).
+ * Cross-origin: Image + anonymous CORS.
+ * Root cause of solid-green Follow: Image()+crossOrigin mass-fails on iOS Safari
+ * while earth disc (0x3d5a42) stays visible — mosaics never paint.
+ */
 function loadTileImage(url, timeoutMs) {
+  if (!url) return Promise.resolve(null);
+  const ms = timeoutMs || 12000;
+  if (isSameOriginTileUrl(url)) {
+    return (async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        const r = await fetch(url, {
+          signal: ctrl.signal,
+          credentials: 'same-origin',
+          cache: 'force-cache',
+        });
+        clearTimeout(timer);
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        if (!blob || blob.size < 64) return null;
+        if (typeof createImageBitmap === 'function') {
+          try { return await createImageBitmap(blob); } catch (_) {}
+        }
+        const obj = URL.createObjectURL(blob);
+        try {
+          return await new Promise((resolve) => {
+            const im = new Image();
+            const t = setTimeout(() => resolve(null), Math.min(ms, 8000));
+            im.onload = () => { clearTimeout(t); resolve(im); };
+            im.onerror = () => { clearTimeout(t); resolve(null); };
+            im.src = obj;
+          });
+        } finally {
+          try { URL.revokeObjectURL(obj); } catch (_) {}
+        }
+      } catch (_) { return null; }
+    })();
+  }
   return new Promise((resolve) => {
-    if (!url) { resolve(null); return; }
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    const t = setTimeout(() => { try { img.src = ''; } catch (_) {} resolve(null); }, timeoutMs || 12000);
+    const t = setTimeout(() => { try { img.src = ''; } catch (_) {} resolve(null); }, ms);
     img.onload = () => { clearTimeout(t); resolve(img); };
     img.onerror = () => { clearTimeout(t); resolve(null); };
     img.src = url;
@@ -2415,9 +2515,9 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       jobs.push({ url, reliefUrl, px, py });
     }
   }
-  // Safari iOS drops many parallel cross-origin Image loads; cap concurrency.
-  const poolLimit = opts.poolLimit || (opts.sameOrigin ? 16 : 8);
-  const timeoutMs = opts.tileTimeoutMs || 12000;
+  // Safari iOS: lower concurrency; same-origin fetch path above is the real fix.
+  const poolLimit = opts.poolLimit || (opts.sameOrigin ? (IOS_SAFARI ? 6 : 16) : (IOS_SAFARI ? 4 : 8));
+  const timeoutMs = opts.tileTimeoutMs || (IOS_SAFARI ? 16000 : 12000);
   const reliefAlpha = Number.isFinite(opts.reliefAlpha) ? opts.reliefAlpha : 0.62;
   const reliefMode = opts.reliefMode || 'overlay';
   await runPool(jobs, poolLimit, async ({ url, reliefUrl, px, py }) => {
@@ -2439,7 +2539,7 @@ async function fetchTileLayer(z, span, fillCss, brighten, opts) {
       } catch (_) {}
     }
   });
-  if (loaded < total * 0.12) return null;
+  if (loaded < total * (IOS_SAFARI ? 0.06 : 0.10)) return null;
 
   if (brighten) {
     try {
@@ -2592,7 +2692,7 @@ window.__AIRLOOM_TILE_LEVELS = {
   fallbackUsgs: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
   maxEsriZ: 19,
   maxUsgsZ: 16,
-  densify: 'airloom-v21-esri-sat-z19-topo',
+  densify: 'airloom-v23-safari-fetch-sat',
   orbitSource: ORBIT_TILE_TMPL,
   orbitSourceDirect: ORBIT_TILE_DIRECT_TMPL,
   reliefOrbit: RELIEF_TILE_TMPL,
@@ -2614,33 +2714,50 @@ function disposeMeshTree(root) {
 async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extraOpts) {
   const base = { lat, lon, ...(extraOpts || {}) };
   // Stronger Follow hillshade/DEM relief — hills read under sat without chalk wash
-  if (base.reliefUrl == null && base.relief !== false) {
+  // iOS: skip relief on z>=15 (doubles Image budget → solid green earth-disc fallback)
+  const wantRelief = !(IOS_SAFARI && z >= 15) && base.relief !== false;
+  if (base.reliefUrl == null && wantRelief) {
     base.reliefUrl = RELIEF_FOLLOW_URL;
     if (base.reliefAlpha == null) {
       // v21: raise mid/far topo; keep z19 slightly softer so runway paint stays sharp
       base.reliefAlpha = z >= 19 ? 0.26 : (z >= 17 ? 0.34 : (z >= 15 ? 0.40 : (z >= 13 ? 0.46 : 0.52)));
     }
     if (!base.reliefMode) base.reliefMode = 'soft-light';
+  } else if (!wantRelief) {
+    base.reliefUrl = null;
   }
-  // 1) same-origin ESRI World Imagery (Safari + high-z)
+  const soPool = IOS_SAFARI ? 6 : 16;
+  const xoPool = IOS_SAFARI ? 4 : 8;
+  // 1) iOS: paint sat WITHOUT relief first (fast path → no green disc)
+  if (IOS_SAFARI && wantRelief && base.reliefUrl) {
+    let layerFast = await fetchTileLayer(z, span, fillCss, brighten, {
+      ...base, reliefUrl: null, tileUrl: FOLLOW_TILE_URL, sameOrigin: true, poolLimit: soPool,
+    });
+    if (layerFast) return layerFast;
+  }
+  // 2) same-origin ESRI World Imagery (Safari + high-z)
   let layer = await fetchTileLayer(z, span, fillCss, brighten, {
-    ...base, tileUrl: FOLLOW_TILE_URL, sameOrigin: true, poolLimit: 16,
+    ...base, tileUrl: FOLLOW_TILE_URL, sameOrigin: true, poolLimit: soPool,
   });
-  // 2) direct ESRI
+  // 3) direct ESRI
   if (!layer) {
     layer = await fetchTileLayer(z, span, fillCss, brighten, {
-      ...base, tileUrl: FOLLOW_TILE_DIRECT_URL, reliefUrl: RELIEF_FOLLOW_DIRECT_URL, poolLimit: 8,
+      ...base, tileUrl: FOLLOW_TILE_DIRECT_URL,
+      reliefUrl: wantRelief ? RELIEF_FOLLOW_DIRECT_URL : null,
+      poolLimit: xoPool,
     });
   }
-  // 3) USGS via proxy (max z16; softer/paler near SFO — last resort)
+  // 4) USGS via proxy (max z16; softer/paler near SFO — last resort)
   if (!layer && z <= 16) {
     layer = await fetchTileLayer(z, span, fillCss, brighten, {
-      ...base, tileUrl: FOLLOW_TILE_USGS_URL, sameOrigin: true, poolLimit: 12,
+      ...base, reliefUrl: null, tileUrl: FOLLOW_TILE_USGS_URL, sameOrigin: true, poolLimit: IOS_SAFARI ? 6 : 12,
     });
   }
   if (!layer && z <= 16) {
     layer = await fetchTileLayer(z, span, fillCss, brighten, {
-      ...base, tileUrl: FOLLOW_TILE_USGS_DIRECT_URL, reliefUrl: RELIEF_FOLLOW_DIRECT_URL, poolLimit: 6,
+      ...base, tileUrl: FOLLOW_TILE_USGS_DIRECT_URL,
+      reliefUrl: wantRelief ? RELIEF_FOLLOW_DIRECT_URL : null,
+      poolLimit: 6,
     });
   }
   return layer;
@@ -2773,15 +2890,15 @@ async function refreshChaseInset(lat, lon, trackDeg) {
   const gen = ++chaseInsetGen;
   const pending = [];
   try {
-    const mid = await fetchLayerWithFallback(15, 5, '#426848', true, focusLat, focusLon, { overlay: true });
+    const mid = await fetchLayerWithFallback(15, 5, '#2a3c34', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const sharp = await fetchLayerWithFallback(16, 4, '#4a6e50', true, focusLat, focusLon, { overlay: true });
+    const sharp = await fetchLayerWithFallback(16, 4, '#2e4238', true, focusLat, focusLon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const fine = await fetchLayerWithFallback(17, 3, '#4e7254', true, lat, lon, { overlay: true });
+    const fine = await fetchLayerWithFallback(17, 3, '#30443a', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const ultra = await fetchLayerWithFallback(18, 3, '#527856', true, lat, lon, { overlay: true });
+    const ultra = await fetchLayerWithFallback(18, 3, '#32463c', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
-    const nano = await fetchLayerWithFallback(19, 2, '#567c5a', true, lat, lon, { overlay: true });
+    const nano = await fetchLayerWithFallback(19, 2, '#34483e', true, lat, lon, { overlay: true });
     if (gen !== chaseInsetGen || settings.cameraMode !== 'follow') return;
 
     if (mid) { mid.mesh.position.y = 1.55; mid.mesh.renderOrder = 40; pending.push(mid.mesh); }
@@ -2839,6 +2956,7 @@ async function loadSatBasemap() {
         layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
         satGroundGroup.add(layer.mesh);
         ok++;
+        if (ok === 1) hideEarthBase(satGroundGroup);
       }
       yi++;
     }
@@ -2847,12 +2965,12 @@ async function loadSatBasemap() {
 
   // Phase A — wide + mid ladder (paint ASAP)
   const phaseA = [
-    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#2f4a55', overlay: false },
-    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#334f50', overlay: true },
-    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.46, fill: '#355548', overlay: true },
-    { z: 12, span: Math.min(MAX_MOSAIC_SPAN, spanForRadiusNm(12, SFO_HD_RADIUS_NM)), y: 0.64, fill: '#3a5848', overlay: true, patches: true, maxPatches: 9 },
-    { z: 13, span: 6, y: 0.82, fill: '#3d5c48', overlay: true, patches: true, maxPatches: 16, radiusNm: SFO_HD_RADIUS_NM },
-    { z: 14, span: 5, y: 1.00, fill: '#416648', overlay: true, patches: true, maxPatches: 22, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#1e2a30', overlay: false },
+    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#223038', overlay: true },
+    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.46, fill: '#243430', overlay: true },
+    { z: 12, span: Math.min(MAX_MOSAIC_SPAN, spanForRadiusNm(12, SFO_HD_RADIUS_NM)), y: 0.64, fill: '#263830', overlay: true, patches: true, maxPatches: 9 },
+    { z: 13, span: 6, y: 0.82, fill: '#283a32', overlay: true, patches: true, maxPatches: 16, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 14, span: 5, y: 1.00, fill: '#2a3c34', overlay: true, patches: true, maxPatches: 22, radiusNm: SFO_HD_RADIUS_NM },
   ];
   const metaA = [];
   for (const L of phaseA) metaA.push(await addSatLayer(L, SFO_HD_RADIUS_NM));
@@ -2870,20 +2988,24 @@ async function loadSatBasemap() {
   // Phase B — Bay-wide high-z always resident (background; does not block Follow)
   const phaseB = [
     // Full ~100 mi at z15–z16 (hex patches; underlay keeps gaps readable)
-    { z: 15, span: 4, y: 1.18, fill: '#456a4c', overlay: true, patches: true, maxPatches: 40, radiusNm: SFO_HD_RADIUS_NM },
-    { z: 16, span: 3, y: 1.32, fill: '#4a6e50', overlay: true, patches: true, maxPatches: 56, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 15, span: 4, y: 1.18, fill: '#2c4036', overlay: true, patches: true, maxPatches: 40, radiusNm: SFO_HD_RADIUS_NM },
+    { z: 16, span: 3, y: 1.32, fill: '#2e4238', overlay: true, patches: true, maxPatches: 56, radiusNm: SFO_HD_RADIUS_NM },
     // Core Bay ultra denser + farther (v21): z17–z19 resident
-    { z: 17, span: 3, y: 1.46, fill: '#4e7254', overlay: true, patches: true, maxPatches: 56, radiusNm: 62 },
-    { z: 18, span: 2, y: 1.56, fill: '#527856', overlay: true, patches: true, maxPatches: 64, radiusNm: 48 },
-    { z: 19, span: 2, y: 1.64, fill: '#567c5a', overlay: true, patches: true, maxPatches: 48, radiusNm: 28 },
+    { z: 17, span: 3, y: 1.46, fill: '#30443a', overlay: true, patches: true, maxPatches: 56, radiusNm: 62 },
+    { z: 18, span: 2, y: 1.56, fill: '#32463c', overlay: true, patches: true, maxPatches: 64, radiusNm: 48 },
+    { z: 19, span: 2, y: 1.64, fill: '#34483e', overlay: true, patches: true, maxPatches: 48, radiusNm: 28 },
   ];
   const metaB = [];
   for (const L of phaseB) {
     try { metaB.push(await addSatLayer(L, L.radiusNm || SFO_HD_RADIUS_NM)); }
     catch (e) { console.warn('sat phaseB z' + L.z, e); }
   }
-  // Warm leftover raw tiles into browser + server proxy cache (no mesh)
-  try { warmBaySatTileCache().catch(() => {}); } catch (_) {}
+  // Warm leftover raw tiles (skip / defer on iOS — warming starved mosaic loads → green)
+  if (!IOS_SAFARI) {
+    try { warmBaySatTileCache().catch(() => {}); } catch (_) {}
+  } else {
+    setTimeout(() => { try { warmBaySatTileCache().catch(() => {}); } catch (_) {} }, 12000);
+  }
 
   window.__AIRLOOM_SFO_HD = {
     radiusNm: SFO_HD_RADIUS_NM,
