@@ -29,13 +29,24 @@
     --font: "Outfit", "Segoe UI", system-ui, sans-serif;
     --display: "Cormorant Garamond", "Times New Roman", Georgia, serif;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    /* iOS Safari / Android Chrome / CT47: safe-area + dynamic browser chrome */
+    --safe-bottom: max(0px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom, 0px));
+    --safe-top: max(0px, constant(safe-area-inset-top), env(safe-area-inset-top, 0px));
+    --chrome-bottom: 0px; /* visualViewport overlay chrome (JS) */
+    --mobile-chrome-floor: 0px; /* generous floor so collapsed↔expanded Safari never buries UI */
+    --stack-pad: 8px;
+    --stack-bottom: calc(var(--safe-bottom) + max(var(--chrome-bottom), var(--mobile-chrome-floor)) + var(--stack-pad));
+    --stack-clearance: 140px; /* distance from viewport bottom to clear #camStack (JS) */
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font);
     -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
     -webkit-touch-callout: none;
+    overscroll-behavior: none;
   }
+  html { height: 100%; height: 100dvh; max-width: 100%; overflow-x: hidden; }
+  body { max-width: 100vw; overflow-x: hidden; }
   #c { display: block; width: 100%; height: 100%; touch-action: none; -webkit-tap-highlight-color: transparent; }
   #hud {
     position: absolute; top: max(12px, env(safe-area-inset-top)); left: 56px; right: 16px; z-index: 14; pointer-events: none;
@@ -165,7 +176,10 @@
     position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
     padding: 12px 18px; min-width: 280px; max-width: 90vw; z-index: 8;
-    display: none; backdrop-filter: blur(10px); font-family: var(--mono); font-size: 12px;
+    display: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    font-family: var(--mono); font-size: 12px;
+    max-height: min(42vh, 320px); overflow-x: hidden; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
   #sel.visible { display: block; }
   #sel .cs { font-size: 16px; color: #fff; letter-spacing: 0.12em; margin-bottom: 6px; }
@@ -474,7 +488,7 @@
   /* ── Soon bar: next 30 min KSFO arrivals (CT47 + iOS/Android) ── */
   #camStack {
     position: absolute; left: 50%; transform: translateX(-50%);
-    bottom: max(10px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom));
+    bottom: var(--stack-bottom);
     z-index: 13; pointer-events: none;
     display: flex; flex-direction: column; align-items: stretch; gap: 6px;
     width: min(100vw - 16px, 720px);
@@ -611,27 +625,32 @@
   /* Follow landing chip: thicker green ETA bar on mobile */
   #landingChip .lc-bar { height: 3px; }
   body.has-soon-stack #landingChip {
-    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+    bottom: var(--stack-clearance);
   }
   body.has-soon-stack #sel {
-    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+    bottom: var(--stack-clearance);
   }
   body.has-soon-stack a.credits {
-    bottom: max(130px, calc(constant(safe-area-inset-bottom) + 120px), calc(env(safe-area-inset-bottom) + 120px));
+    bottom: var(--stack-clearance);
     left: 10px; font-size: 9px; max-width: 42vw;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   @media (max-width: 800px) {
+    :root {
+      /* Survives Safari collapsed+expanded URL/tab bars; JS may raise via --chrome-bottom */
+      --mobile-chrome-floor: 56px;
+      --stack-pad: 10px;
+    }
     #camStack {
       width: calc(100vw - 12px); max-width: calc(100vw - 12px);
-      bottom: max(8px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom));
+      bottom: var(--stack-bottom);
       gap: 5px;
     }
-    #soonBar { border-radius: 10px; max-height: min(40vh, 260px); }
+    #soonBar { border-radius: 10px; max-height: min(36vh, 240px); }
     #soonBar .sb-head { padding: 4px 8px 3px; }
     #soonBar .sb-title { font-size: 8px; letter-spacing: 0.12em; }
     #soonBar .sb-cols { padding: 1px 8px 2px; font-size: 7px; gap: 0 4px; }
-    #soonBar .sb-list { max-height: min(30vh, 200px); }
+    #soonBar .sb-list { max-height: min(26vh, 180px); }
     #soonBar .sb-row {
       min-height: 46px; padding: 6px 8px 5px; gap: 0 4px;
     }
@@ -646,19 +665,52 @@
     #soonBar .sb-row .sb-prog { height: 8px; margin-top: 5px; }
     #soonBar .sb-row.soonest .sb-prog { height: 10px; }
     #camStack #camBar button { min-height: 44px; padding: 10px 10px; font-size: 11px; }
-    /* Follow chip: fat green progress + large countdown */
+    /* Follow chip: fat green progress + large countdown; stay above camStack */
     #landingChip .lc-bar { height: 6px; border-radius: 3px; }
     #landingChip .lc-dist { font-size: 18px; font-weight: 700; }
     body.has-soon-stack #landingChip {
-      bottom: max(148px, calc(constant(safe-area-inset-bottom) + 136px), calc(env(safe-area-inset-bottom) + 136px));
+      bottom: var(--stack-clearance);
       padding: 6px 12px 7px; gap: 4px; border-radius: 12px;
+      max-width: min(92vw, 360px);
     }
     body.has-soon-stack #landingChip .lc-dist { font-size: 18px; }
     body.has-soon-stack #landingChip .lc-label { font-size: 8px; }
     body.has-soon-stack #landingChip .lc-sub { font-size: 12px; }
     body.has-soon-stack #toast {
-      bottom: max(148px, calc(env(safe-area-inset-bottom) + 136px));
+      bottom: var(--stack-clearance);
       right: 8px; max-width: min(70vw, 260px);
+    }
+    /* Plane detail: tuck top-right under HUD — not center, not under browser chrome */
+    #sel, body.has-soon-stack #sel {
+      left: auto; right: 8px; transform: none;
+      top: calc(var(--safe-top) + 58px);
+      bottom: auto;
+      min-width: 0; width: auto;
+      max-width: min(46vw, 168px);
+      max-height: min(28vh, 200px);
+      padding: 6px 8px;
+      font-size: 9px;
+      border-radius: 8px;
+      z-index: 11;
+    }
+    #sel .cs { font-size: 11px; letter-spacing: 0.06em; margin-bottom: 3px; }
+    #sel .grid { gap: 1px 6px; font-size: 9px; }
+    #sel .grid .sel-extra { display: none; }
+    /* 60-min left rail: optional + compact when open */
+    #infoPanel.orbit-arrivals {
+      left: 8px; right: auto;
+      max-width: min(148px, calc(100vw - 24px));
+      top: calc(var(--safe-top) + 58px);
+    }
+    #infoPanel.orbit-arrivals .ig-card {
+      padding: 5px 7px 6px;
+      max-height: min(28vh, 180px);
+    }
+    #infoPanel .ig-arr-list { max-height: min(22vh, 140px); }
+    #infoPanel .ig-arr-row { min-height: 44px; padding: 6px 4px; }
+    #btnArrivalsSide {
+      top: calc(var(--safe-top) + 58px);
+      left: 8px; min-height: 44px; padding: 10px 12px; font-size: 10px;
     }
   }
   @media (max-width: 480px) {
@@ -689,15 +741,10 @@
     #stats { font-size: 9px; }
     #stats .n, #stats .arr { font-size: 12px; }
     #stats .meta { font-size: 8px; }
-    #sel { bottom: max(18px, env(safe-area-inset-bottom)); }
+    /* Mobile #sel tucked top-right in ≤800px rules; desktop-narrow keeps clearance */
     a.credits { bottom: max(10px, env(safe-area-inset-bottom)); }
-    /* CT47: keep sel/credits above bottom camStack */
-    body.has-soon-stack #sel {
-      bottom: max(156px, calc(env(safe-area-inset-bottom) + 144px));
-      max-width: min(92vw, 360px); min-width: 0;
-    }
     body.has-soon-stack a.credits {
-      bottom: max(156px, calc(env(safe-area-inset-bottom) + 144px));
+      bottom: var(--stack-clearance);
       left: 8px; max-width: 40vw;
     }
   }
@@ -877,7 +924,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v24'; // 30-min soon bar + visual ETA bars (CT47/iOS/Android)
+const BUILD_MARK = 'airloom-v25'; // mobile safe-area chrome lift + compact HUD (CT47/iOS/Android)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -903,7 +950,10 @@ window.__AIRLOOM_FEATURES = {
   orbitUsefulWindowMin: 60,
   arrivalsSidebarToggle: true,
   arrivalsHoverTopDown: true,
-  arrivalsLeftRailDefaultOpen: true,
+  arrivalsLeftRailDefaultOpen: false,
+  mobileChromeSafeArea: true,
+  mobileSoonBarPrimary: true,
+  mobileSelTopRight: true,
   drawerClosedDefault: true,
   ksfoBullseye: true,
   biggerPlanes: true,
@@ -934,6 +984,59 @@ window.__AIRLOOM_FEATURES = {
   mobileEtaVisual: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
+
+/** Lift #camStack above iOS Safari / Chrome bottom chrome (visualViewport + safe-area floor). */
+function syncMobileChromeInsets() {
+  const root = document.documentElement;
+  let chromeBottom = 0;
+  try {
+    const vv = window.visualViewport;
+    if (vv) {
+      // Pixels of layout viewport below the visual viewport = overlaying browser UI
+      chromeBottom = Math.max(0, Math.round((window.innerHeight || 0) - (vv.height + vv.offsetTop)));
+    }
+  } catch (_) { chromeBottom = 0; }
+  root.style.setProperty('--chrome-bottom', chromeBottom + 'px');
+
+  // Clearance so landingChip / credits / toast sit above the whole bottom stack
+  let clearance = 140;
+  try {
+    const stack = document.getElementById('camStack');
+    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0;
+    if (stack) {
+      const r = stack.getBoundingClientRect();
+      if (r.height > 0) {
+        const layoutH = window.innerHeight || vh;
+        clearance = Math.max(96, Math.round(layoutH - r.top + 10));
+      }
+    }
+  } catch (_) {}
+  root.style.setProperty('--stack-clearance', clearance + 'px');
+  root.style.setProperty('--vv-height', ((window.visualViewport && window.visualViewport.height) || window.innerHeight || 0) + 'px');
+}
+window.__AIRLOOM_SYNC_CHROME = syncMobileChromeInsets;
+(function bindMobileChromeInsets() {
+  const run = () => { try { syncMobileChromeInsets(); } catch (_) {} };
+  run();
+  window.addEventListener('resize', run, { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(run, 50), { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', run, { passive: true });
+    window.visualViewport.addEventListener('scroll', run, { passive: true });
+  }
+  // Soon bar / mode changes alter stack height
+  try {
+    const stack = document.getElementById('camStack');
+    if (stack && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => run());
+      ro.observe(stack);
+    }
+  } catch (_) {}
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
+  setTimeout(run, 0);
+  setTimeout(run, 250);
+  setTimeout(run, 1000);
+})();
 
 function enu(lat, lon, altM) {
   const dLat = (lat - ORIGIN.lat) * Math.PI / 180;
@@ -4586,7 +4689,7 @@ $('btnClear').onclick = () => {
 };
 // Drawer + arrivals sidebar: closed by default, persist via localStorage
 const LS_DRAWER = 'airloom.drawerOpen';
-const LS_ARRIVALS = 'airloom.arrivalsRail.v18'; // bump key so v17 closed default does not stick
+const LS_ARRIVALS = 'airloom.arrivalsRail.v25'; // v25: mobile soon-bar primary → rail closed by default
 function readLsBool(key, defaultVal) {
   try {
     const v = localStorage.getItem(key);
@@ -4628,8 +4731,20 @@ function setArrivalsSidebarOpen(open) {
   }
   if (settings.cameraMode === 'orbit') updateInfoPanel();
 }
-let arrivalsSidebarOpen = readLsBool(LS_ARRIVALS, true); // default OPEN on Orbit (slim left rail)
+function isNarrowMobileLayout() {
+  try {
+    return window.matchMedia('(max-width: 800px)').matches
+      || Math.min(window.innerWidth || 0, window.innerHeight || 0) <= 500;
+  } catch (_) {
+    return (window.innerWidth || 900) <= 800;
+  }
+}
+// Desktop: rail can stay open; mobile/CT47: soon bar is primary → rail closed by default
+let arrivalsSidebarOpen = readLsBool(LS_ARRIVALS, !isNarrowMobileLayout());
 setDrawerOpen(readLsBool(LS_DRAWER, false)); // default CLOSED (all viewports)
+if (isNarrowMobileLayout() && !localStorage.getItem(LS_ARRIVALS)) {
+  arrivalsSidebarOpen = false;
+}
 $('toggleDrawer').onclick = () => setDrawerOpen(!isDrawerOpen());
 if ($('btnCloseDrawer')) $('btnCloseDrawer').onclick = () => setDrawerOpen(false);
 if ($('btnArrivalsSide')) {
@@ -5157,6 +5272,7 @@ function updateSoonBar() {
       }
     });
     bar.classList.add('visible');
+    try { syncMobileChromeInsets(); } catch (_) {}
     return;
   }
   _soonBarSig = sig;
@@ -5166,6 +5282,7 @@ function updateSoonBar() {
 
   if (!list.length) {
     listEl.innerHTML = '<div class="sb-empty">No KSFO arrivals ≤30 min</div>';
+    try { syncMobileChromeInsets(); } catch (_) {}
     return;
   }
 
@@ -5210,6 +5327,7 @@ function updateSoonBar() {
       if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
     });
   });
+  try { syncMobileChromeInsets(); } catch (_) {}
 }
 
 /** Closest / soonest KSFO inbound for Orbit focus (prefer distance-to-field). */
@@ -5904,16 +6022,17 @@ function updateSelPanel(rec) {
   $('selCs').textContent = ident;
   $('selGrid').innerHTML =
     `<span>hex</span><b>${rec.icao}</b>` +
-    `<span>type</span><b>${typ} <span style="color:var(--muted)">(${cat})</span></b>` +
-    `<span>reg</span><b>${reg}</b>` +
+    `<span>type</span><b>${typ}</b>` +
     `<span>alt</span><b>${altFt.toLocaleString()} ft</b>` +
     `<span>spd</span><b>${spd}</b>` +
-    `<span>track</span><b>${track}</b>` +
     `<span>dist</span><b>${dist}</b>` +
-    `<span>arr</span><b>${rec.isArrival ? 'yes' : 'no'}</b>` +
-    `<span>final</span><b>${rec.isOnFinal ? (rec.finalRwy || 'yes') : 'no'}</b>` +
-    `<span>KSFO</span><b>${rec.isKsfo ? 'yes' : 'no'}</b>` +
-    `<span>src</span><b>${rec.source || '—'}</b>`;
+    `<span class="sel-extra">reg</span><b class="sel-extra">${reg}</b>` +
+    `<span class="sel-extra">track</span><b class="sel-extra">${track}</b>` +
+    `<span class="sel-extra">cat</span><b class="sel-extra">${cat}</b>` +
+    `<span class="sel-extra">arr</span><b class="sel-extra">${rec.isArrival ? 'yes' : 'no'}</b>` +
+    `<span class="sel-extra">final</span><b class="sel-extra">${rec.isOnFinal ? (rec.finalRwy || 'yes') : 'no'}</b>` +
+    `<span class="sel-extra">KSFO</span><b class="sel-extra">${rec.isKsfo ? 'yes' : 'no'}</b>` +
+    `<span class="sel-extra">src</span><b class="sel-extra">${rec.source || '—'}</b>`;
   bar.classList.add('visible');
   none.style.display = 'none';
   body.style.display = 'block';

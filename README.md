@@ -5,7 +5,14 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v24)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v25)
+
+## airloom-v25
+
+- **iOS Safari / Chrome / CT47 chrome lift**: `#camStack` (soon bar + mode pills) sits above browser bottom chrome via `env(safe-area-inset-bottom)` + `visualViewport` `--chrome-bottom` + generous `--mobile-chrome-floor` (56px) so collapsed↔expanded Safari bars never bury the soon bar.
+- **Soon bar primary on mobile**: ≤800px / CT47 — Tail·ICAO·ETA·On base + thick green progress + large `~N min` remain; left **FBO · NEXT ~60 MIN** rail closed by default (Arrivals chip to open; much smaller when open).
+- **Plane detail card**: on narrow screens tucked top-right under HUD (compact type, secondary fields hidden) — no longer blocks map center or sits under browser chrome.
+- **Touch / layout**: ≥44px taps, no horizontal scroll, `100dvh` + overflow-x clip, portrait 480–800px friendly.
 
 ## airloom-v24
 
