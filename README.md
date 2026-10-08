@@ -5,7 +5,7 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v26)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v27)
 
 ## airloom-v26
 
@@ -200,3 +200,9 @@ Coverage fetch ≈ 250 mi around KSFO; default display filter is KSFO-associated
 - Caveat: schedule-only FA rows (no ADS-B position yet) still need a schedule
   source for 95%+ list parity; ADS-B completeness covers airborne matches.
 
+
+## airloom-v27 — basemap engine
+- **AirTiles** quadtree LOD: per-tile 256px textures (mipmapped, max anisotropy, sRGB, `toneMapped:false`), frustum-culled, nearest-first priority queue, parent/child fallback while the exact tile streams. Only the active mode's basemap holds textures; the other is released on switch. GPU texture LRU cap (iOS 320 ≈ 112 MB, Android/CT47 420, desktop 1000). Pixel ratio capped at 2 on phones.
+- **Baked Bay tile cache**: `tools/bake-tiles.js` downloads `tiles-schedule.json` (~40k ESRI tiles, ~350 MB, sat z8–19 / hill / orbit / relief within ≤160 nm of KSFO) into the Docker image at build time. Server tiers: RAM LRU → baked image → `/tmp` → upstream (keep-alive, single-flight). Tiles served `public, max-age=31536000, immutable` + ETag/304. `/tiles/manifest` shows bake/warm stats.
+- Loading gate until the visible set is sharp (≤12 s); service worker (`/sw.js`) persists tiles across visits; idle fetch-only prefetch (never decoded).
+- Gesture-aware throttling (≤2 GPU uploads/frame while dragging, no prefetch), WebGL context lost/restored handling, auto-follow target held while the user interacts.

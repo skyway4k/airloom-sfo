@@ -828,94 +828,186 @@ const TILE_UPSTREAMS = {
   ],
 };
 const ORBIT_UPSTREAMS = TILE_UPSTREAMS.orbit; // back-compat alias
-const tileProxyCache = new Map(); // key -> { buf, ct, at }
-const TILE_CACHE_MAX = 4800;
-const TILE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
-function fetchUpstreamTile(url) {
+/** ─── airloom-v27 tile cache ────────────────────────────────────────────────
+ *  Lookup order: memory LRU → baked image dir (/app/tilecache, built into the
+ *  Docker image by tools/bake-tiles.js) → runtime disk (/tmp) → upstream ESRI
+ *  (keep-alive agent + single-flight). All hits are served with a strong ETag and
+ *  `public, max-age=31536000, immutable` (tile URLs are content-stable z/y/x). */
+const crypto = require('crypto');
+const https = require('https');
+const { loadSchedule, tilesInRadius, inSchedule } = require('./tools/tile-schedule');
+const TILE_SCHEDULE = (() => { try { return loadSchedule(path.join(__dirname, 'tiles-schedule.json')); } catch (_) { return null; } })();
+const BAKED_DIR = process.env.TILE_BAKED_DIR || path.join(__dirname, 'tilecache');
+const RUNTIME_DIR = process.env.TILE_RUNTIME_DIR || path.join(require('os').tmpdir(), 'airloom-tiles');
+const TILE_MEM_MAX_BYTES = Number(process.env.TILE_MEM_MB || 72) * 1048576;
+const TILE_IMMUTABLE = 'public, max-age=31536000, immutable';
+const upstreamAgent = new https.Agent({ keepAlive: true, maxSockets: 24, maxFreeSockets: 24, keepAliveMsecs: 15000 });
+const tileMem = new Map(); // key -> { buf, ct, etag, src }
+let tileMemBytes = 0;
+const tileInflight = new Map();
+const tileStats = { mem: 0, baked: 0, disk: 0, miss: 0, fail: 0, n304: 0 };
+let bakeInfo = null;
+try { bakeInfo = JSON.parse(fs.readFileSync(path.join(BAKED_DIR, 'bake.json'), 'utf8')); } catch (_) {}
+const tileWarm = { state: 'idle', total: 0, done: 0, startedAt: null, finishedAt: null, seconds: null, memTiles: 0, memMB: 0, source: null };
+
+function memGet(key) {
+  const e = tileMem.get(key);
+  if (!e) return null;
+  tileMem.delete(key); tileMem.set(key, e); // LRU touch
+  return e;
+}
+function memPut(key, e) {
+  if (tileMem.has(key)) { tileMemBytes -= tileMem.get(key).buf.length; tileMem.delete(key); }
+  tileMem.set(key, e); tileMemBytes += e.buf.length;
+  while (tileMemBytes > TILE_MEM_MAX_BYTES && tileMem.size) {
+    const k = tileMem.keys().next().value;
+    tileMemBytes -= tileMem.get(k).buf.length; tileMem.delete(k);
+  }
+}
+function mkEntry(buf, ct, src) {
+  return { buf, ct: ct || 'image/jpeg', src, etag: '"' + crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 20) + '"' };
+}
+function tileFile(dir, kind, z, y, x) { return path.join(dir, kind, String(z), String(y), x + '.jpg'); }
+function readFileOrNull(f) {
+  return new Promise((resolve) => fs.readFile(f, (err, b) => resolve(err || !b || b.length < 64 ? null : b)));
+}
+
+function fetchUpstreamTile(url, depth) {
   return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https') ? require('https') : require('http');
-    const req = lib.get(url, {
+    const req = https.get(url, {
+      agent: upstreamAgent,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AirLoomSFO/1.6; +https://sfo3d.onrender.com)',
+        'User-Agent': 'Mozilla/5.0 (compatible; AirLoomSFO/27; +https://sfo3d.onrender.com)',
         Accept: 'image/avif,image/webp,image/apng,image/jpeg,image/*,*/*;q=0.8',
         Referer: 'https://sfo3d.onrender.com/',
       },
-      timeout: 15000,
+      timeout: 12000,
     }, (r) => {
-      if (r.statusCode && r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
+      if (r.statusCode && r.statusCode >= 300 && r.statusCode < 400 && r.headers.location && (depth || 0) < 3) {
         r.resume();
-        fetchUpstreamTile(r.headers.location).then(resolve, reject);
+        fetchUpstreamTile(r.headers.location, (depth || 0) + 1).then(resolve, reject);
         return;
       }
-      if (r.statusCode !== 200) {
-        r.resume();
-        reject(new Error('upstream ' + r.statusCode));
-        return;
-      }
+      if (r.statusCode !== 200) { r.resume(); reject(new Error('upstream ' + r.statusCode)); return; }
       const chunks = [];
       r.on('data', (c) => chunks.push(c));
-      r.on('end', () => resolve({
-        buf: Buffer.concat(chunks),
-        ct: r.headers['content-type'] || 'image/jpeg',
-      }));
+      r.on('end', () => resolve({ buf: Buffer.concat(chunks), ct: r.headers['content-type'] || 'image/jpeg' }));
+      r.on('error', reject);
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
   });
 }
 
-async function handleProxiedTile(kind, z, y, x, res) {
-  const upstreams = TILE_UPSTREAMS[kind];
-  if (!upstreams) {
-    res.writeHead(404).end('unknown tile kind');
-    return;
-  }
+/** Resolve a tile through every cache tier (single-flight per key). */
+function getTile(kind, z, y, x) {
   const key = kind + ':' + z + '/' + y + '/' + x;
-  const cached = tileProxyCache.get(key);
-  if (cached && (Date.now() - cached.at) < TILE_CACHE_TTL_MS) {
-    res.writeHead(200, {
-      'Content-Type': cached.ct,
+  const hit = memGet(key);
+  if (hit) { tileStats.mem++; return Promise.resolve({ e: hit, tier: 'mem' }); }
+  if (tileInflight.has(key)) return tileInflight.get(key);
+  const p = (async () => {
+    let b = await readFileOrNull(tileFile(BAKED_DIR, kind, z, y, x));
+    if (b) { const e = mkEntry(b, 'image/jpeg', 'baked'); memPut(key, e); tileStats.baked++; return { e, tier: 'baked' }; }
+    b = await readFileOrNull(tileFile(RUNTIME_DIR, kind, z, y, x));
+    if (b) { const e = mkEntry(b, 'image/jpeg', 'disk'); memPut(key, e); tileStats.disk++; return { e, tier: 'disk' }; }
+    const upstreams = TILE_UPSTREAMS[kind];
+    let lastErr = null;
+    for (const mk of upstreams) {
+      try {
+        const { buf, ct } = await fetchUpstreamTile(mk(z, y, x));
+        if (!buf || buf.length < 64) throw new Error('short');
+        const e = mkEntry(buf, ct, 'upstream');
+        memPut(key, e);
+        const f = tileFile(RUNTIME_DIR, kind, z, y, x);
+        fs.mkdir(path.dirname(f), { recursive: true }, () => fs.writeFile(f, buf, () => {}));
+        tileStats.miss++;
+        return { e, tier: 'miss' };
+      } catch (err) { lastErr = err; }
+    }
+    tileStats.fail++;
+    throw lastErr || new Error('upstream failed');
+  })();
+  tileInflight.set(key, p);
+  p.finally(() => tileInflight.delete(key)).catch(() => {});
+  return p;
+}
+
+async function handleProxiedTile(kind, z, y, x, res, req) {
+  if (!TILE_UPSTREAMS[kind]) { res.writeHead(404).end('unknown tile kind'); return; }
+  try {
+    const { e, tier } = await getTile(kind, z, y, x);
+    const h = {
+      'Content-Type': e.ct,
       'Access-Control-Allow-Origin': '*',
       'Cross-Origin-Resource-Policy': 'cross-origin',
-      'Cache-Control': 'public, max-age=86400, immutable',
-      'X-AirLoom-Tile': 'cache',
+      'Cache-Control': TILE_IMMUTABLE,
+      ETag: e.etag,
+      'X-AirLoom-Tile': tier,
       'X-AirLoom-Kind': kind,
-    });
-    res.end(cached.buf);
-    return;
+    };
+    if (req && req.headers['if-none-match'] === e.etag) { tileStats.n304++; res.writeHead(304, h); res.end(); return; }
+    h['Content-Length'] = e.buf.length;
+    res.writeHead(200, h);
+    res.end(e.buf);
+  } catch (err) {
+    log(kind + ' tile fail ' + z + '/' + y + '/' + x + ' ' + (err && err.message), 'WARN');
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('tile upstream failed');
   }
-  let lastErr = null;
-  for (const mk of upstreams) {
-    try {
-      const { buf, ct } = await fetchUpstreamTile(mk(z, y, x));
-      if (!buf || buf.length < 64) throw new Error('short');
-      if (tileProxyCache.size >= TILE_CACHE_MAX) {
-        // drop oldest ~10%
-        let i = 0;
-        for (const k of tileProxyCache.keys()) {
-          tileProxyCache.delete(k);
-          if (++i > TILE_CACHE_MAX * 0.1) break;
-        }
-      }
-      tileProxyCache.set(key, { buf, ct, at: Date.now() });
-      res.writeHead(200, {
-        'Content-Type': ct,
-        'Access-Control-Allow-Origin': '*',
-        'Cross-Origin-Resource-Policy': 'cross-origin',
-        'Cache-Control': 'public, max-age=86400, immutable',
-        'X-AirLoom-Tile': 'miss',
-        'X-AirLoom-Kind': kind,
-      });
-      res.end(buf);
-      return;
-    } catch (e) {
-      lastErr = e;
+}
+
+/** Boot warm: preload the coarse Bay set into RAM; if the image has no bake
+ *  (local dev / failed bake) fetch the whole schedule into /tmp in the background. */
+async function warmTileCacheOnBoot() {
+  if (!TILE_SCHEDULE) return;
+  const t0 = Date.now();
+  const baked = !!(bakeInfo && bakeInfo.ok + bakeInfo.skipped > 0);
+  tileWarm.state = 'warming'; tileWarm.startedAt = new Date().toISOString();
+  tileWarm.source = baked ? 'baked-image' : 'upstream→/tmp';
+  const jobs = [];
+  const zs = new Set();
+  for (const k of Object.keys(TILE_SCHEDULE.layers)) for (const z of Object.keys(TILE_SCHEDULE.layers[k])) zs.add(+z);
+  for (const z of [...zs].sort((a, b) => a - b)) {
+    for (const kind of Object.keys(TILE_SCHEDULE.layers)) {
+      const r = TILE_SCHEDULE.layers[kind][z];
+      if (r == null) continue;
+      // Baked: only pull coarse levels (z<=11) into RAM — the rest is already local disk.
+      if (baked && z > 11) continue;
+      for (const t of tilesInRadius(TILE_SCHEDULE.center, z, r)) jobs.push([kind, ...t]);
     }
   }
-  log(kind + ' tile fail ' + z + '/' + y + '/' + x + ' ' + (lastErr && lastErr.message), 'WARN');
-  res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('tile upstream failed');
+  tileWarm.total = jobs.length;
+  let i = 0;
+  const conc = baked ? 16 : 8;
+  await Promise.all(Array.from({ length: conc }, async () => {
+    while (i < jobs.length) {
+      const [kind, z, y, x] = jobs[i++];
+      try { await getTile(kind, z, y, x); } catch (_) {}
+      tileWarm.done++;
+    }
+  }));
+  tileWarm.state = 'ready';
+  tileWarm.finishedAt = new Date().toISOString();
+  tileWarm.seconds = +((Date.now() - t0) / 1000).toFixed(1);
+  tileWarm.memTiles = tileMem.size;
+  tileWarm.memMB = +(tileMemBytes / 1048576).toFixed(1);
+  log(`tile warm ${tileWarm.source}: ${tileWarm.done} tiles in ${tileWarm.seconds}s, RAM ${tileWarm.memMB}MB (${tileMem.size} tiles)`, 'OK');
+}
+
+function tileManifest() {
+  return {
+    build: 'airloom-v27',
+    schedule: TILE_SCHEDULE,
+    baked: bakeInfo ? {
+      tiles: bakeInfo.ok + bakeInfo.skipped, total: bakeInfo.total, mb: bakeInfo.mb, seconds: bakeInfo.seconds,
+      complete: bakeInfo.complete, bakedAt: bakeInfo.bakedAt, perKind: bakeInfo.perKind,
+    } : null,
+    warm: tileWarm,
+    mem: { tiles: tileMem.size, mb: +(tileMemBytes / 1048576).toFixed(1), capMB: TILE_MEM_MAX_BYTES / 1048576 },
+    stats: tileStats,
+    cacheControl: TILE_IMMUTABLE,
+  };
 }
 
 async function handleOrbitTile(z, y, x, res) {
@@ -1007,6 +1099,24 @@ const server = http.createServer(async (req, res) => {
     }
 
 
+    if (pathname === '/tiles/manifest') {
+      sendJSON(res, 200, tileManifest());
+      return;
+    }
+
+    if (pathname === '/sw.js') {
+      fs.readFile(path.join(PUBLIC_DIR, 'sw.js'), (err, data) => {
+        if (err) { res.writeHead(404).end('Not found'); return; }
+        res.writeHead(200, {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Service-Worker-Allowed': '/',
+        });
+        res.end(data);
+      });
+      return;
+    }
+
     // Same-origin Orbit / relief / sat / usgs / hill tiles (z/y/x ArcGIS) — Safari CORS-safe
     {
       const m = pathname.match(/^\/tiles\/(orbit|relief|sat|usgs|hill)\/(\d+)\/(\d+)\/(\d+)(?:\.jpe?g|\.png)?$/);
@@ -1019,7 +1129,7 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(400).end('bad tile');
           return;
         }
-        await handleProxiedTile(kind, z, y, x, res);
+        await handleProxiedTile(kind, z, y, x, res, req);
         return;
       }
     }
@@ -1061,6 +1171,8 @@ server.listen(PORT, () => {
   log(`AirLoom listening on :${PORT}`, 'OK');
   log('Views: /  /airloom', 'OK');
   log('Feed: /adsb/states (adsb.lol → adsb.fi' + (OSKY_ID ? ' → OpenSky)' : ')'), 'OK');
+  // airloom-v27: Bay tile cache warm (baked image → RAM, or upstream → /tmp)
+  setTimeout(() => { warmTileCacheOnBoot().catch((e) => log('tile warm ' + (e.message || e), 'WARN')); }, 50);
   // Warm cache immediately, then every ~20s
   backgroundRefresh();
   setInterval(backgroundRefresh, BG_REFRESH_MS);

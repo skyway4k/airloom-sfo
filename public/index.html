@@ -924,7 +924,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v26'; // destination-first KSFO arrivals (AeroAPI/geometry) · no Bay VFR/airliners in FBO list
+const BUILD_MARK = 'airloom-v27'; // AirTiles quadtree LOD · baked Bay tile cache · loading gate · SW tile cache
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -987,6 +987,11 @@ window.__AIRLOOM_FEATURES = {
   satelliteFieldFit: true,
   airlinersOffFboList: true,
   aeroApiSchedule: true,
+  airTilesLod: true,
+  bakedBayTiles: true,
+  tileLoadingGate: true,
+  tileServiceWorker: true,
+  tilesNotToneMapped: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -2547,7 +2552,10 @@ if (!renderer.getContext()) {
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 // Ultra HD: near-native DPR (cap 3 desktop / 2.5 iOS for Safari GPU budget)
-renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isIOS ? 2.5 : 3));
+// airloom-v27: phones/handhelds cap at 2× (tiles are LOD'd for 2×; 3× = 2.25× the fill cost → drag jank)
+const _coarse = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
+  || /Android|Mobile/i.test(navigator.userAgent || '');
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, (isIOS || _coarse) ? 2 : 3));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.setClearColor(0x9bb8d0); // soft sky — not saturated void-blue
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -3126,6 +3134,730 @@ async function fetchLayerWithFallback(z, span, fillCss, brighten, lat, lon, extr
   return layer;
 }
 
+/* ─── airloom-v27 AirTiles: quadtree LOD tile engine ─────────────────────────
+ * Replaces the v19–v26 giant canvas mosaics (3840² CPU-graded canvases fetched as
+ * ~20k serial tile requests) with per-tile 256px GPU textures:
+ *  • only tiles inside the active camera frustum are requested, nearest first
+ *    (priority queue; prefetch runs only when the visible queue is idle)
+ *  • zoom picked per tile from projected size at min(DPR,2) — retina at 2×
+ *  • a loaded ancestor (or the 4 loaded children) is drawn instantly while the
+ *    exact tile streams in — never blank, no long blurry hold
+ *  • LinearMipmapLinear + max anisotropy + sRGB, grading in a shader with
+ *    toneMapped:false (ACES + exposure 1.28 was washing the imagery out)
+ *  • hillshade multiplied (flat=250 → neutral) instead of soft-light (which
+ *    brightened everything) → prominent, non-chalky terrain
+ *  • GPU texture LRU capped (iOS 300 tiles ≈ 105 MB) — iOS memory safe
+ *  • baked Bay set served same-origin (HTTP/2 + immutable); off-schedule tiles go
+ *    direct to the ESRI CDN (CORS *), falling back to the proxy. */
+const AIRTILE_SVC = {
+  sat: 'World_Imagery',
+  hill: 'Elevation/World_Hillshade',
+  orbit: 'Canvas/World_Dark_Gray_Base',
+  relief: 'Elevation/World_Hillshade_Dark',
+};
+const AIRTILE_DIRECT = (kind, z, y, x) =>
+  `https://server.arcgisonline.com/ArcGIS/rest/services/${AIRTILE_SVC[kind]}/MapServer/tile/${z}/${y}/${x}`;
+const AIRTILE_SO = (kind, z, y, x) => `/tiles/${kind}/${z}/${y}/${x}`;
+const AIRTILE_EFF_DPR = Math.min(window.devicePixelRatio || 1, 2);
+const AIRTILE_MOBILE = IOS_SAFARI || /Android|Mobile|iPhone|iPad/i.test(navigator.userAgent || '')
+  || (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+// GPU budget: 256² RGBA + mips ≈ 350 KB/tile → iOS 320 ≈ 112 MB, Android/CT47 420 ≈ 147 MB (v26 mosaics: >1 GB)
+const AIRTILE_TEX_CAP = IOS_SAFARI ? 320 : (AIRTILE_MOBILE ? 420 : 1000);
+const AIRTILE_LEAF_CAP = IOS_SAFARI ? 230 : (AIRTILE_MOBILE ? 280 : 420);
+const AIRTILE_LANES = { so: IOS_SAFARI ? 10 : 16, direct: 6 };
+const AIRTILE_LANES_GESTURE = { so: 4, direct: 2 };
+
+/* Gesture awareness — while a finger/mouse/wheel is active, tile work is throttled
+ * (fewer fetch starts, ≤2 GPU uploads/frame, slower LOD re-plan, no prefetch) so
+ * the drag/pinch stays at frame rate; full speed resumes ~250 ms after release. */
+const airInteract = { active: false, lastEnd: 0, pointers: new Set(), wheelT: 0 };
+function airInteractRecent(ms) { return airInteract.active || (performance.now() - airInteract.lastEnd) < (ms || 0); }
+function airInteractEnd() {
+  if (airInteract.pointers.size) return;
+  if (airInteract.active) { airInteract.active = false; airInteract.lastEnd = performance.now(); }
+}
+canvas.addEventListener('pointerdown', (e) => { airInteract.pointers.add(e.pointerId); airInteract.active = true; }, { passive: true });
+canvas.addEventListener('pointerup', (e) => { airInteract.pointers.delete(e.pointerId); airInteractEnd(); }, { passive: true });
+canvas.addEventListener('pointercancel', (e) => { airInteract.pointers.delete(e.pointerId); airInteractEnd(); }, { passive: true });
+canvas.addEventListener('lostpointercapture', (e) => { airInteract.pointers.delete(e.pointerId); airInteractEnd(); }, { passive: true });
+canvas.addEventListener('touchstart', () => { airInteract.active = true; }, { passive: true });
+canvas.addEventListener('touchend', (e) => { if (!e.touches.length) { airInteract.pointers.clear(); airInteractEnd(); } }, { passive: true });
+canvas.addEventListener('touchcancel', () => { airInteract.pointers.clear(); airInteractEnd(); }, { passive: true });
+canvas.addEventListener('wheel', () => {
+  airInteract.active = true;
+  clearTimeout(airInteract.wheelT);
+  airInteract.wheelT = setTimeout(() => { airInteract.pointers.clear(); airInteractEnd(); }, 220);
+}, { passive: true });
+window.__AIRLOOM_INTERACT = airInteract;
+
+/* WebGL context loss (iOS under memory pressure): drop every tile texture (their
+ * ImageBitmaps were closed after upload, so they can never be re-uploaded) and
+ * re-stream from the SW/HTTP cache once the context is restored. */
+const airCtx = { lost: false, losses: 0, restores: 0 };
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  airCtx.lost = true; airCtx.losses++;
+  try { satTiles && satTiles.dropGpu(); } catch (_) {}
+  try { darkTiles && darkTiles.dropGpu(); } catch (_) {}
+  console.warn('AirLoom: WebGL context lost — tiles will re-stream');
+}, false);
+canvas.addEventListener('webglcontextrestored', () => {
+  airCtx.lost = false; airCtx.restores++;
+  try { satTiles && satTiles.dropGpu(); } catch (_) {}
+  try { darkTiles && darkTiles.dropGpu(); } catch (_) {}
+}, false);
+window.__AIRLOOM_CTX = airCtx;
+const airTileState = {
+  manifest: null,
+  directFails: 0,
+  directOk: 0,
+  lat: [],               // recent fetch latencies (ms)
+  started: performance.now(),
+};
+window.__AIRLOOM_TILE_MANIFEST = null;
+fetch('/tiles/manifest', { cache: 'no-store' }).then((r) => r.json()).then((m) => {
+  airTileState.manifest = m; window.__AIRLOOM_TILE_MANIFEST = m;
+}).catch(() => {});
+
+function airTileInSchedule(kind, z, y, x) {
+  const m = airTileState.manifest;
+  const sch = m && m.schedule;
+  if (!sch || !m.baked || !sch.layers[kind] || sch.layers[kind][z] == null) return false;
+  const c = sch.center;
+  const cosLat = Math.cos(c.lat * Math.PI / 180);
+  const ll = tileToLatLon(x + 0.5, y + 0.5, z);
+  const dn = (ll.lat - c.lat) * 60, de = (ll.lon - c.lon) * 60 * cosLat;
+  const tileNm = 360 / (2 ** z) * 60 * cosLat;
+  const lim = sch.layers[kind][z] + tileNm * 0.71;
+  return dn * dn + de * de <= lim * lim;
+}
+/** [primaryUrl, lane, fallbackUrl] */
+function airTileRoute(kind, z, y, x) {
+  const so = AIRTILE_SO(kind, z, y, x);
+  const direct = AIRTILE_DIRECT(kind, z, y, x);
+  // Baked Bay set (or manifest not loaded yet): same-origin HTTP/2 + immutable.
+  if (!airTileState.manifest || airTileInSchedule(kind, z, y, x) || airTileState.directFails >= 4) {
+    return [so, 'so', direct];
+  }
+  // Off-schedule: ESRI CDN direct (ACAO *), proxy as fallback.
+  return [direct, 'direct', so];
+}
+
+async function airFetchBitmap(url, signal) {
+  const sameOrigin = url.charAt(0) === '/';
+  const r = await fetch(url, sameOrigin
+    ? { signal, credentials: 'same-origin' }
+    : { signal, mode: 'cors', credentials: 'omit' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const blob = await r.blob();
+  if (!blob || blob.size < 64) throw new Error('short');
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(blob); } catch (_) {}
+  }
+  const obj = URL.createObjectURL(blob);
+  try {
+    return await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error('decode'));
+      im.src = obj;
+    });
+  } finally { setTimeout(() => { try { URL.revokeObjectURL(obj); } catch (_) {} }, 0); }
+}
+
+const AIRTILE_VS = `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  #include <logdepthbuf_vertex>
+}`;
+const AIRTILE_FS = `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform sampler2D map;
+uniform vec4 rect;
+uniform sampler2D hill;
+uniform vec4 hrect;
+uniform float hasHill;
+uniform float hillFlat;
+uniform float hillAmt;
+uniform float hillPow;
+uniform float hillLift;
+uniform float contrast;
+uniform float saturation;
+uniform float gammaV;
+uniform float bright;
+uniform vec3 tint;
+varying vec2 vUv;
+void main() {
+  #include <logdepthbuf_fragment>
+  vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
+  vec3 c = texture2D(map, rect.xy + iuv * rect.zw).rgb;     // linear (hw sRGB decode)
+  c = pow(max(c, 0.0), vec3(1.0 / 2.2));                     // grade in display space
+  if (hasHill > 0.5) {
+    float h = pow(max(texture2D(hill, hrect.xy + iuv * hrect.zw).r, 0.0), 1.0 / 2.2);
+    float f = h / hillFlat;                                  // flat ground → 1.0
+    float shade = pow(clamp(f, 0.0, 1.6), hillPow);
+    c *= mix(1.0, shade, hillAmt);
+    c += max(f - 1.0, 0.0) * hillLift;                       // sun-facing slope sheen
+  }
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, saturation);
+  c = (c - 0.5) * contrast + 0.5 + bright;
+  c = pow(clamp(c, 0.0, 1.0), vec3(gammaV)) * tint;
+  gl_FragColor = vec4(pow(clamp(c, 0.0, 1.0), vec3(2.2)), 1.0);
+  #include <colorspace_fragment>
+}`;
+
+const AIRTILE_GRADES = {
+  // Follow photoreal: punchy, saturated, darker mids (not chalky), strong terrain
+  sat: { contrast: 1.18, saturation: 1.2, gammaV: 1.04, bright: -0.01, tint: [1.0, 1.0, 1.0],
+    hillFlat: 250 / 255, hillAmt: 0.85, hillPow: 1.35, hillLift: 0.0 },
+  // Orbit Air Loom dark: ink base, cool tint, relief carved in
+  orbit: { contrast: 1.35, saturation: 1.15, gammaV: 0.92, bright: 0.02, tint: [0.84, 0.92, 1.08],
+    hillFlat: 94 / 255, hillAmt: 0.9, hillPow: 1.25, hillLift: 0.22 },
+};
+
+class AirTileEngine {
+  constructor(opts) {
+    this.name = opts.name;
+    this.kind = opts.kind;              // 'sat' | 'orbit'
+    this.hillKind = opts.hillKind;      // 'hill' | 'relief'
+    this.minZ = opts.minZ || 8;
+    this.maxZ = opts.maxZ || 19;
+    this.hillMaxZ = opts.hillMaxZ || 13;
+    this.parent = opts.parent;
+    this.grade = AIRTILE_GRADES[opts.grade || opts.kind];
+    this.group = new THREE.Group();
+    this.group.name = 'airTiles-' + this.name;
+    this.parent.add(this.group);
+    this.tex = new Map();                // key → { state, tex, used, z, pinned, fails, retryAt }
+    this.queue = new Map();              // key → job
+    this.inflight = { so: 0, direct: 0 };
+    this.meshes = new Map();             // drawKey → mesh
+    this.meshPool = [];
+    this.readyQ = [];
+    this.geo = new THREE.PlaneGeometry(1, 1);
+    this.frustum = new THREE.Frustum();
+    this.m4 = new THREE.Matrix4();
+    this.box = new THREE.Box3();
+    this.v3 = new THREE.Vector3();
+    this.lastLeafAt = 0;
+    this.leaves = [];
+    this.stats = { leaves: 0, exact: 0, fallback: 0, blank: 0, queued: 0, inflight: 0, textures: 0, loaded: 0, failed: 0 };
+    this.focus = null;
+    this.prefetch = null;
+    this.idleSince = 0;
+    const c = latLonToTile(ORIGIN.lat, ORIGIN.lon, this.minZ);
+    this.roots = [];
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) this.roots.push([this.minZ, c.x + dx, c.y + dy]);
+    try { this.aniso = renderer.capabilities.getMaxAnisotropy() || 1; } catch (_) { this.aniso = 1; }
+    this.pinBase();
+  }
+  /** Pin the coarse base so a parent is always available instantly. */
+  pinBase() {
+    const c = latLonToTile(ORIGIN.lat, ORIGIN.lon, this.minZ);
+    for (const [z, x, y] of this.roots) this.want(this.kind, z, x, y, -1e9 + (Math.abs(x - c.x) + Math.abs(y - c.y)), true);
+    const c9 = latLonToTile(ORIGIN.lat, ORIGIN.lon, 9);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.want(this.kind, 9, c9.x + dx, c9.y + dy, -1e8, true);
+  }
+  /** Context loss: forget all GPU textures + meshes, re-pin the base. */
+  dropGpu() {
+    for (const t of this.tex.values()) this.free(t);
+    for (const e of this.readyQ) this.free(e);
+    this.tex.clear(); this.queue.clear(); this.readyQ.length = 0;
+    for (const [dk, m] of this.meshes) {
+      this.group.remove(m);
+      m.material.uniforms.map.value = null; m.material.uniforms.hill.value = null;
+      this.meshPool.push(m);
+    }
+    this.meshes.clear();
+    this.leaves = [];
+    this.gen = (this.gen || 0) + 1;
+    this.pinBase();
+  }
+  key(kind, z, x, y) { return kind + '/' + z + '/' + x + '/' + y; }
+  /** Free one texture entry: GPU texture + (if never uploaded) the decoded bitmap. */
+  free(t) {
+    if (!t) return;
+    try { t.tex && t.tex.dispose(); } catch (_) {}
+    try { t.bmp && t.bmp.close && t.bmp.close(); } catch (_) {}
+    t.tex = null; t.bmp = null; t.state = 'freed';
+  }
+  /** Mode switched away: release every non-pinned texture + all meshes so the two
+   *  basemaps never hold full-res sets at once (iOS WebKit crash in v26). */
+  release() {
+    if (this.released) return;
+    this.released = true;
+    for (const [k, t] of this.tex) {
+      if (t.pinned && t.state === 'ready') continue;
+      this.free(t); this.tex.delete(k);
+    }
+    for (const e of this.readyQ) if (!e.pinned) this.free(e);
+    this.readyQ = this.readyQ.filter((e) => e.pinned && e.tex);
+    this.queue.clear();
+    for (const [dk, m] of this.meshes) {
+      this.group.remove(m);
+      m.material.uniforms.map.value = null; m.material.uniforms.hill.value = null;
+      this.meshPool.push(m);
+    }
+    this.meshes.clear();
+    this.leaves = [];
+    this.gen = (this.gen || 0) + 1;
+  }
+  active() {
+    let o = this.group;
+    while (o) { if (!o.visible) return false; o = o.parent; }
+    return true;
+  }
+  bounds(z, x, y) {
+    const nw = tileToLatLon(x, y, z), se = tileToLatLon(x + 1, y + 1, z);
+    const a = enu(nw.lat, nw.lon, 0), b = enu(se.lat, se.lon, 0);
+    return { x0: a.x, x1: b.x, z0: a.z, z1: b.z };
+  }
+  want(kind, z, x, y, pri, pinned) {
+    const k = this.key(kind, z, x, y);
+    const t = this.tex.get(k);
+    if (t) {
+      t.used = performance.now();
+      if (pinned) t.pinned = true;
+      if (t.state === 'ready' || t.state === 'loading') return t;
+      if (t.state === 'failed' && performance.now() < t.retryAt) return t;
+    }
+    const j = this.queue.get(k);
+    if (j) { j.pri = Math.min(j.pri, pri); j.seen = this.tick; return t; }
+    this.queue.set(k, { k, kind, z, x, y, pri, pinned: !!pinned, seen: this.tick });
+    return t;
+  }
+  ready(kind, z, x, y) {
+    const t = this.tex.get(this.key(kind, z, x, y));
+    if (t && t.state === 'ready') { t.used = performance.now(); return t; }
+    return null;
+  }
+  /** nearest loaded ancestor within maxUp levels → { t, rect } */
+  ancestor(kind, z, x, y, maxUp, minZ) {
+    for (let up = 1; up <= maxUp && z - up >= minZ; up++) {
+      const az = z - up, ax = x >> up, ay = y >> up;
+      const t = this.ready(kind, az, ax, ay);
+      if (t) {
+        const s = 1 << up;
+        return { t, rect: [(x - ax * s) / s, (y - ay * s) / s, 1 / s, 1 / s], z: az };
+      }
+    }
+    return null;
+  }
+  pump() {
+    if (!this.queue.size) return;
+    const lanes = airInteract.active ? AIRTILE_LANES_GESTURE : AIRTILE_LANES;
+    if (this.inflight.so >= lanes.so && this.inflight.direct >= lanes.direct) return;
+    const jobs = [...this.queue.values()].sort((a, b) => a.pri - b.pri);
+    for (const j of jobs) {
+      let route = airTileRoute(j.kind, j.z, j.y, j.x);
+      if (this.inflight[route[1]] >= lanes[route[1]]) {
+        if (this.inflight.so >= lanes.so && this.inflight.direct >= lanes.direct) break;
+        // primary lane full → use the other lane (ESRI direct ⇄ same-origin proxy)
+        route = route[1] === 'direct' ? [route[2], 'so', route[0]] : [route[2], 'direct', route[0]];
+        if (route[1] === 'direct' && airTileState.directFails >= 4) continue;
+      }
+      this.queue.delete(j.k);
+      this.load(j, route);
+    }
+  }
+  async load(j, route) {
+    const gen = this.gen || 0;
+    const prev = this.tex.get(j.k);
+    const ent = { state: 'loading', tex: null, used: performance.now(), z: j.z, kind: j.kind, pinned: j.pinned || !!(prev && prev.pinned), fails: prev ? prev.fails || 0 : 0 };
+    this.tex.set(j.k, ent);
+    const [url, lane, fb] = route;
+    this.inflight[lane]++;
+    const t0 = performance.now();
+    let bmp = null;
+    try {
+      try {
+        bmp = await airFetchBitmap(url);
+        if (lane === 'direct') airTileState.directOk++;
+      } catch (e) {
+        if (lane === 'direct') airTileState.directFails++;
+        bmp = await airFetchBitmap(fb);
+      }
+      airTileState.lat.push(performance.now() - t0);
+      if (airTileState.lat.length > 400) airTileState.lat.shift();
+    } catch (_) {
+      bmp = null;
+    } finally {
+      this.inflight[lane]--;
+    }
+    if ((this.gen || 0) !== gen || this.tex.get(j.k) !== ent) {
+      try { bmp && bmp.close && bmp.close(); } catch (_) {}
+      return;
+    }
+    if (!bmp) {
+      ent.state = 'failed'; ent.fails++; ent.retryAt = performance.now() + 8000 * ent.fails;
+      this.stats.failed++;
+      return;
+    }
+    const tex = new THREE.Texture(bmp);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = false;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = this.aniso;
+    // Free the decoded bitmap right after GPU upload (iOS memory)
+    if (typeof bmp.close === 'function') tex.onUpdate = () => { try { bmp.close(); } catch (_) {} ent.bmp = null; tex.onUpdate = null; };
+    tex.needsUpdate = true;
+    ent.tex = tex;
+    ent.bmp = bmp;
+    this.readyQ.push(ent);
+    this.stats.loaded++;
+  }
+  evict() {
+    const n = this.tex.size;
+    if (n <= AIRTILE_TEX_CAP) return;
+    const now = performance.now();
+    const cands = [];
+    for (const [k, t] of this.tex) {
+      if (t.pinned || t.state === 'loading' || t.drawn === this.tick) continue;
+      cands.push([k, t]);
+    }
+    cands.sort((a, b) => a[1].used - b[1].used);
+    let drop = n - AIRTILE_TEX_CAP + 24;
+    for (const [k, t] of cands) {
+      if (drop-- <= 0) break;
+      if (now - t.used < 400) break;
+      this.free(t);
+      this.tex.delete(k);
+    }
+  }
+  computeLeaves(cam) {
+    cam.updateMatrixWorld();
+    this.m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.m4);
+    const H = (renderer.domElement.clientHeight || innerHeight) * AIRTILE_EFF_DPR;
+    const pxPerM = H / (2 * Math.tan((cam.fov || 55) * Math.PI / 360));
+    const eye = cam.position;
+    let factor = 1.0;
+    for (let attempt = 0; attempt < 9; attempt++) {
+      const leaves = [];
+      const stack = this.roots.map((r) => r.slice());
+      while (stack.length) {
+        const [z, x, y] = stack.pop();
+        const b = this.bounds(z, x, y);
+        this.box.min.set(b.x0, -40, b.z0); this.box.max.set(b.x1, 40, b.z1);
+        if (!this.frustum.intersectsBox(this.box)) continue;
+        const d = Math.max(1, this.box.distanceToPoint(eye));
+        const proj = (b.x1 - b.x0) / d * pxPerM;
+        if (z < this.maxZ && proj > 256 * factor) {
+          const z1 = z + 1, x2 = x * 2, y2 = y * 2;
+          stack.push([z1, x2, y2], [z1, x2 + 1, y2], [z1, x2, y2 + 1], [z1, x2 + 1, y2 + 1]);
+        } else {
+          leaves.push({ z, x, y, d, b });
+        }
+        if (leaves.length > AIRTILE_LEAF_CAP * 1.6) break;
+      }
+      if (leaves.length <= AIRTILE_LEAF_CAP || attempt === 8) { this.lodFactor = factor; return leaves; }
+      factor *= 1.15;
+    }
+    return [];
+  }
+  setFocus(lat, lon) {
+    if (Number.isFinite(lat) && Number.isFinite(lon)) this.focus = enu(lat, lon, 0);
+  }
+  hillZ(z) { return Math.max(this.minZ, Math.min(z - 1, this.hillMaxZ)); }
+  update(cam) {
+    this.tick = (this.tick || 0) + 1;
+    if (!this.active() || !cam) {
+      // inactive basemap: free its textures shortly after the switch (keep tiny pinned base)
+      if (!this.released) {
+        if (!this.inactiveAt) this.inactiveAt = performance.now();
+        if (performance.now() - this.inactiveAt > 400) this.release();
+      }
+      return;
+    }
+    if (airCtx.lost) return;
+    const now = performance.now();
+    if (this.released || this.inactiveAt) {
+      this.released = false; this.inactiveAt = 0; this.activatedAt = now;
+      this.pinBase();
+    }
+    const gesture = airInteract.active;
+    const transition = now - (this.activatedAt || 0) < 1500;
+    // promote freshly decoded tiles (cap GPU uploads per frame; 2 while dragging / 6 right after a mode switch)
+    const upCap = gesture ? 2 : (transition ? 6 : (AIRTILE_MOBILE ? 12 : 24));
+    for (let n = 0; n < upCap && this.readyQ.length; n++) {
+      const e = this.readyQ.shift();
+      if (e.tex && e.state === 'loading') e.state = 'ready';
+    }
+    if (now - this.lastLeafAt > (gesture ? 200 : 90) || !this.leaves.length) {
+      this.lastLeafAt = now;
+      this.leaves = this.computeLeaves(cam);
+      const f = this.focus;
+      for (const L of this.leaves) {
+        // nearest camera first; tiles under/near the followed aircraft get a boost
+        let pri = L.d;
+        if (f) {
+          const cx = (L.b.x0 + L.b.x1) / 2, cz = (L.b.z0 + L.b.z1) / 2;
+          pri = Math.min(pri, Math.hypot(cx - f.x, cz - f.z) * 0.8);
+        }
+        L.pri = pri;
+        this.want(this.kind, L.z, L.x, L.y, pri);
+        // fast intermediate parent (z-3) if nothing usable within 3 levels
+        if (L.z - 3 >= this.minZ && !this.ancestor(this.kind, L.z, L.x, L.y, 3, this.minZ)) {
+          const up = 3;
+          this.want(this.kind, L.z - up, L.x >> up, L.y >> up, pri * 0.25 - 1e6);
+        }
+        if (this.hillKind) {
+          const hz = this.hillZ(L.z), s = L.z - hz;
+          this.want(this.hillKind, hz, L.x >> s, L.y >> s, pri + 500);
+        }
+      }
+      // drop stale queued jobs (camera moved away)
+      for (const [k, j] of this.queue) if (!j.pinned && j.seen !== this.tick) this.queue.delete(k);
+    }
+    this.pump();
+    this.draw();
+    this.evict();
+    // idle prefetch (warm HTTP/SW cache only — no decode, no GPU)
+    const busy = this.queue.size + this.inflight.so + this.inflight.direct;
+    if (busy) this.idleSince = 0;
+    else if (!this.idleSince) this.idleSince = now;
+    if (this.prefetch && this.idleSince && now - this.idleSince > 1500 && !airInteractRecent(3000)
+        && airGate.state !== 'loading') this.prefetch.step(this);
+  }
+  draw() {
+    const used = new Set();
+    let exact = 0, fallback = 0, blank = 0, soft = 0;
+    const put = (dk, z, x, y, t, rect, b) => {
+      used.add(dk);
+      let m = this.meshes.get(dk);
+      if (!m) {
+        m = this.meshPool.pop() || this.makeMesh();
+        this.meshes.set(dk, m);
+        this.group.add(m);
+        const bb = b || this.bounds(z, x, y);
+        m.scale.set(bb.x1 - bb.x0, bb.z1 - bb.z0, 1);
+        m.position.set((bb.x0 + bb.x1) / 2, 0, (bb.z0 + bb.z1) / 2);
+        m.renderOrder = 0;
+      }
+      t.drawn = this.tick;
+      const u = m.material.uniforms;
+      u.map.value = t.tex;
+      u.rect.value.set(rect[0], rect[1], rect[2], rect[3]);
+      // hillshade
+      let hillT = null, hr = [0, 0, 1, 1];
+      if (this.hillKind) {
+        const hz = this.hillZ(z), s = z - hz;
+        const hx = x >> s, hy = y >> s;
+        const h = this.ready(this.hillKind, hz, hx, hy);
+        if (h) {
+          hillT = h; const S = 1 << s;
+          hr = [(x - hx * S) / S, (y - hy * S) / S, 1 / S, 1 / S];
+        } else {
+          const a = this.ancestor(this.hillKind, hz, hx, hy, 4, 0);
+          if (a) {
+            hillT = a.t; const S = 1 << s;
+            hr = [a.rect[0] + ((x - hx * S) / S) * a.rect[2], a.rect[1] + ((y - hy * S) / S) * a.rect[3], a.rect[2] / S, a.rect[3] / S];
+          }
+        }
+      }
+      if (hillT) { hillT.drawn = this.tick; u.hill.value = hillT.tex; u.hasHill.value = 1; u.hrect.value.set(hr[0], hr[1], hr[2], hr[3]); }
+      else { u.hasHill.value = 0; u.hill.value = t.tex; }
+      m.visible = true;
+    };
+    for (const L of this.leaves) {
+      const t = this.ready(this.kind, L.z, L.x, L.y);
+      if (t) { put('L' + L.z + '/' + L.x + '/' + L.y, L.z, L.x, L.y, t, [0, 0, 1, 1], L.b); exact++; continue; }
+      // zoom-out case: all four children already loaded
+      if (L.z < this.maxZ) {
+        const z1 = L.z + 1, kids = [[L.x * 2, L.y * 2], [L.x * 2 + 1, L.y * 2], [L.x * 2, L.y * 2 + 1], [L.x * 2 + 1, L.y * 2 + 1]];
+        const kt = kids.map(([x, y]) => this.ready(this.kind, z1, x, y));
+        if (kt.every(Boolean)) {
+          kids.forEach(([x, y], i) => put('L' + z1 + '/' + x + '/' + y, z1, x, y, kt[i], [0, 0, 1, 1]));
+          exact++; continue;
+        }
+      }
+      const a = this.ancestor(this.kind, L.z, L.x, L.y, L.z - this.minZ, this.minZ);
+      if (a) {
+        put('L' + L.z + '/' + L.x + '/' + L.y, L.z, L.x, L.y, a.t, a.rect, L.b); fallback++;
+        // visibly soft = more than one zoom short, or any gap at z<=16
+        if (L.z - a.z > 1 || L.z <= 16) soft++;
+      } else { blank++; soft++; }
+    }
+    for (const [dk, m] of this.meshes) {
+      if (used.has(dk)) continue;
+      this.meshes.delete(dk);
+      this.group.remove(m);
+      m.material.uniforms.map.value = null;
+      m.material.uniforms.hill.value = null;
+      this.meshPool.push(m);
+    }
+    const s = this.stats;
+    s.leaves = this.leaves.length; s.exact = exact; s.fallback = fallback; s.blank = blank; s.soft = soft;
+    s.queued = this.queue.size; s.inflight = this.inflight.so + this.inflight.direct;
+    s.textures = this.tex.size; s.lod = +(this.lodFactor || 1).toFixed(2);
+    s.maxZ = this.leaves.reduce((m, L) => Math.max(m, L.z), 0);
+  }
+  makeMesh() {
+    const g = this.grade;
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: AIRTILE_VS,
+      fragmentShader: AIRTILE_FS,
+      uniforms: {
+        map: { value: null }, rect: { value: new THREE.Vector4(0, 0, 1, 1) },
+        hill: { value: null }, hrect: { value: new THREE.Vector4(0, 0, 1, 1) }, hasHill: { value: 0 },
+        hillFlat: { value: g.hillFlat }, hillAmt: { value: g.hillAmt }, hillPow: { value: g.hillPow }, hillLift: { value: g.hillLift },
+        contrast: { value: g.contrast }, saturation: { value: g.saturation }, gammaV: { value: g.gammaV },
+        bright: { value: g.bright }, tint: { value: new THREE.Vector3(...g.tint) },
+      },
+      depthWrite: true,
+      depthTest: true,
+      toneMapped: false,
+      fog: false,
+    });
+    const m = new THREE.Mesh(this.geo, mat);
+    m.rotation.x = -Math.PI / 2;
+    m.frustumCulled = true;
+    m.userData.airTile = true;
+    return m;
+  }
+  dispose() {
+    for (const t of this.tex.values()) this.free(t);
+    for (const e of this.readyQ) this.free(e);
+    this.readyQ.length = 0;
+    this.tex.clear(); this.queue.clear();
+    for (const m of this.meshes.values()) { try { m.material.dispose(); } catch (_) {} }
+    for (const m of this.meshPool) { try { m.material.dispose(); } catch (_) {} }
+    this.meshes.clear(); this.meshPool.length = 0;
+    try { this.parent.remove(this.group); } catch (_) {}
+  }
+}
+
+/** Idle Bay prefetch: fetch (no decode) the near-Bay set once per device so the
+ *  Service Worker / HTTP cache holds it across visits. Pauses whenever any
+ *  visible tile is queued. */
+function makeAirPrefetch(kinds) {
+  const KEY = 'airloom-prefetch-v27-' + kinds.join('-');
+  try { if (localStorage.getItem(KEY) === 'done') return null; } catch (_) {}
+  const plan = { 10: 100, 11: 100, 12: 40, 13: 20, 14: 10, 15: 5, 16: 3, 17: 1.5 };
+  const urls = [];
+  const c = { lat: ORIGIN.lat, lon: ORIGIN.lon };
+  const cosLat = Math.cos(c.lat * Math.PI / 180);
+  for (const kind of kinds) {
+    for (const zs of Object.keys(plan)) {
+      const z = +zs;
+      if ((kind === 'hill' || kind === 'relief') && z > 13) continue;
+      if ((kind === 'orbit') && z > 16) continue;
+      const r = plan[z];
+      const tileNm = 360 / (2 ** z) * 60 * cosLat;
+      const ct = latLonToTile(c.lat, c.lon, z);
+      const half = Math.ceil(r / tileNm) + 1;
+      for (let dy = -half; dy <= half; dy++) for (let dx = -half; dx <= half; dx++) {
+        if ((dx * dx + dy * dy) * tileNm * tileNm > (r + tileNm) * (r + tileNm)) continue;
+        urls.push(AIRTILE_SO(kind, z, ct.y + dy, ct.x + dx));
+      }
+    }
+  }
+  let i = 0, inflight = 0;
+  window.__AIRLOOM_TILE_WARM = { n: urls.length, done: 0, at: Date.now() };
+  return {
+    step() {
+      while (inflight < 4 && i < urls.length) {
+        const u = urls[i++];
+        inflight++;
+        fetch(u, { credentials: 'same-origin' }).then((r) => r.arrayBuffer()).catch(() => {}).finally(() => {
+          inflight--; window.__AIRLOOM_TILE_WARM.done++;
+          if (i >= urls.length && inflight === 0) { try { localStorage.setItem(KEY, 'done'); } catch (_) {} }
+        });
+      }
+    },
+  };
+}
+
+let satTiles = null;
+let darkTiles = null;
+window.__AIRTILES = { get sat() { return satTiles; }, get dark() { return darkTiles; } };
+window.__AIRTILES_STATS = function () {
+  const lat = airTileState.lat.slice().sort((a, b) => a - b);
+  const q = (p) => lat.length ? Math.round(lat[Math.min(lat.length - 1, Math.floor(p * lat.length))]) : null;
+  return {
+    build: BUILD_MARK,
+    sat: satTiles ? { ...satTiles.stats, active: satTiles.active() } : null,
+    dark: darkTiles ? { ...darkTiles.stats, active: darkTiles.active() } : null,
+    p50: q(0.5), p95: q(0.95), n: lat.length,
+    directOk: airTileState.directOk, directFails: airTileState.directFails,
+    gate: airGate.state, gateMs: airGate.doneMs, warm: window.__AIRLOOM_TILE_WARM || null,
+    gpuTextures: renderer.info.memory.textures, gpuGeometries: renderer.info.memory.geometries,
+    tileTexMB: Math.round(((satTiles ? satTiles.tex.size : 0) + (darkTiles ? darkTiles.tex.size : 0)) * 0.35),
+    ctx: airCtx, pixelRatio: renderer.getPixelRatio(),
+  };
+};
+
+/* Loading gate: brief progress screen until the visible high-res set is sharp. */
+const airGate = { state: 'loading', startMs: performance.now(), doneMs: null, el: null, okTicks: 0 };
+(function mountAirGate() {
+  try {
+    const el = document.createElement('div');
+    el.id = 'airTileGate';
+    el.setAttribute('role', 'status');
+    el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;'
+      + 'background:radial-gradient(ellipse at 50% 40%,#16222e 0%,#070b11 70%);color:#dfe8f0;font:500 14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;'
+      + 'transition:opacity .45s ease;padding:24px;text-align:center;';
+    el.innerHTML = '<div style="font-size:20px;font-weight:650;letter-spacing:.02em;margin-bottom:6px">✈ AirLoom · KSFO</div>'
+      + '<div id="airTileGateMsg" style="opacity:.78;margin-bottom:16px">Loading sharp Bay Area imagery…</div>'
+      + '<div style="width:min(260px,70vw);height:6px;border-radius:3px;background:#1d2a36;overflow:hidden">'
+      + '<div id="airTileGateBar" style="height:100%;width:4%;background:linear-gradient(90deg,#3ecf8e,#4ecdc4);transition:width .25s ease"></div></div>'
+      + '<div id="airTileGatePct" style="margin-top:10px;font-variant-numeric:tabular-nums;opacity:.7;font-size:12px">0%</div>';
+    (document.body || document.documentElement).appendChild(el);
+    airGate.el = el;
+  } catch (_) {}
+})();
+function airGateTick(engine, camReady) {
+  if (airGate.state !== 'loading') return;
+  const el = airGate.el;
+  const now = performance.now();
+  const age = now - airGate.startMs;
+  const s = engine && engine.stats;
+  let pct = 0;
+  if (s && s.leaves) pct = Math.round(100 * (s.leaves - s.soft) / s.leaves);
+  if (!camReady) pct = Math.min(pct, 60);
+  if (el) {
+    const bar = el.querySelector('#airTileGateBar'), p = el.querySelector('#airTileGatePct');
+    if (bar) bar.style.width = Math.max(4, pct) + '%';
+    if (p) p.textContent = pct + '%' + (s ? ` · ${s.leaves - s.soft}/${s.leaves} tiles` : '');
+  }
+  const sharp = s && s.leaves > 0 && s.soft === 0 && camReady;
+  airGate.okTicks = sharp ? airGate.okTicks + 1 : 0;
+  // launch when sharp for a few frames; never hold longer than 12 s (parents already drawn)
+  if ((airGate.okTicks >= 4 && age > 600) || age > 12000) {
+    airGate.state = sharp ? 'sharp' : 'timeout';
+    airGate.doneMs = Math.round(age);
+    console.log('AIRLOOM_BENCH gate ' + airGate.state + ' ' + airGate.doneMs + 'ms leaves=' + (s && s.leaves) + ' exact=' + (s && s.exact));
+    if (el) { el.style.opacity = '0'; el.style.pointerEvents = 'none'; setTimeout(() => { try { el.remove(); } catch (_) {} }, 600); }
+  }
+}
+
+let _airCamWait = 0;
+function airTilesTick(cam, camReady) {
+  const follow = settings.cameraMode === 'follow';
+  const eng = follow ? satTiles : darkTiles;
+  if (satTiles) satTiles.update(follow ? cam : null);
+  if (darkTiles) darkTiles.update(follow ? null : cam);
+  // Follow needs a placed chase cam (first ADS-B poll); give it up to 6 s
+  if (!camReady && !_airCamWait) _airCamWait = performance.now();
+  const ready = camReady || (performance.now() - (_airCamWait || performance.now()) > 6000);
+  airGateTick(eng, ready);
+}
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((e) => console.warn('sw', e));
+  });
+}
+
 /**
  * Hex-lattice mosaic centers covering ~radiusNm (Bay HD resident).
  * Overlap ~20% so switching Follow views never falls into soft low-z gaps.
@@ -3232,6 +3964,12 @@ function offsetAlongTrack(lat, lon, trackDeg, aheadNm) {
 async function refreshChaseInset(lat, lon, trackDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
   if (settings.cameraMode !== 'follow') return;
+  // airloom-v27: AirTiles streams z15–z19 under/ahead of the chase by priority — no mosaics
+  if (satTiles) {
+    const ahead = offsetAlongTrack(lat, lon, trackDeg, 1.2);
+    satTiles.setFocus((lat + ahead.lat) / 2, (lon + ahead.lon) / 2);
+    return;
+  }
   const now = performance.now();
   if (chaseInsetBusy) return;
   if (now - chaseInsetLastTry < 1100) return;
@@ -3295,86 +4033,23 @@ async function loadSatBasemap() {
   chaseInsetGen++;
   chaseInsetTileKey = '';
   disposeMeshTree(chaseHiZGroup);
+  if (satTiles) { satTiles.dispose(); satTiles = null; }
   disposeMeshTree(satGroundGroup);
   makeEarthBase(satGroundGroup, false);
   satGroundGroup.add(makeRunwaySketch());
   satGroundGroup.add(chaseHiZGroup);
-
-  const addSatLayer = async (L, radiusNm) => {
-    const r = Number.isFinite(L.radiusNm) ? L.radiusNm : radiusNm;
-    const centers = L.patches
-      ? bayHdPatchCenters(L.z, L.span, r, L.maxPatches || 12)
-      : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
-    let yi = 0;
-    let ok = 0;
-    for (const c of centers) {
-      const layer = await fetchLayerWithFallback(
-        L.z, L.span, L.fill, true, c.lat, c.lon, {
-          overlay: !!L.overlay,
-          // relief alpha left to fetchLayerWithFallback z-scaling
-        }
-      );
-      if (layer) {
-        layer.mesh.position.y = L.y + yi * 0.015;
-        layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
-        satGroundGroup.add(layer.mesh);
-        ok++;
-        if (ok === 1) hideEarthBase(satGroundGroup);
-      }
-      yi++;
-    }
-    return { z: L.z, span: L.span, patches: centers.length, loaded: ok, radiusNm: r };
-  };
-
-  // Phase A — wide + mid ladder (paint ASAP)
-  const phaseA = [
-    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#1e2a30', overlay: false },
-    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#223038', overlay: true },
-    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.46, fill: '#243430', overlay: true },
-    { z: 12, span: Math.min(MAX_MOSAIC_SPAN, spanForRadiusNm(12, SFO_HD_RADIUS_NM)), y: 0.64, fill: '#263830', overlay: true, patches: true, maxPatches: 9 },
-    { z: 13, span: 6, y: 0.82, fill: '#283a32', overlay: true, patches: true, maxPatches: 16, radiusNm: SFO_HD_RADIUS_NM },
-    { z: 14, span: 5, y: 1.00, fill: '#2a3c34', overlay: true, patches: true, maxPatches: 22, radiusNm: SFO_HD_RADIUS_NM },
-  ];
-  const metaA = [];
-  for (const L of phaseA) metaA.push(await addSatLayer(L, SFO_HD_RADIUS_NM));
+  // airloom-v27: quadtree LOD engine (ESRI World Imagery z8–z19 + World_Hillshade multiply)
+  satTiles = new AirTileEngine({
+    name: 'sat', kind: 'sat', hillKind: 'hill', grade: 'sat',
+    parent: satGroundGroup, minZ: 8, maxZ: 19, hillMaxZ: 13,
+  });
+  satTiles.prefetch = makeAirPrefetch(['sat', 'hill']);
   groundReady = true;
   window.__AIRLOOM_SFO_HD = {
     radiusNm: SFO_HD_RADIUS_NM,
-    phase: 'A',
-    follow: metaA,
-    at: Date.now(),
-  };
-  if (settings.cameraMode === 'follow') {
-    refreshChaseInset(ORIGIN.lat, ORIGIN.lon).catch(() => {});
-  }
-
-  // Phase B — Bay-wide high-z always resident (background; does not block Follow)
-  const phaseB = [
-    // Full ~100 mi at z15–z16 (hex patches; underlay keeps gaps readable)
-    { z: 15, span: 4, y: 1.18, fill: '#2c4036', overlay: true, patches: true, maxPatches: 40, radiusNm: SFO_HD_RADIUS_NM },
-    { z: 16, span: 3, y: 1.32, fill: '#2e4238', overlay: true, patches: true, maxPatches: 56, radiusNm: SFO_HD_RADIUS_NM },
-    // Core Bay ultra denser + farther (v21): z17–z19 resident
-    { z: 17, span: 3, y: 1.46, fill: '#30443a', overlay: true, patches: true, maxPatches: 56, radiusNm: 62 },
-    { z: 18, span: 2, y: 1.56, fill: '#32463c', overlay: true, patches: true, maxPatches: 64, radiusNm: 48 },
-    { z: 19, span: 2, y: 1.64, fill: '#34483e', overlay: true, patches: true, maxPatches: 48, radiusNm: 28 },
-  ];
-  const metaB = [];
-  for (const L of phaseB) {
-    try { metaB.push(await addSatLayer(L, L.radiusNm || SFO_HD_RADIUS_NM)); }
-    catch (e) { console.warn('sat phaseB z' + L.z, e); }
-  }
-  // Warm leftover raw tiles (skip / defer on iOS — warming starved mosaic loads → green)
-  if (!IOS_SAFARI) {
-    try { warmBaySatTileCache().catch(() => {}); } catch (_) {}
-  } else {
-    setTimeout(() => { try { warmBaySatTileCache().catch(() => {}); } catch (_) {} }, 12000);
-  }
-
-  window.__AIRLOOM_SFO_HD = {
-    radiusNm: SFO_HD_RADIUS_NM,
-    phase: 'B',
-    follow: metaA.concat(metaB),
-    bayCoreNm: { z17: 62, z18: 48, z19: 28 },
+    phase: 'airtiles-v27',
+    engine: 'quadtree-lod',
+    maxZ: 19,
     at: Date.now(),
   };
 }
@@ -3410,83 +4085,19 @@ async function warmBaySatTileCache() {
  *  airloom-v9: dispose + exclusive visibility + depth-stable overlays.
  *  airloom-v19: ~100 mi ultra-HD resident + World_Hillshade_Dark topography. */
 async function loadDarkBasemap() {
+  if (darkTiles) { darkTiles.dispose(); darkTiles = null; }
   disposeMeshTree(darkGroundGroup);
   makeEarthBase(darkGroundGroup, true);
-  const addDark = async (z, span, y, fill, overlay, lat, lon, reliefAlpha) => {
-    const commonRelief = {
-      reliefUrl: RELIEF_TILE_URL,
-      reliefAlpha: Number.isFinite(reliefAlpha) ? reliefAlpha : (z >= 12 ? 0.82 : 0.68),
-      reliefMode: 'overlay',
-    };
-    const pos = {
-      lat: Number.isFinite(lat) ? lat : ORIGIN.lat,
-      lon: Number.isFinite(lon) ? lon : ORIGIN.lon,
-    };
-    // 1) same-origin proxy (Safari-safe) + same-origin dark hillshade
-    let layer = await fetchTileLayer(z, span, fill, false, {
-      tileUrl: ORBIT_TILE_URL, overlay, sameOrigin: true, orbitLift: true, poolLimit: 16,
-      ...pos, ...commonRelief,
-    });
-    // 2) direct ESRI (Chrome / desktop) + direct dark hillshade
-    if (!layer) {
-      layer = await fetchTileLayer(z, span, fill, false, {
-        tileUrl: ORBIT_TILE_DIRECT_URL, overlay, orbitLift: true, poolLimit: 8,
-        reliefUrl: RELIEF_TILE_DIRECT_URL,
-        reliefAlpha: commonRelief.reliefAlpha,
-        reliefMode: 'overlay',
-        ...pos,
-      });
-    }
-    // 3) stylized World Imagery + hillshade so Orbit is never an empty ink disc
-    if (!layer) {
-      layer = await fetchTileLayer(z, span, fill, false, {
-        tileUrl: FOLLOW_TILE_FALLBACK_URL, overlay, darkStylize: true, poolLimit: 8,
-        reliefUrl: RELIEF_FOLLOW_URL,
-        reliefAlpha: 0.55,
-        reliefMode: 'overlay',
-        ...pos,
-      });
-    }
-    if (!layer) return null;
-    layer.mesh.position.y = y;
-    darkGroundGroup.add(layer.mesh);
-    return layer;
-  };
-
-  const layers = [
-    { z: 8,  span: Math.max(3, spanForRadiusNm(8, 160)), y: 0,    fill: '#05070c', overlay: false },
-    { z: 10, span: spanForRadiusNm(10, SFO_HD_RADIUS_NM), y: 0.28, fill: '#060910', overlay: true },
-    { z: 11, span: spanForRadiusNm(11, SFO_HD_RADIUS_NM), y: 0.48, fill: '#070b12', overlay: true },
-    { z: 12, span: spanForRadiusNm(12, SFO_HD_RADIUS_NM), y: 0.68, fill: '#080c14', overlay: true, patches: true, maxPatches: 9 },
-    { z: 13, span: 6, y: 0.88, fill: '#090e16', overlay: true, patches: true, maxPatches: 14 },
-    { z: 14, span: 5, y: 1.08, fill: '#0a1018', overlay: true, patches: true, maxPatches: 18 },
-    { z: 15, span: 4, y: 1.28, fill: '#0c141c', overlay: true, patches: true, maxPatches: 22 },
-    { z: 16, span: 3, y: 1.42, fill: '#0e1820', overlay: true, patches: true, maxPatches: 28 },
-  ];
-
-  let any = false;
-  for (const L of layers) {
-    const centers = L.patches
-      ? bayHdPatchCenters(L.z, L.span, SFO_HD_RADIUS_NM, L.maxPatches || 12)
-      : [{ lat: ORIGIN.lat, lon: ORIGIN.lon }];
-    let yi = 0;
-    for (const c of centers) {
-      const layer = await addDark(
-        L.z, L.span, L.y + yi * 0.02, L.fill, L.overlay, c.lat, c.lon,
-        L.z >= 12 ? 0.74 : 0.58
-      );
-      if (layer) {
-        any = true;
-        if (centers.length > 1) layer.mesh.renderOrder = (L.overlay ? 10 : 0) + L.z + yi;
-      }
-      yi++;
-    }
-  }
-  if (!any) console.warn('dark basemap: wide mosaic failed');
-
+  // airloom-v27: Orbit = World Dark Gray Base + World_Hillshade_Dark relief, LOD-streamed;
+  // only requests tiles while Orbit is the visible stack (no more Follow/Orbit contention)
+  darkTiles = new AirTileEngine({
+    name: 'dark', kind: 'orbit', hillKind: 'relief', grade: 'orbit',
+    parent: darkGroundGroup, minZ: 8, maxZ: 16, hillMaxZ: 13,
+  });
   window.__AIRLOOM_SFO_HD_ORBIT = {
     radiusNm: SFO_HD_RADIUS_NM,
-    layers: layers.map((L) => ({ z: L.z, span: L.span, patches: !!L.patches })),
+    engine: 'quadtree-lod',
+    maxZ: 16,
     relief: RELIEF_TILE_TMPL,
     at: Date.now(),
   };
@@ -5972,7 +6583,12 @@ function pickCockpitTargets(fromList) {
       if (a.onFinal !== b.onFinal) return a.onFinal ? -1 : 1;
       return a.score - b.score;
     });
-    const nextId = scored[0].icao;
+    let nextId = scored[0].icao;
+    // airloom-v27: never yank the chase target (and reset yaw/pitch/zoom) mid-gesture
+    if (cockpitPrimaryId && cockpitPrimaryId !== nextId && typeof airInteractRecent === 'function'
+        && airInteractRecent(4000) && scored.some((s) => s.icao === cockpitPrimaryId)) {
+      nextId = cockpitPrimaryId;
+    }
     if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
     cockpitPrimaryId = nextId;
   }
@@ -7735,6 +8351,10 @@ function animate() {
     }
   }
 
+  try {
+    airTilesTick(settings.cameraMode === 'follow' && followOk ? cockpitCam : camera,
+      settings.cameraMode !== 'follow' || followOk);
+  } catch (e) { if (!airTilesTick._warned) { airTilesTick._warned = 1; console.warn('airtiles', e); } }
   if (settings.cameraMode === 'follow') {
     renderer.autoClear = true;
     cockpitCam.aspect = w / h;
@@ -7770,7 +8390,8 @@ function animate() {
           if (hr) frameTopDownPreview(hr, false);
           else clearOrbitHoverPreview(true);
           controls.update();
-        } else if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)) {
+        } else if (dualFinalActive && (dualFinalBand.length >= 2 || finalCache.length >= 2)
+            && !airInteract.active && !orbitUserFramed) {
           frameDualFinalOrbit(dualFinalBand.length >= 2 ? dualFinalBand : finalCache, false);
         } else if (!orbitUserFramed && orbitArrivalsCache.length) {
           frameClosestOrbitInbound(false);
