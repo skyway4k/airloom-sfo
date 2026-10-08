@@ -5,7 +5,15 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28.1)
+
+## airloom-v28.1 — tighter ADS-B-only arrival filter (lists + soon bar only)
+
+- **Other-field veto** for targets without a filed KSFO destination: on a KNUQ / KSJC / KPAO / KSQL / KHAF / KOAK final corridor (≤15 nm, ≤20° track-to-threshold, ~3° profile to that field) and pointing at it better than at SFO — or on the same line as SFO but far below any SFO profile — or closer to, pointing at and still able to land at that field. Tight SFO finals (≤0.35 nm, ≤7 nm) always win. Jets are never assigned to PAO/SQL/HAF.
+- **Small aircraft** (light pistons / wake-L piston types, ADS-B emitter A1 non-jets) are listed only when Skyway FAA SWIM (or another filed source) confirms KSFO; single-engine turboprops (C208, PC12, TBM, P46T, Kodiak…) need SWIM or a tight SFO short final. Light jets (C510/C525/CJ/E50P/SF50/HDJT) are not "small".
+- Destination-confirmed (SWIM) targets always win. The 3D map keeps the v28 decision (`legacy`), so BLOCKED/PIA/other traffic stays visible as before.
+- Soon-bar "On base" times are explicitly Pacific (`America/Los_Angeles`), header "On base PT".
+- Test hook: `window.__AIRLOOM_DECIDE({type, lat, lon, altFt, track, vrFpm, gsKt, adsbCat, dest}, {allowAirline})` → strict vs legacy.
 
 ## airloom-v28 — FAA SWIM filed flight plans (via Skyway public GETs)
 

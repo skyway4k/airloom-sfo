@@ -783,7 +783,7 @@
       <span class="c-tail">Tail</span>
       <span class="c-icao">ICAO</span>
       <span class="c-eta">ETA</span>
-      <span class="c-base">On base</span>
+      <span class="c-base">On base PT</span>
     </div>
     <div class="sb-list" id="sbList"></div>
   </div>
@@ -947,7 +947,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v28'; // FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
+const BUILD_MARK = 'airloom-v28.1'; // v28.1: ADS-B-only other-field (NUQ/SJC/PAO/SQL/HAF/OAK) + small-aircraft list filter, PT on-base · FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -1018,6 +1018,9 @@ window.__AIRLOOM_FEATURES = {
   stackBottomFix271: true,
   stackNearBrowserBar28: true,
   faaSwimFiledPlans28: true,
+  otherFieldVeto281: true,
+  smallAircraftSwimOnly281: true,
+  onBasePt281: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -5944,11 +5947,103 @@ function hasPublicIdent(p) {
   return !!((p.reg && String(p.reg).trim()) || (p.callsign && String(p.callsign).trim()));
 }
 
+/* ───────────── airloom-v28.1: tighter ADS-B-only arrival filter (lists + soon bar only) ─────────────
+ * (1) Other-field veto: an ADS-B-only candidate whose track/descent fits a KNUQ / KSJC / KPAO / KSQL /
+ *     KHAF / KOAK final (corridor + ~3° profile) or that is closer to, pointing at, and on a landing
+ *     profile for that field is not a KSFO arrival.
+ * (2) Small aircraft (light pistons / wake-L piston types, single-engine turboprops, ADS-B emitter A1
+ *     non-jets) are listed only when Skyway FAA SWIM (or another filed source) confirms KSFO.
+ * Destination-confirmed targets always win. The 3D map keeps using the v26 decision (legacy) so
+ * BLOCKED / PIA / other traffic stays visible exactly as before.
+ */
+const VETO_FIELD_SHORT = new Set(['NUQ', 'SJC', 'PAO', 'SQL', 'HAF', 'OAK']);
+// Approximate thresholds (true headings) for the GA fields not in OTHER_FINALS
+const VETO_EXTRA_FINALS = [
+  { apt: 'PAO', name: '31', thrLat: 37.4568, thrLon: -122.1090, hdg: 324 },
+  { apt: 'PAO', name: '13', thrLat: 37.4655, thrLon: -122.1210, hdg: 144 },
+  { apt: 'SQL', name: '30', thrLat: 37.5090, thrLon: -122.2450, hdg: 314 },
+  { apt: 'SQL', name: '12', thrLat: 37.5150, thrLon: -122.2545, hdg: 134 },
+  { apt: 'HAF', name: '30', thrLat: 37.5085, thrLon: -122.4960, hdg: 314 },
+  { apt: 'HAF', name: '12', thrLat: 37.5185, thrLon: -122.5065, hdg: 134 },
+];
+const VETO_FINALS = OTHER_FINALS.filter((r) => VETO_FIELD_SHORT.has(r.apt)).concat(VETO_EXTRA_FINALS);
+const SMALL_JET_RE = /^(C510|C525|C25[ABCM]|E50P|E55P|SF50|HDJT|EA50|PRM1|LJ\d\d|BE40|PC24|C550|C560|C56X|C680|C68A|G150|G280|FA\d\w?|F2TH|CL\d\d|GL\w\w|GLF\d|GA\dC|H25B|E545|E550|HA4T)$/;
+const SE_TURBOPROP_TYPES = new Set(['C208', 'PC12', 'TBM7', 'TBM8', 'TBM9', 'P46T', 'KODI', 'PC6T', 'C210T', 'M7', 'EPIC', 'DHC2', 'DHC3', 'AT8T', 'TBM']);
+const EXTRA_PISTON_RE = /^(COL[34]|LNC[24]|C72R|C77R|C82[RST]|T182|C1[24]0|BE19|BE77|P28[UR]|PA25|PA31|C340|C310|C414|C421|BE95|BE60|AEST|AA5|GC1|ERCO|EVOT|FDCT|PIVI|SIRA|SR2\d|DA\d\d)$/;
+
+function isJetType(t) {
+  return !!t && (JET_ONLY_LONG_RWY_RE.test(t) || SMALL_JET_RE.test(t));
+}
+
+/** 'piston' | 'se-turboprop' | 'a1' | null — small aircraft that rarely use KSFO. */
+function smallAircraftClass(p) {
+  const t = String((p && p.type) || '').toUpperCase().trim();
+  if (isJetType(t)) return null;
+  if (t && SE_TURBOPROP_TYPES.has(t)) return 'se-turboprop';
+  if (isLightPiston(p) || (t && EXTRA_PISTON_RE.test(t))) return 'piston';
+  if (String(p.adsbCat || '').toUpperCase() === 'A1') {
+    if (t) return 'a1';
+    const gs = p.gsKt != null ? p.gsKt : (p.vel != null ? p.vel / KT_MS : null);
+    if (gs == null || gs < 230) return 'a1'; // untyped A1 that isn't jet-fast
+  }
+  return null;
+}
+
+/** Fits another Bay field's final / landing profile better than KSFO → { field, why } or null. */
+function otherFieldVeto(p) {
+  if (!p || p.onGround || p.lat == null || p.lon == null) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  if (vrFpm > 400 && altFt > 2000) return null; // climbing out — not landing anywhere
+  const t = String(p.type || '').toUpperCase().trim();
+  const jet = isJetType(t) || (!t && p.gsKt != null && p.gsKt > 230);
+  const sfoFin = p.finalInfo || detectKsfoFinal(p);
+  // Established tight on a KSFO final → KSFO wins
+  if (sfoFin && Math.abs(sfoFin.xtkNm) <= 0.35 && sfoFin.alongNm <= 7) return null;
+  const sfo = trackMissNm(p, BAY_FIELDS[0].lat, BAY_FIELDS[0].lon);
+
+  // (a) On another field's final corridor, on a ~3° profile to it
+  for (const rw of VETO_FINALS) {
+    if (jet && SHORT_RWY_FIELDS.has('K' + rw.apt)) continue;
+    const c = corridorFit(p, rw, 15);
+    if (!c) continue;
+    if (Math.abs(c.xtkNm) > 0.6 + 0.06 * c.alongNm) continue;
+    if (c.hdgDiff > 25) continue;
+    // Must point at that threshold better than at KSFO (an SFO arrival crossing the corridor doesn't count)
+    const teThr = Math.abs(angDiff(p.track, bearingDeg(p.lat, p.lon, rw.thrLat, rw.thrLon)));
+    if (teThr > 20) continue;
+    const pointsBetter = sfo.te == null || teThr + 5 < sfo.te;
+    // Same line as KSFO (e.g. SQL 30 points at SFO): ~3° to that field = far below any SFO profile
+    const glideFavorsOther = altFt < 200 * sfo.d - 300;
+    if (!pointsBetter && !glideFavorsOther) continue;
+    const hi = 420 * c.alongNm + 800, lo = 150 * c.alongNm - 600;
+    if (altFt > hi || altFt < lo) continue;
+    if (sfoFin && Math.abs(sfoFin.xtkNm) <= Math.abs(c.xtkNm)) continue;
+    return { field: rw.apt, why: rw.apt + ' ' + rw.name + ' final (' + c.alongNm.toFixed(1) + ' nm, ' + Math.round(altFt) + ' ft)' };
+  }
+  // (b) Closer to, pointing at, and still able to land at the other field
+  if (sfo.te == null) return null;
+  for (const f of BAY_FIELDS.slice(1)) {
+    if (!VETO_FIELD_SHORT.has(f.short)) continue;
+    if (jet && SHORT_RWY_FIELDS.has(f.icao)) continue;
+    const o = trackMissNm(p, f.lat, f.lon);
+    if (o.te == null || o.d > 25) continue;
+    if (!(o.d < sfo.d - 1)) continue;          // closer to the other field
+    if (!(o.te <= 18 && o.miss + 0.5 < sfo.miss)) continue; // pointing at it, not at SFO
+    if (altFt > 380 * o.d + 1200) continue;     // too high to land there (e.g. SFO arrivals passing over)
+    if (vrFpm > 200 && altFt > 2500) continue;
+    return { field: f.short, why: 'pointing at ' + f.short + ' (' + o.d.toFixed(1) + ' nm, ' + Math.round(altFt) + ' ft) vs SFO ' + sfo.d.toFixed(1) + ' nm' };
+  }
+  return null;
+}
+
 /**
  * The arrival decision. Returns { ok, why, geo, confirmed } — ok=false drops the aircraft.
  */
 function ksfoArrivalDecision(p, opts) {
   const allowAirline = !!(opts && opts.allowAirline);
+  // v28.1: legacy = v26/v28 decision, used only for 3D map visibility (lists use the strict one)
+  const legacy = !!(opts && opts.legacy);
   const isGa = !!(p.isPrivateGa || isPrivateOrGa(p));
   if (!isGa && !allowAirline) return { ok: false, why: 'airliner (not FBO list)' };
   const dst = p.dest || null;
@@ -5956,8 +6051,22 @@ function ksfoArrivalDecision(p, opts) {
   const confirmed = !!(dst && dst.icao === 'KSFO');
   const light = isLightPiston(p);
   if (confirmed) {
-    // Filed to KSFO (even a rare piston IFR plan) — trust the destination source
+    // Filed to KSFO (even a rare piston IFR plan) — trust the destination source (SWIM always wins)
     return { ok: true, why: 'dest KSFO (' + (dst.src || 'schedule') + ')', confirmed: true, geo: strongKsfoGeometry(p) };
+  }
+  if (!legacy) {
+    const small = smallAircraftClass(p);
+    if (small === 'piston' || small === 'a1') {
+      return { ok: false, why: 'small aircraft (' + small + (p.type ? ' ' + p.type : '') + ') without SWIM KSFO', filter281: 'small' };
+    }
+    const veto = otherFieldVeto(p);
+    if (veto) return { ok: false, why: 'other field: ' + veto.why, filter281: 'field', field: veto.field };
+    if (small === 'se-turboprop') {
+      // strong evidence only: tight SFO short final
+      return isTightShortFinal(p)
+        ? { ok: true, why: 'single-engine turboprop on SFO short final', geo: { tier: 'final', fin: p.finalInfo || detectKsfoFinal(p) } }
+        : { ok: false, why: 'single-engine turboprop (' + p.type + ') without SWIM KSFO', filter281: 'small' };
+    }
   }
   if (light) {
     return isTightShortFinal(p)
@@ -5986,7 +6095,7 @@ function scoreOrbitArrival(p, opts) {
 
   // v26: destination-first gate (replaces permissive toward-field heuristics)
   const allowAirline = !!(opts && opts.allowAirline) || settings.trafficMode !== 'ga';
-  const dec = ksfoArrivalDecision(p, { allowAirline });
+  const dec = ksfoArrivalDecision(p, { allowAirline, legacy: !!(opts && opts.legacy) });
   if (!dec.ok) return null;
   const geo = dec.geo || null;
   const finalHit = (geo && geo.tier === 'final') ? (geo.fin || p.finalInfo || detectKsfoFinal(p)) : (p.finalInfo || null);
@@ -6068,7 +6177,8 @@ function scoreOrbitArrival(p, opts) {
 /** True when a non-GA should still appear (useful KSFO arrival in ~60 min). */
 function isOrbitUsefulArrival(p) {
   // Scene visibility keeps real airliner arrivals as context; lists use the GA gate.
-  return !!scoreOrbitArrival(p, { allowAirline: true });
+  // v28.1: map visibility keeps the v26/v28 (legacy) decision — the strict filter is lists-only
+  return !!scoreOrbitArrival(p, { allowAirline: true, legacy: true });
 }
 
 function collectOrbitArrivals(fromList) {
@@ -6132,7 +6242,9 @@ function formatPtClock(ms) {
   try {
     return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
   } catch (_) {
-    return formatEtaClock((ms - Date.now()) / 60000);
+    const d = new Date(ms); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
   }
 }
 
@@ -6223,10 +6335,26 @@ window.__AIRLOOM_ARRIVAL_DECISIONS = (maxNm) => _lastParsedForDebug
       trk: p.track != null ? Math.round(p.track) : null, vr: p.vr != null ? Math.round(p.vr / 0.00508) : null,
       te: sfo.te != null ? Math.round(sfo.te) : null, miss: +sfo.miss.toFixed(1),
       betterField: alt ? alt.field.short : null, dest: p.dest ? p.dest.icao : null,
-      ok: d.ok, why: d.why,
+      ok: d.ok, why: d.why, cat: p.adsbCat || null, small: smallAircraftClass(p),
+      legacyOk: ksfoArrivalDecision(p, { allowAirline: true, legacy: true }).ok,
     };
   })
   .sort((a, b) => a.nm - b.nm);
+/** v28.1 test hook: decide a synthetic target (strict vs legacy) — diagnostics only. */
+window.__AIRLOOM_DECIDE = (q, o) => {
+  const allowAirline = !!(o && o.allowAirline);
+  const p = Object.assign({ icao: 'test', callsign: '', onGround: false, blocked: false }, q);
+  if (p.altFt != null) p.altM = p.altFt * FT_M;
+  if (p.vrFpm != null) p.vr = p.vrFpm * 0.00508;
+  if (p.gsKt != null) p.vel = p.gsKt * KT_MS;
+  p.dist = haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  p.cat = classifyType(p.type || '');
+  p.isPrivateGa = isPrivateOrGa(p);
+  p.finalInfo = detectKsfoFinal(p);
+  const strict = ksfoArrivalDecision(p, { allowAirline });
+  const legacy = ksfoArrivalDecision(p, { allowAirline, legacy: true });
+  return { ok: strict.ok, why: strict.why, legacyOk: legacy.ok, legacyWhy: legacy.why, mapUseful: isOrbitUsefulArrival(p) };
+};
 window.__AIRLOOM_ARRIVALS_DEBUG = () => ({
   build: BUILD_MARK,
   activeFlow,
@@ -6248,8 +6376,9 @@ window.__AIRLOOM_ARRIVALS_DEBUG = () => ({
 function formatEtaClock(etaMin) {
   if (etaMin == null || !Number.isFinite(etaMin)) return '—';
   const d = new Date(Date.now() + Math.max(0, etaMin) * 60000);
+  // v28.1: always Pacific (KSFO local), regardless of the device time zone
   try {
-    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
   } catch (_) {
     let h = d.getHours(), m = d.getMinutes();
     const ap = h >= 12 ? 'PM' : 'AM';
