@@ -8,13 +8,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 8767);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.7 (+https://sfo3d.onrender.com; airloom-sfo)';
+const UA = 'AirLoomSFO/1.8 (+https://sfo3d.onrender.com; airloom-sfo; airloom-v28)';
 // FlightAware AeroAPI (optional): destination truth + scheduled GA inbounds beyond ADS-B range.
 // Off unless AEROAPI_KEY is set. Never scrape flightaware.com web pages (FA ToS §7 forbids robots).
 const AEROAPI_KEY = process.env.AEROAPI_KEY || '';
@@ -154,10 +155,12 @@ function classifyPrivacy(ac) {
   const ownOp = (ac.ownOp != null ? String(ac.ownOp) : '').trim();
   const ownLower = ownOp.toLowerCase();
   const piaFlag = !!(flags & 4) || /\bpia\b/.test(ownLower);
-  const laddFlag = !!(flags & 8) || /\b(ladd|barr|blocked)\b/.test(ownLower)
-    || (/\bprivacy\b/.test(ownLower) && !piaFlag);
   const regRaw = (ac.r != null ? String(ac.r).trim() : '');
   const flightRaw = (ac.flight != null ? String(ac.flight).trim() : '');
+  // v28: FAA Industry LADD list (LADD_FILE / LADD_URL) masks matching tails / callsigns too
+  const laddFlag = !!(flags & 8) || /\b(ladd|barr|blocked)\b/.test(ownLower)
+    || (/\bprivacy\b/.test(ownLower) && !piaFlag)
+    || laddHas(regRaw, flightRaw);
   const typ = (ac.t != null ? String(ac.t).trim().toUpperCase() : '');
   const cat = ac.category != null ? String(ac.category).trim().toUpperCase() : '';
   const onGround = ac.alt_baro === 'ground' || ac.alt_baro === 'GROUND';
@@ -689,10 +692,13 @@ function maybeRefreshAero() {
   fetchAeroArrivals().catch(() => {});
 }
 
-function beginScheduleMatch() { buildMatches = new Map(); }
+function beginScheduleMatch() { buildMatches = new Map(); swimMatchesBuild.clear(); }
 
 /** Match one ADS-B aircraft to an AeroAPI arrival. Returns a compact dst object or null. */
 function matchScheduleForAc(ac, priv) {
+  // v28: FAA SWIM (Skyway) has priority; AeroAPI only when SWIM has no filing for this target
+  const swim = matchSwimForAc(ac, priv);
+  if (swim) return swim;
   if (!aeroFresh()) return null;
   const hex = String(ac.hex || '').toLowerCase();
   let fl = null;
@@ -727,25 +733,503 @@ function matchScheduleForAc(ac, priv) {
   };
 }
 
-/** Compact schedule list for the client (filed inbounds, incl. beyond ADS-B range). */
+/** Compact schedule list for the client (filed inbounds, incl. beyond ADS-B range).
+ *  v28: FAA SWIM via Skyway first, then AeroAPI rows not already covered by a SWIM filing. */
 function scheduleSummary() {
+  const swimOk = swimFresh();
+  const aeroOk = aeroFresh();
+  const sources = [];
+  if (swimOk) sources.push('skyway-swim');
+  if (aeroOk) sources.push('aeroapi');
   const base = {
-    enabled: aeroState.enabled,
-    authoritative: aeroFresh(),
-    source: aeroState.enabled ? 'aeroapi' : null,
+    enabled: swimState.enabled || aeroState.enabled,
+    // authoritative = a fresh filed-arrivals source is present (list + destination truth)
+    authoritative: swimOk || aeroOk,
+    // Absence-as-evidence (drop GA not on the filed list) only for AeroAPI's complete GA list;
+    // the Skyway SWIM board is a curated subset, so it confirms but never rejects (v26 behavior kept).
+    negativeEvidence: aeroOk,
+    source: sources[0] || (swimState.enabled ? 'skyway-swim' : (aeroState.enabled ? 'aeroapi' : null)),
+    sources,
     airport: AEROAPI_AIRPORT,
-    fetchedAgoSec: aeroState.lastFetchAt ? Math.round((Date.now() - aeroState.lastFetchAt) / 1000) : null,
-    error: aeroState.lastError || null,
+    fetchedAgoSec: swimOk
+      ? Math.round((Date.now() - swimState.lastGoodAt) / 1000)
+      : (aeroState.lastFetchAt ? Math.round((Date.now() - aeroState.lastFetchAt) / 1000) : null),
+    error: (swimOk || aeroOk) ? null : (swimState.lastError || aeroState.lastError || null),
+    swim: {
+      enabled: swimState.enabled,
+      state: swimFeedState(),
+      connected: swimState.connected,
+      fetchedAgoSec: swimState.lastGoodAt ? Math.round((Date.now() - swimState.lastGoodAt) / 1000) : null,
+    },
+    ladd: laddState.loaded ? 'loaded' : 'not loaded',
     flights: [],
   };
-  if (!aeroFresh()) return base;
-  base.flights = aeroState.flights.slice(0, 60).map((f) => ({
-    id: f.id, ident: f.ident, reg: f.reg, type: f.type, origin: f.origin,
-    eta: f.etaOn, sched: f.schedOn, off: f.actualOff, status: f.status,
-    progress: f.progress, blocked: f.blocked,
-    hex: (f.id && buildMatches.get(f.id)) || null,
-  }));
+  const out = swimSummaryFlights();
+  if (aeroOk) {
+    const seen = new Set();
+    for (const f of swimState.flights) for (const k of (f._keys || [])) seen.add(k);
+    for (const f of aeroState.flights.slice(0, 60)) {
+      const ks = [f.reg, f.ident, f.identIcao, f.atcIdent].map(normIdent).filter(Boolean);
+      if (swimOk && ks.some((k) => seen.has(k))) continue;
+      out.push({
+        id: f.id, ident: f.ident, reg: f.reg, type: f.type, origin: f.origin,
+        eta: f.etaOn, sched: f.schedOn, off: f.actualOff, status: f.status,
+        progress: f.progress, blocked: f.blocked, source: 'aeroapi',
+        hex: (f.id && buildMatches.get(f.id)) || null,
+      });
+    }
+    out.sort((a, b) => (a.eta || a.off || 9e12) - (b.eta || b.off || 9e12));
+  }
+  base.flights = out.slice(0, 80);
   return base;
+}
+
+/* ─────────────── airloom-v28: FAA SWIM (TFMS) filed flight plans via Skyway ───────────────
+ * Source: the live Skyway service's PUBLIC read-only endpoints (GET only, no credentials):
+ *   GET {SKYWAY_BASE}/status        → swim.connected / swim.msgs (does not keep Skyway awake)
+ *   GET {SKYWAY_BASE}/api/arrivals  → KSFO arrivals board rows
+ * Only rows Skyway sourced from FAA SWIM TFMS are kept (adsb-inbound rows are guesses → dropped).
+ * Ramp fields (spot, pax, flags, towNotes) are never read into AirLoom: rows are rebuilt from a
+ * whitelist. Polled every 60 s ONLY while AirLoom has an active viewer (lastClientAt, 15-min
+ * idle stop, same as AeroAPI). Last good result is served for 5 min, then dropped.
+ * Priority: SWIM > AeroAPI (AeroAPI stays optional / off unless AEROAPI_KEY is set).
+ */
+const SKYWAY_BASE = (process.env.SKYWAY_BASE || 'https://skyway-sfo.onrender.com').replace(/\/+$/, '');
+const SKYWAY_SWIM_ENABLED = !/^(0|false|off|no)$/i.test(String(process.env.SKYWAY_SWIM_ENABLED == null ? '1' : process.env.SKYWAY_SWIM_ENABLED).trim());
+const SWIM_POLL_MS = 60 * 1000;
+const SWIM_TIMEOUT_MS = 10 * 1000;
+const SWIM_KEEP_MS = 5 * 60 * 1000;      // last-good retention
+const SWIM_STALE_MS = 150 * 1000;        // > 2 missed polls → "stale" (badge)
+const SWIM_IDLE_STOP_MS = AEROAPI_IDLE_STOP_MS; // 15 min, shared viewer gate
+const SWIM_AIRPORT = 'KSFO';
+
+const swimState = {
+  enabled: SKYWAY_SWIM_ENABLED,
+  connected: null,
+  msgs: null,
+  lastAttemptAt: 0,
+  lastGoodAt: 0,
+  lastError: SKYWAY_SWIM_ENABLED ? '' : 'SKYWAY_SWIM_ENABLED=0',
+  flights: [],
+  byKey: new Map(),        // normalized tail / callsign / mapped fractional ident → flight
+  byHex: new Map(),        // N-number-derived icao24 hex → flight
+  hexToId: new Map(),      // sticky ADS-B hex → flight id after a reg/callsign match
+  privMatched: new Set(),  // flight ids matched to a PIA/LADD/BLOCKED ADS-B target → always masked
+  inflight: null,
+  polls: 0,
+  rawRows: 0,
+  dropped: { notSwim: 0, notKsfo: 0 },
+};
+const swimMatchesBuild = new Map(); // flight id -> hex (per payload build)
+const SWIM_CLEAN_PATH = '/api/swim/arrivals?airport=' + 'KSFO';
+const SWIM_CLEAN_RETRY_MS = 10 * 60 * 1000; // re-probe the clean endpoint every 10 min when absent
+swimState.cleanAvailable = null;
+swimState.cleanRetryAt = 0;
+swimState.endpoint = null;
+function swimRowsOf(j) {
+  if (Array.isArray(j)) return j;
+  if (j && typeof j === 'object') {
+    for (const k of ['arrivals', 'rows', 'flights']) if (Array.isArray(j[k])) return j[k];
+  }
+  return null;
+}
+
+/* ── LADD (FAA Limiting Aircraft Data Displayed) ───────────────────────────────
+ * TODO(airloom-v28, user): load the FAA *Industry* LADD list. Set LADD_FILE (path in the image)
+ * or LADD_URL (https, GET) to a text/CSV list of tails and/or callsigns (one per line or
+ * comma/whitespace separated; '#' comments ok). Until then /status reports `ladd: "not loaded"`.
+ * Matching SWIM rows are shown FlightAware-style as BLOCKED (time, type, origin kept; tail and
+ * callsign hidden); matching ADS-B targets are masked like adsb.lol LADD (dbFlags & 8). */
+const LADD_FILE = process.env.LADD_FILE || '';
+const LADD_URL = process.env.LADD_URL || '';
+const LADD_REFRESH_MS = 24 * 3600 * 1000;
+const laddState = { loaded: false, count: 0, source: null, error: '', loadedAt: 0, set: new Set() };
+
+function parseLaddText(text) {
+  const out = new Set();
+  for (const line0 of String(text || '').split(/\r?\n/)) {
+    const line = line0.replace(/#.*$/, '');
+    for (const tok of line.split(/[\s,;|\t"]+/)) {
+      const n = normIdent(tok);
+      if (!n || n.length < 2 || n.length > 8) continue;
+      // N-number, ICAO callsign (3 letters + digits), or other tail with hyphen (normalized)
+      if (/^N[0-9][0-9A-Z]{0,4}$/.test(n) || /^[A-Z]{3}[0-9][0-9A-Z]{0,3}$/.test(n)
+          || (/-/.test(tok) && /^[A-Z0-9]{3,7}$/.test(n))) out.add(n);
+    }
+  }
+  return out;
+}
+
+async function loadLadd() {
+  try {
+    let text = null, source = null;
+    if (LADD_FILE) {
+      text = fs.readFileSync(LADD_FILE, 'utf8');
+      source = 'file:' + path.basename(LADD_FILE);
+    } else if (LADD_URL) {
+      const r = await fetch(LADD_URL, { headers: { 'User-Agent': UA, Accept: 'text/plain,text/csv,*/*' }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error('LADD_URL HTTP ' + r.status);
+      text = await r.text();
+      source = 'url';
+    } else {
+      laddState.error = 'LADD_FILE / LADD_URL not set — FAA Industry LADD list not provided yet';
+      return;
+    }
+    const set = parseLaddText(text);
+    if (!set.size) throw new Error('LADD list parsed 0 entries');
+    laddState.set = set;
+    laddState.count = set.size;
+    laddState.loaded = true;
+    laddState.source = source;
+    laddState.loadedAt = Date.now();
+    laddState.error = '';
+    log('LADD loaded: ' + set.size + ' tails/callsigns from ' + source, 'OK');
+  } catch (e) {
+    laddState.error = e.message || String(e);
+    log('LADD load failed: ' + laddState.error, 'WARN');
+  }
+}
+
+function laddHas(...vals) {
+  if (!laddState.loaded) return false;
+  for (const v of vals) {
+    const n = normIdent(v);
+    if (n && laddState.set.has(n)) return true;
+  }
+  return false;
+}
+
+/* ── ident helpers ── */
+// Fractional operators: callsign number == tail digits. EJA### ↔ N###QS (NetJets), LXJ### ↔ N###FX (Flexjet).
+const FRACTIONAL_MAP = [
+  { cs: 'EJA', suffix: 'QS' },
+  { cs: 'LXJ', suffix: 'FX' },
+];
+function identVariants(v) {
+  const n = normIdent(v);
+  if (!n) return [];
+  const out = [n];
+  for (const m of FRACTIONAL_MAP) {
+    let x = n.match(new RegExp('^' + m.cs + '([1-9][0-9]{0,2})$'));
+    if (x) out.push('N' + x[1] + m.suffix);
+    x = n.match(new RegExp('^N([1-9][0-9]{0,2})' + m.suffix + '$'));
+    if (x) out.push(m.cs + x[1]);
+  }
+  return out;
+}
+
+/** US N-number → Mode-S icao24 hex (FAA algorithmic block A00001–ADF7C7). Null if not an N-number. */
+const NN_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const NN_SUFFIX = 1 + NN_CH.length * (1 + NN_CH.length);
+const NN_B4 = 1 + NN_CH.length + 10;
+const NN_B3 = 10 * NN_B4 + NN_SUFFIX;
+const NN_B2 = 10 * NN_B3 + NN_SUFFIX;
+const NN_B1 = 10 * NN_B2 + NN_SUFFIX;
+function nNumberToHex(reg) {
+  const t = normIdent(reg);
+  if (!/^N[1-9][0-9A-Z]{0,4}$/.test(t)) return null;
+  const s = t.slice(1);
+  let out = 0xA00001 + (Number(s[0]) - 1) * NN_B1;
+  const bucket = [NN_B2, NN_B3, NN_B4];
+  for (let i = 1; i < s.length; i++) {
+    const c = s[i];
+    const li = NN_CH.indexOf(c);
+    if (li >= 0) {
+      if (i === 4) return s.length === 5 ? (out + 1 + li).toString(16) : null;
+      const rest = s.slice(i);
+      if (rest.length > 2) return null;
+      let off = (NN_CH.length + 1) * li + 1;
+      if (rest.length === 2) { const l2 = NN_CH.indexOf(rest[1]); if (l2 < 0) return null; off += l2 + 1; }
+      return (out + off).toString(16);
+    }
+    if (!/[0-9]/.test(c)) return null;
+    if (i === 4) return (out + 1 + NN_CH.length + Number(c)).toString(16);
+    out += NN_SUFFIX + Number(c) * bucket[i - 1];
+  }
+  return out.toString(16);
+}
+
+const SWIM_ID_SALT = crypto.randomBytes(16);
+function swimRowId(tail, departISO, arriveISO) {
+  // Opaque, stable within this process; never reveals the tail (LADD rows).
+  return 'swim:' + crypto.createHmac('sha256', SWIM_ID_SALT)
+    .update(normIdent(tail) + '|' + (departISO || '') + '|' + (arriveISO || '')).digest('base64url').slice(0, 14);
+}
+
+function upIcao(v) { return String(v == null ? '' : v).trim().toUpperCase(); }
+
+/** Keep only SWIM-sourced KSFO rows. */
+function isSwimKsfoRow(r, cleanEndpoint) {
+  if (!r || typeof r !== 'object') return 'bad';
+  const src = String(r.source || '').trim().toLowerCase();
+  const ts = String(r.timeSource || '').trim().toLowerCase();
+  if (src.startsWith('adsb')) return 'notSwim'; // adsb-inbound guesses — always dropped
+  // The clean endpoint is SWIM-only by contract; still honour an explicit non-swim source.
+  const swimTagged = src.startsWith('swim') || ts === 'swim' || (cleanEndpoint && !src);
+  if (!swimTagged) return 'notSwim';
+  const to = upIcao(r.to), dv = upIcao(r.divertTo);
+  if (to === SWIM_AIRPORT || dv) return '';
+  return 'notKsfo';
+}
+
+/** Whitelist-map one Skyway SWIM row into the /arrivals/schedule flight shape (v26 format). */
+function mapSwimRow(r, now) {
+  const reg = (r.reg != null && String(r.reg).trim()) ? String(r.reg).trim().toUpperCase() : null;
+  const identRaw = (r.ident != null && String(r.ident).trim()) ? String(r.ident).trim().toUpperCase() : null;
+  const callsign = (r.callsign != null && String(r.callsign).trim()) ? String(r.callsign).trim().toUpperCase() : null;
+  const tail = reg || identRaw;
+  const to = upIcao(r.to) || null;
+  const filedDest = upIcao(r.filedDest) || to;
+  const divertTo = upIcao(r.divertTo) || null;
+  const diverted = !!divertTo && divertTo !== filedDest;
+  const eta = toEpoch(r.arriveISO);
+  const off = toEpoch(r.departISO);
+  const arrived = !!r.arrived;
+  const onGround = !!r.onGround;
+  let status;
+  if (arrived || onGround) status = 'Arrived';
+  else if (diverted) status = 'Diverted';
+  else if (off && off * 1000 <= now) status = 'En Route';
+  else status = 'Filed';
+  const blocked = laddHas(reg, identRaw, callsign) || r.blocked === true || r.ladd === true
+    || /^(BLOCKED|LADD|PIA)$/.test(String(identRaw || '')) || /^(BLOCKED|LADD|PIA)$/.test(String(reg || ''));
+  return {
+    id: swimRowId(tail || callsign, r.departISO, r.arriveISO),
+    ident: blocked ? 'BLOCKED' : (tail || callsign || null),
+    callsign: blocked ? null : callsign,
+    reg: blocked ? null : reg,
+    type: r.type ? String(r.type).trim().toUpperCase() : null,
+    model: r.model ? String(r.model).trim() : null,
+    origin: r.from ? upIcao(r.from) : null,
+    dest: diverted ? divertTo : (to || filedDest || SWIM_AIRPORT),
+    filedDest: filedDest || null,
+    eta, off,
+    schedOn: null,
+    actualOn: arrived && eta ? eta : null,
+    status,
+    arrived, onGround,
+    diverted, divertTo: diverted ? divertTo : null,
+    intl: !!r.intl,
+    progress: null,
+    blocked,
+    laddBlocked: blocked,
+    source: 'skyway-swim',
+    // matching keys (server-side only; stripped from the public summary)
+    _keys: blocked ? [] : [...new Set([...identVariants(reg), ...identVariants(identRaw), ...identVariants(callsign)])],
+    _hex: blocked ? null : nNumberToHex(reg || identRaw),
+  };
+}
+
+/** Can this filing be the leg an airborne ADS-B target is flying right now? */
+function swimMatchable(f, now) {
+  if (f.blocked || f.status === 'Arrived') return false;
+  if (f.dest && f.dest !== SWIM_AIRPORT) return false;
+  if (f.off && f.off * 1000 > now + 20 * 60 * 1000) return false; // future leg (aircraft still on a prior leg)
+  if (f.eta && f.eta * 1000 < now - 60 * 60 * 1000) return false; // stale ETA
+  return !!(f.off || f.eta);
+}
+
+function rebuildSwimIndex(list) {
+  const now = Date.now();
+  const byKey = new Map(), byHex = new Map();
+  const score = (x) => (x.status === 'En Route' ? 0 : 1e10) + (x.eta || x.off || 9e9);
+  const put = (m, k, fl) => { const prev = m.get(k); if (!prev || score(fl) < score(prev)) m.set(k, fl); };
+  for (const fl of list) {
+    if (!swimMatchable(fl, now)) continue;
+    for (const k of fl._keys) put(byKey, k, fl);
+    if (fl._hex) put(byHex, fl._hex, fl);
+  }
+  swimState.byKey = byKey;
+  swimState.byHex = byHex;
+  // drop sticky hex links / privacy marks for flights that left the board
+  const ids = new Set(list.map((f) => f.id));
+  for (const [h, id] of swimState.hexToId) if (!ids.has(id)) swimState.hexToId.delete(h);
+  for (const id of swimState.privMatched) if (!ids.has(id)) swimState.privMatched.delete(id);
+}
+
+async function swimGetJson(p) {
+  const r = await fetch(SKYWAY_BASE + p, {
+    method: 'GET',
+    headers: { Accept: 'application/json', 'User-Agent': UA },
+    signal: AbortSignal.timeout(SWIM_TIMEOUT_MS),
+  });
+  if (!r.ok) throw new Error(p + ' HTTP ' + r.status);
+  return r.json();
+}
+
+async function fetchSwimArrivals() {
+  if (!swimState.enabled) return null;
+  if (swimState.inflight) return swimState.inflight;
+  swimState.inflight = (async () => {
+    swimState.lastAttemptAt = Date.now();
+    swimState.polls++;
+    const hadData = swimFresh();
+    try {
+      const st = await swimGetJson('/status');
+      const sw = (st && st.swim) || {};
+      const tfms = (sw.feeds && sw.feeds.tfms) || {};
+      swimState.connected = !!(sw.connected || tfms.connected);
+      swimState.msgs = Number.isFinite(Number(sw.msgs)) ? Number(sw.msgs) : (Number(tfms.msgs) || null);
+      if (!swimState.connected) throw new Error('Skyway SWIM disconnected' + (sw.reason ? ' (' + sw.reason + ')' : ''));
+      // Prefer Skyway's clean read-only SWIM endpoint (SWIM-only, LADD-masked, no ramp fields).
+      // A 200 is not enough: an unknown path can return Skyway's catch-all JSON, so require rows.
+      let rows = null, endpoint = null;
+      if (Date.now() >= swimState.cleanRetryAt) {
+        try {
+          const jc = await swimGetJson(SWIM_CLEAN_PATH);
+          rows = swimRowsOf(jc);
+          if (rows) { endpoint = SWIM_CLEAN_PATH; swimState.cleanAvailable = true; }
+          else throw new Error('no rows array');
+        } catch (e) {
+          if (swimState.cleanAvailable !== false) log('Skyway clean SWIM endpoint unavailable (' + ((e && e.message) || e) + ') — using /api/arrivals + SWIM-only filter', 'INFO');
+          swimState.cleanAvailable = false;
+          swimState.cleanRetryAt = Date.now() + SWIM_CLEAN_RETRY_MS;
+          rows = null;
+        }
+      }
+      if (!rows) {
+        rows = swimRowsOf(await swimGetJson('/api/arrivals'));
+        endpoint = '/api/arrivals';
+      }
+      if (!rows) throw new Error(endpoint + ': unexpected shape');
+      swimState.endpoint = endpoint;
+      const clean = endpoint === SWIM_CLEAN_PATH;
+      const now = Date.now();
+      const dropped = { notSwim: 0, notKsfo: 0 };
+      const list = [];
+      for (const r of rows) {
+        const why = isSwimKsfoRow(r, clean);
+        if (why) { if (dropped[why] != null) dropped[why]++; continue; }
+        list.push(mapSwimRow(r, now));
+      }
+      list.sort((a, b) => (a.eta || a.off || 9e12) - (b.eta || b.off || 9e12));
+      swimState.rawRows = rows.length;
+      swimState.dropped = dropped;
+      swimState.flights = list;
+      rebuildSwimIndex(list);
+      swimState.lastGoodAt = Date.now();
+      swimState.lastError = '';
+      log('Skyway SWIM KSFO n=' + list.length + ' (rows ' + rows.length + ', dropped adsb/non-swim ' + dropped.notSwim + ', non-KSFO ' + dropped.notKsfo + ') msgs=' + swimState.msgs, 'OK');
+      // First good data after idle/boot: rebuild ADS-B payloads so dst matches show immediately
+      if (!hadData) cacheByKey.clear();
+      return list;
+    } catch (e) {
+      swimState.lastError = (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) ? 'timeout' : ((e && e.message) || String(e));
+      log('Skyway SWIM ' + swimState.lastError, 'WARN');
+      return null;
+    } finally {
+      swimState.inflight = null;
+    }
+  })();
+  return swimState.inflight;
+}
+
+function swimFresh() {
+  return swimState.enabled && swimState.lastGoodAt > 0 && (Date.now() - swimState.lastGoodAt) < SWIM_KEEP_MS;
+}
+
+function swimViewerActive() { return lastClientAt > 0 && (Date.now() - lastClientAt) <= SWIM_IDLE_STOP_MS; }
+
+function maybeRefreshSwim() {
+  if (!swimState.enabled) return;
+  if (!swimViewerActive()) return; // nobody watching → no Skyway traffic at all
+  if (swimState.inflight) return;
+  if (Date.now() - swimState.lastAttemptAt < SWIM_POLL_MS) return;
+  fetchSwimArrivals().catch(() => {});
+}
+
+/** off | idle | pending | ok | stale | down  (stale/down → "FAA feed down" badge). */
+function swimFeedState() {
+  if (!swimState.enabled) return 'off';
+  const now = Date.now();
+  const fresh = swimState.lastGoodAt && (now - swimState.lastGoodAt) < SWIM_STALE_MS;
+  if (fresh && swimState.connected) return 'ok';
+  if (!swimViewerActive()) return 'idle';
+  if (!swimState.lastAttemptAt || (swimState.inflight && !swimFresh())) return 'pending';
+  return swimFresh() ? 'stale' : 'down';
+}
+
+function swimStatusBlock() {
+  return {
+    ok: swimFresh() && swimState.connected === true && !!swimState.lastGoodAt && (Date.now() - swimState.lastGoodAt) < SWIM_STALE_MS,
+    connected: swimState.connected,
+    msgs: swimState.msgs,
+    fetchedAgoSec: swimState.lastGoodAt ? Math.round((Date.now() - swimState.lastGoodAt) / 1000) : null,
+    n: swimFresh() ? swimState.flights.length : 0,
+    enabled: swimState.enabled,
+    state: swimFeedState(),
+    base: SKYWAY_BASE,
+    pollSec: SWIM_POLL_MS / 1000,
+    keepSec: SWIM_KEEP_MS / 1000,
+    polling: swimState.enabled && swimViewerActive(),
+    lastAttemptAgoSec: swimState.lastAttemptAt ? Math.round((Date.now() - swimState.lastAttemptAt) / 1000) : null,
+    lastError: swimState.lastError || null,
+    endpoint: swimState.endpoint,
+    cleanEndpoint: swimState.cleanAvailable == null ? 'unprobed' : (swimState.cleanAvailable ? 'in use' : 'unavailable (fallback /api/arrivals)'),
+    rows: swimState.rawRows,
+    dropped: swimState.dropped,
+    polls: swimState.polls,
+  };
+}
+
+/** Match one ADS-B aircraft to a SWIM filing: reg → callsign (incl. EJA/LXJ ↔ N…QS/FX) → hex. */
+function matchSwimForAc(ac, priv) {
+  if (!swimFresh()) return null;
+  const hex = String(ac.hex || '').toLowerCase();
+  let fl = null, via = null;
+  for (const [kind, v] of [['reg', ac.r], ['callsign', ac.flight]]) {
+    for (const k of identVariants(v)) {
+      if (swimState.byKey.has(k)) { fl = swimState.byKey.get(k); via = kind; break; }
+    }
+    if (fl) break;
+  }
+  if (!fl && hex && swimState.hexToId.has(hex)) {
+    const id = swimState.hexToId.get(hex);
+    fl = swimState.flights.find((x) => x.id === id && swimMatchable(x, Date.now())) || null;
+    if (fl) via = 'hex';
+  }
+  if (!fl && hex && swimState.byHex.has(hex)) { fl = swimState.byHex.get(hex); via = 'hex'; }
+  if (!fl) return null;
+  const masked = !!(priv && priv.blocked);
+  if (masked) {
+    // PIA / LADD / BLOCKED target: never link the filing's tail to this hex and never relabel it.
+    swimState.privMatched.add(fl.id);
+  } else if (hex && fl.id) {
+    swimState.hexToId.set(hex, fl.id);
+    swimMatchesBuild.set(fl.id, hex);
+  }
+  return {
+    icao: fl.dest || SWIM_AIRPORT,
+    src: 'skyway-swim',
+    via,
+    origin: fl.origin,
+    eta: fl.eta,
+    type: fl.type,
+    ident: masked || swimState.privMatched.has(fl.id) ? null : (fl.ident || null),
+  };
+}
+
+/** Public SWIM rows for the client (no matching keys; LADD / privacy-matched rows masked). */
+function swimSummaryFlights() {
+  if (!swimFresh()) return [];
+  return swimState.flights.slice(0, 60).map((f) => {
+    const masked = f.blocked || swimState.privMatched.has(f.id);
+    return {
+      id: f.id,
+      ident: masked ? 'BLOCKED' : f.ident,
+      callsign: masked ? null : f.callsign,
+      reg: masked ? null : f.reg,
+      type: f.type, model: f.model,
+      origin: f.origin, dest: f.dest,
+      eta: f.eta, sched: null, off: f.off,
+      status: f.status, arrived: f.arrived, onGround: f.onGround,
+      diverted: f.diverted, divertTo: f.divertTo, intl: f.intl,
+      progress: null,
+      blocked: masked,
+      source: 'skyway-swim',
+      hex: masked ? null : ((f.id && swimMatchesBuild.get(f.id)) || null),
+    };
+  });
 }
 
 async function handleAdsbStates(query, res) {
@@ -834,7 +1318,6 @@ const ORBIT_UPSTREAMS = TILE_UPSTREAMS.orbit; // back-compat alias
  *  Docker image by tools/bake-tiles.js) → runtime disk (/tmp) → upstream ESRI
  *  (keep-alive agent + single-flight). All hits are served with a strong ETag and
  *  `public, max-age=31536000, immutable` (tile URLs are content-stable z/y/x). */
-const crypto = require('crypto');
 const https = require('https');
 const { loadSchedule, tilesInRadius, inSchedule } = require('./tools/tile-schedule');
 const TILE_SCHEDULE = (() => { try { return loadSchedule(path.join(__dirname, 'tiles-schedule.json')); } catch (_) { return null; } })();
@@ -997,7 +1480,7 @@ async function warmTileCacheOnBoot() {
 
 function tileManifest() {
   return {
-    build: 'airloom-v27.1',
+    build: 'airloom-v28',
     schedule: TILE_SCHEDULE,
     baked: bakeInfo ? {
       tiles: bakeInfo.ok + bakeInfo.skipped, total: bakeInfo.total, mb: bakeInfo.mb, seconds: bakeInfo.seconds,
@@ -1071,6 +1554,16 @@ const server = http.createServer(async (req, res) => {
             pausedBy: aeroState.capBlocked || null,
           },
         },
+        // airloom-v28: FAA SWIM (TFMS) filed flight plans via Skyway public GETs
+        skywaySwim: swimStatusBlock(),
+        // TODO(airloom-v28): flips to 'loaded' once LADD_FILE / LADD_URL (FAA Industry LADD) is provided
+        ladd: laddState.loaded ? 'loaded' : 'not loaded',
+        laddList: {
+          loaded: laddState.loaded, count: laddState.count, source: laddState.source,
+          loadedAgoSec: laddState.loadedAt ? Math.round((Date.now() - laddState.loadedAt) / 1000) : null,
+          error: laddState.error || null,
+        },
+        build: 'airloom-v28',
         faWebScrape: 'disabled (FlightAware ToS forbids automated page retrieval; use AEROAPI_KEY)',
         primary: ADSB_PRIMARY,
         cache: {
@@ -1086,6 +1579,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/arrivals/schedule') {
       lastClientAt = Date.now();
       maybeRefreshAero();
+      maybeRefreshSwim();
       sendJSON(res, 200, scheduleSummary());
       return;
     }
@@ -1093,6 +1587,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/adsb/states') {
       lastClientAt = Date.now();
       maybeRefreshAero();
+      maybeRefreshSwim();
       const q = Object.fromEntries(u.searchParams.entries());
       await handleAdsbStates(q, res);
       return;
@@ -1187,4 +1682,13 @@ server.listen(PORT, () => {
   } else {
     log('AeroAPI off (set AEROAPI_KEY to enable destination truth + scheduled inbounds)', 'INFO');
   }
+  // airloom-v28: FAA SWIM filed plans via Skyway (public GETs, only while someone is viewing)
+  if (SKYWAY_SWIM_ENABLED) {
+    log('Skyway SWIM on: ' + SKYWAY_BASE + ' every ' + (SWIM_POLL_MS / 1000) + 's while viewed (idle stop 15 min)', 'OK');
+    setInterval(maybeRefreshSwim, 15000);
+  } else {
+    log('Skyway SWIM off (SKYWAY_SWIM_ENABLED=0)', 'INFO');
+  }
+  loadLadd().catch(() => {});
+  if (LADD_URL && !LADD_FILE) setInterval(() => { loadLadd().catch(() => {}); }, LADD_REFRESH_MS);
 });

@@ -5,7 +5,15 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v27.1)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28)
+
+## airloom-v28 — FAA SWIM filed flight plans (via Skyway public GETs)
+
+- Server polls Skyway (`SKYWAY_BASE`, default `https://skyway-sfo.onrender.com`; `SKYWAY_SWIM_ENABLED`, default 1) every 60 s with a 10 s timeout, **only while AirLoom has a viewer** (15-min idle stop). `GET /status` first (swim.connected), then `GET /api/swim/arrivals?airport=KSFO` (clean SWIM-only endpoint, used when it returns rows) else `GET /api/arrivals` filtered to SWIM rows (`source` starts `swim` or `timeSource==='swim'`, to KSFO or divertTo set; adsb-inbound guesses dropped). Ramp fields (spot, pax, flags, towNotes) are never copied. Last good result kept 5 min.
+- Rows map into the v26 `/arrivals/schedule` shape (`source: 'skyway-swim'`), priority over AeroAPI (still optional/off). ADS-B merge: reg → callsign (EJA### ↔ N###QS, LXJ### ↔ N###FX) → sticky hex / N-number-derived hex. PIA/LADD/BLOCKED targets never receive a SWIM ident. SWIM confirms destinations but is not used as negative evidence (v26 behaviour kept).
+- LADD: `LADD_FILE` / `LADD_URL` (tails + callsigns). **TODO: FAA Industry LADD list not supplied yet** → `/status` shows `ladd: "not loaded"`. Matching rows show as BLOCKED (time/type/origin kept).
+- `/status.skywaySwim {ok, connected, msgs, fetchedAgoSec, n, state, endpoint, …}`; UI "FAA feed down" badge when stale/down; "Filed · FAA flight plan" rail section (tail · ICAO · origin · ETA PT); ≤30 min filings enter the soon bar; "Not for safety-critical use" in About.
+- Mobile: bottom stack now sits just above the browser bar (visualViewport `--chrome-bottom` + safe-area + 8px gap, 10px iOS Safari tab) instead of the 64/78px floors.
 
 ## airloom-v26
 

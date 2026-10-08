@@ -35,9 +35,11 @@
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-top: env(safe-area-inset-top, 0px);
     --chrome-bottom: 0px; /* visualViewport overlay chrome (JS) */
-    --mobile-chrome-floor: 0px; /* generous floor so collapsed↔expanded Safari never buries UI */
-    --stack-pad: 8px;
-    --stack-bottom: calc(var(--safe-bottom) + max(var(--chrome-bottom), var(--mobile-chrome-floor)) + var(--stack-pad));
+    /* v28: sit just above the browser bar — visualViewport chrome (JS) + safe-area + a small gap.
+       --mobile-chrome-floor is now only that gap (desktop/Android ~8px, iOS Safari tab ~10px). */
+    --mobile-chrome-floor: 8px;
+    --stack-pad: 0px;
+    --stack-bottom: calc(var(--safe-bottom) + var(--chrome-bottom) + var(--mobile-chrome-floor) + var(--stack-pad));
     --stack-clearance: 140px; /* distance from viewport bottom to clear #camStack (JS) */
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -639,12 +641,12 @@
   }
   @media (max-width: 800px) {
     :root {
-      /* Survives Safari collapsed+expanded URL/tab bars; JS may raise via --chrome-bottom */
-      --mobile-chrome-floor: 64px;
-      --stack-pad: 10px;
+      /* v28: small gap only; the bar itself is tracked live via --chrome-bottom (visualViewport) */
+      --mobile-chrome-floor: 8px;
+      --stack-pad: 0px;
     }
-    /* iOS Safari floating URL bar / tab bar (not reported by visualViewport when collapsed) */
-    html.ios-safari-chrome { --mobile-chrome-floor: 78px; }
+    /* iOS Safari tab: a touch more air above the floating URL/tab bar */
+    html.ios-safari-chrome { --mobile-chrome-floor: 10px; }
     #camStack {
       width: calc(100vw - 12px); max-width: calc(100vw - 12px);
       bottom: var(--stack-bottom);
@@ -752,6 +754,17 @@
       left: 8px; max-width: 40vw;
     }
   }
+  /* airloom-v28: FAA SWIM feed badge + filed-plan rows + about note */
+  .faa-badge {
+    display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 999px;
+    border: 1px solid rgba(255,170,90,0.5); background: rgba(255,140,50,0.14);
+    color: #ffc98a; font-size: 8px; letter-spacing: 0.06em; line-height: 1.5; vertical-align: 1px;
+  }
+  .faa-badge[hidden] { display: none; }
+  #infoPanel .ig-arr-row.sched .eta { font-size: 11px; }
+  #infoPanel .ig-arr-row.sched .eta .eta-pt { font-size: 7px; color: #9fb0c4; margin-left: 2px; letter-spacing: 0.06em; }
+  #infoPanel .ig-arr-row.sched .dist { color: #8fd3b0; letter-spacing: 0.06em; }
+  #drawer .about-note { color: var(--muted); font-size: 10px; letter-spacing: 0.02em; line-height: 1.4; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -808,7 +821,7 @@
       <span class="n" id="acCount">—</span><span class="lbl"> shown</span>
     </div>
     <div class="meta" id="srcLine">—</div>
-    <div class="meta" id="pollLine">—</div>
+    <div class="meta"><span id="pollLine">—</span><span id="faaBadge" class="faa-badge" hidden title="FAA SWIM flight-plan feed stale or down — ADS-B still live">FAA feed down</span></div>
   </div>
 </div>
 
@@ -838,6 +851,7 @@
     <div class="section">
       <h3>Data sources</h3>
       <div class="row"><label>Flight Data</label><span class="val" id="uiSource" style="font-size:10px">—</span></div>
+      <div class="row"><label>Flight plans</label><span class="val" id="uiSwim" style="font-size:10px">—</span></div>
       <div class="row"><label>Airport</label><span class="val">KSFO</span></div>
     </div>
 
@@ -879,6 +893,11 @@
       <h3>Selected</h3>
       <div id="uiSelNone" style="color:var(--muted)">Click an aircraft</div>
       <div id="uiSelBody" style="display:none;font-family:var(--mono);line-height:1.55"></div>
+    </div>
+
+    <div class="section">
+      <h3>About</h3>
+      <div class="about-note">Not for safety-critical use — ADS-B + FAA SWIM filed plans, informational only.</div>
     </div>
   </div>
 </aside>
@@ -928,7 +947,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v27.1'; // AirTiles quadtree LOD · baked Bay tile cache · loading gate · SW tile cache
+const BUILD_MARK = 'airloom-v28'; // FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -997,6 +1016,8 @@ window.__AIRLOOM_FEATURES = {
   tileServiceWorker: true,
   tilesNotToneMapped: true,
   stackBottomFix271: true,
+  stackNearBrowserBar28: true,
+  faaSwimFiledPlans28: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1008,7 +1029,13 @@ function syncMobileChromeInsets() {
     const vv = window.visualViewport;
     if (vv) {
       // Pixels of layout viewport below the visual viewport = overlaying browser UI
-      chromeBottom = Math.max(0, Math.round((window.innerHeight || 0) - (vv.height + vv.offsetTop)));
+      const visBottom = vv.height + vv.offsetTop;
+      chromeBottom = Math.max(0, Math.round((window.innerHeight || 0) - visBottom));
+      // v28: also measure against #camStack's containing block (html/body, 100dvh) so an expanded
+      // or collapsed Safari bar that overlays the page is always cleared.
+      const cb = document.body ? document.body.getBoundingClientRect() : null;
+      if (cb && cb.height > 0) chromeBottom = Math.max(chromeBottom, Math.round(cb.bottom - visBottom));
+      chromeBottom = Math.min(chromeBottom, 240); // sanity (keyboard etc.)
     }
   } catch (_) { chromeBottom = 0; }
   root.style.setProperty('--chrome-bottom', chromeBottom + 'px');
@@ -1055,6 +1082,8 @@ try {
     }
   } catch (_) {}
   document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
+  // v28: Safari bar expand/collapse can settle after the gesture ends
+  window.addEventListener('touchend', () => { setTimeout(run, 60); setTimeout(run, 400); }, { passive: true });
   setTimeout(run, 0);
   setTimeout(run, 250);
   setTimeout(run, 1000);
@@ -5720,7 +5749,7 @@ function isKsfoEnrouteInbound(p) {
  * Light pistons/trainers count only on a real SFO final (≤6 nm, tight, low).
  * Airliners stay off the GA/FBO list (still available in Arrivals / All modes).
  */
-let schedInfo = { enabled: false, authoritative: false, flights: [], source: null };
+let schedInfo = { enabled: false, authoritative: false, negativeEvidence: false, flights: [], source: null, swim: null };
 
 const LIGHT_PISTON_TYPES = new Set([
   'C150','C152','C162','C170','C172','C175','C177','C180','C182','C185','C195','C206','C207','C210','T206','T210','P210','C337',
@@ -5938,7 +5967,7 @@ function ksfoArrivalDecision(p, opts) {
   const geo = strongKsfoGeometry(p);
   if (!geo) return { ok: false, why: 'no destination + weak geometry' };
   // AeroAPI fresh + GA with a public ident not on the filed-arrival list → only trust a real final/close approach
-  if (schedInfo.authoritative && isGa && hasPublicIdent(p) && geo.tier !== 'final'
+  if (schedInfo.authoritative && schedInfo.negativeEvidence !== false && isGa && hasPublicIdent(p) && geo.tier !== 'final'
       && !(geo.tier === 'approach' && geo.dist <= 12)) {
     return { ok: false, why: 'not on KSFO filed arrivals (AeroAPI)' };
   }
@@ -6097,18 +6126,55 @@ function collectSoonArrivals(fromList) {
 }
 
 
+/** v28: wall-clock time in Pacific (PT) for filed-plan rows. */
+function formatPtClock(ms) {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  try {
+    return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
+  } catch (_) {
+    return formatEtaClock((ms - Date.now()) / 60000);
+  }
+}
+
 /**
- * v26: filed KSFO GA inbounds from AeroAPI that are NOT on the ADS-B arrivals list
+ * v26: filed KSFO GA inbounds that are NOT on the ADS-B arrivals list
  * (still beyond ADS-B range, not departed yet, or not yet matched). FA-board parity.
+ * v28: FAA SWIM (TFMS) filings via Skyway first, AeroAPI (optional) after. Landed / diverted-away
+ * filings are skipped. opts.allowNoEta lists SWIM filings with no ETA yet (by proposed departure)
+ * — side list only; the soon bar needs a real ETA.
  */
-function schedInboundsUnmatched(maxEtaMin) {
+function schedInboundsUnmatched(maxEtaMin, opts) {
   if (!schedInfo.authoritative || !schedInfo.flights.length) return [];
+  const allowNoEta = !!(opts && opts.allowNoEta);
   const listed = new Set(orbitArrivalsCache.map((s) => s.icao));
   const now = Date.now();
   const out = [];
+  const tail = [];
   for (const f of schedInfo.flights) {
-    if (!f || !f.eta) continue;
-    if (f.hex && (listed.has(f.hex) || aircraft.has(f.hex))) continue;
+    if (!f) continue;
+    if (f.status === 'Arrived' || f.arrived || f.onGround) continue;
+    if (f.dest && f.dest !== 'KSFO') continue; // diverted elsewhere
+    if (f.hex && (listed.has(f.hex) || aircraft.has(f.hex))) continue; // ADS-B has it → live track
+    const swim = f.source === 'skyway-swim';
+    const offMs = f.off ? f.off * 1000 : null;
+    const base = {
+      icao: 'sched:' + (f.id || f.ident || (out.length + tail.length)),
+      sched: true,
+      swim,
+      callsign: f.blocked ? 'BLOCKED' : (f.ident || f.reg || '—'),
+      type: f.type || '',
+      origin: f.origin || null,
+      departed: !!(offMs && offMs <= now),
+      offMs,
+      nm: null, mi: null, onFinal: false, conf: 'sched', isGa: true,
+    };
+    if (!f.eta) {
+      if (!allowNoEta || !offMs) continue;
+      const depMin = (offMs - now) / 60000;
+      if (depMin < -30 || (maxEtaMin != null && depMin > maxEtaMin)) continue;
+      tail.push(Object.assign(base, { etaMin: null, etaMs: null, depMin }));
+      continue;
+    }
     const etaMin = (f.eta * 1000 - now) / 60000;
     if (etaMin < -5 || (maxEtaMin != null && etaMin > maxEtaMin)) continue;
     // Blocked filings can't be matched by tail/hex: fold into an ADS-B BLOCKED/PIA
@@ -6116,23 +6182,32 @@ function schedInboundsUnmatched(maxEtaMin) {
     if (f.blocked || !f.hex) {
       const typ = String(f.type || '').toUpperCase();
       const dup = orbitArrivalsCache.some((s) => typ && String(s.type || '').toUpperCase() === typ
-        && (f.blocked ? /BLOCKED|PIA|~/i.test(String(s.callsign || '')) : (f.ident && s.callsign === f.ident))
+        && (f.blocked ? /BLOCKED|PIA|~/i.test(String(s.callsign || ''))
+          : ((f.ident && s.callsign === f.ident) || (f.callsign && s.callsign === f.callsign)))
         && s.etaMin != null && Math.abs(s.etaMin - etaMin) <= 20);
       if (dup) continue;
     }
-    out.push({
-      icao: 'sched:' + (f.id || f.ident || out.length),
-      sched: true,
-      callsign: f.blocked ? 'BLOCKED' : (f.ident || f.reg || '—'),
-      type: f.type || '',
-      origin: f.origin || null,
-      etaMin: Math.max(0, etaMin),
-      departed: !!f.off,
-      nm: null, mi: null, onFinal: false, conf: 'sched', isGa: true,
-    });
+    out.push(Object.assign(base, { etaMin: Math.max(0, etaMin), etaMs: f.eta * 1000 }));
   }
   out.sort((a, b) => a.etaMin - b.etaMin);
-  return out;
+  tail.sort((a, b) => a.depMin - b.depMin);
+  return out.concat(tail);
+}
+
+/** v28: FAA SWIM feed health → HUD badge + drawer row. */
+function updateSwimFeedUi() {
+  const sw = schedInfo.swim;
+  const badge = document.getElementById('faaBadge');
+  const down = !!(sw && sw.enabled && (sw.state === 'stale' || sw.state === 'down'));
+  if (badge) badge.hidden = !down;
+  const ui = document.getElementById('uiSwim');
+  if (ui) {
+    if (!sw || !sw.enabled) ui.textContent = 'off';
+    else {
+      const n = schedInfo.flights.filter((f) => f && f.source === 'skyway-swim').length;
+      ui.textContent = 'FAA SWIM · ' + (sw.state === 'ok' ? n + ' filed' : sw.state);
+    }
+  }
 }
 let _lastParsedForDebug = [];
 /** Why each nearby GA/bizjet target is (not) a KSFO arrival — diagnostics only. */
@@ -6155,13 +6230,18 @@ window.__AIRLOOM_ARRIVAL_DECISIONS = (maxNm) => _lastParsedForDebug
 window.__AIRLOOM_ARRIVALS_DEBUG = () => ({
   build: BUILD_MARK,
   activeFlow,
-  schedule: { enabled: schedInfo.enabled, authoritative: schedInfo.authoritative, n: schedInfo.flights.length },
+  schedule: { enabled: schedInfo.enabled, authoritative: schedInfo.authoritative, negativeEvidence: schedInfo.negativeEvidence, source: schedInfo.source, n: schedInfo.flights.length },
   arrivals: orbitArrivalsCache.map((s) => ({
     ident: s.callsign, hex: s.icao, type: s.type, etaMin: s.etaMin != null ? +s.etaMin.toFixed(1) : null,
     nm: s.nm != null ? +s.nm.toFixed(1) : null, conf: s.conf, why: s.why, confirmed: s.confirmed, origin: s.origin,
   })),
   soon: soonArrivalsCache.map((s) => ({ ident: s.callsign, type: s.type, etaMin: s.etaMin != null ? +s.etaMin.toFixed(1) : null, sched: !!s.sched })),
-  scheduledBeyondAdsb: schedInboundsUnmatched(24 * 60).map((s) => ({ ident: s.callsign, type: s.type, origin: s.origin, etaMin: Math.round(s.etaMin) })),
+  scheduledBeyondAdsb: schedInboundsUnmatched(24 * 60, { allowNoEta: true }).map((s) => ({
+    ident: s.callsign, type: s.type, origin: s.origin, src: s.swim ? 'faa-swim' : 'aeroapi',
+    etaMin: s.etaMin != null ? Math.round(s.etaMin) : null, etaPT: s.etaMs ? formatPtClock(s.etaMs) : null,
+    depPT: s.offMs ? formatPtClock(s.offMs) : null, departed: s.departed,
+  })),
+  swim: schedInfo.swim,
 });
 
 /** Clock time for ETA minutes from now (user-local, short). */
@@ -6929,15 +7009,20 @@ function updateInfoPanel() {
   _orbitArrivalsSig = sig;
 
   const closeBtn = `<button type="button" class="panel-x" id="btnCloseArrivals" title="Close arrivals" aria-label="Close arrivals">✕</button>`;
-  // v26: filed GA inbounds still beyond ADS-B (AeroAPI) — informational rows, no 3D target
-  const schedHtml = schedInboundsUnmatched(12 * 60).slice(0, 8).map((f) =>
-    `<div class="ig-arr-row sched ga" data-icao="${f.icao}">` +
-    `<div class="cs">${f.callsign}</div>` +
-    `<div class="eta">${formatEtaClock(f.etaMin)}<span class="eta-to">${f.departed ? 'en route' : 'filed'}</span></div>` +
-    `<div class="meta">${f.type || '????'}${f.origin ? ' · ' + f.origin : ''}</div>` +
-    `<div class="dist">sched</div>` +
-    `</div>`);
-
+  // v26/v28: filed GA inbounds still beyond ADS-B (FAA SWIM via Skyway, else AeroAPI) — informational rows, no 3D target
+  const schedList = schedInboundsUnmatched(12 * 60, { allowNoEta: true }).slice(0, 8);
+  const schedHtml = schedList.map((f) => {
+    const when = f.etaMs
+      ? `${formatPtClock(f.etaMs)}<span class="eta-pt">PT</span>`
+      : `dep ${formatPtClock(f.offMs)}<span class="eta-pt">PT</span>`;
+    const sub = f.etaMs ? (f.departed ? 'en route' : 'filed') : 'ETA pending';
+    return `<div class="ig-arr-row sched ga" data-icao="${f.icao}">` +
+      `<div class="cs">${f.callsign}</div>` +
+      `<div class="eta">${when}<span class="eta-to">${sub}</span></div>` +
+      `<div class="meta">${f.type || '????'}${f.origin ? ' · ' + f.origin : ''}</div>` +
+      `<div class="dist">${f.swim ? 'FAA' : 'sched'}</div>` +
+      `</div>`;
+  });
   if (!list.length && !schedHtml.length) {
     igP.innerHTML =
       `<div class="ig-arr-head"><div class="ig-arr-title">FBO · arrivals</div>` +
@@ -6967,7 +7052,7 @@ function updateInfoPanel() {
   }).join('');
 
   const schedRows = schedHtml.length ? (
-    `<div class="ig-arr-count" style="margin:8px 0 4px">Filed · beyond ADS-B (FlightAware)</div>` + schedHtml.join('')) : '';
+    `<div class="ig-arr-count" style="margin:8px 0 4px">${schedList.some((f) => f.swim) ? 'Filed · FAA flight plan' : 'Filed · beyond ADS-B (FlightAware)'}</div>` + schedHtml.join('')) : '';
   igP.innerHTML =
     `<div class="ig-arr-head"><div class="ig-arr-title">FBO · next ~60 min</div>` +
     `<div style="display:flex;align-items:center;gap:6px"><div class="ig-badge">${badge}</div>${closeBtn}</div></div>` +
@@ -7984,12 +8069,16 @@ function ingest(data) {
     schedInfo = {
       enabled: !!data.sched.enabled,
       authoritative: !!data.sched.authoritative,
+      // v28: only a complete filed list (AeroAPI) may reject GA by absence; SWIM confirms only
+      negativeEvidence: data.sched.negativeEvidence !== undefined ? !!data.sched.negativeEvidence : !!data.sched.authoritative,
       source: data.sched.source || null,
       flights: Array.isArray(data.sched.flights) ? data.sched.flights : [],
+      swim: data.sched.swim && typeof data.sched.swim === 'object' ? data.sched.swim : null,
     };
   } else {
-    schedInfo = { enabled: false, authoritative: false, flights: [], source: null };
+    schedInfo = { enabled: false, authoritative: false, negativeEvidence: false, flights: [], source: null, swim: null };
   }
+  try { updateSwimFeedUi(); } catch (_) {}
 
   // Merge ac meta by hex
   const metaByHex = new Map();
