@@ -14,7 +14,27 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.6 (+https://sfo3d.onrender.com; airloom-sfo)';
+const UA = 'AirLoomSFO/1.7 (+https://sfo3d.onrender.com; airloom-sfo)';
+// FlightAware AeroAPI (optional): destination truth + scheduled GA inbounds beyond ADS-B range.
+// Off unless AEROAPI_KEY is set. Never scrape flightaware.com web pages (FA ToS §7 forbids robots).
+const AEROAPI_KEY = process.env.AEROAPI_KEY || '';
+const AEROAPI_BASE = (process.env.AEROAPI_BASE || 'https://aeroapi.flightaware.com/aeroapi').replace(/\/+$/, '');
+const AEROAPI_AIRPORT = (process.env.AEROAPI_AIRPORT || 'KSFO').toUpperCase();
+const AEROAPI_POLL_SEC = Math.max(120, Number(process.env.AEROAPI_POLL_SEC || 600));
+const AEROAPI_MAX_PAGES = Math.max(1, Math.min(10, Number(process.env.AEROAPI_MAX_PAGES || 3)));
+const AEROAPI_WINDOW_H = Math.max(1, Math.min(47, Number(process.env.AEROAPI_WINDOW_H || 12)));
+// Only spend AeroAPI queries while someone is actually watching.
+const AEROAPI_IDLE_STOP_MS = 15 * 60 * 1000;
+// HARD spend caps (Skyway v249 lesson: an uncapped key ran up $580). All env-only.
+// scheduled_arrivals bills $0.005 per result-set page (15 records) per FA's public price list.
+const AEROAPI_COST_PER_PAGE = Number(process.env.AEROAPI_COST_PER_PAGE || 0.005);
+const AEROAPI_DAILY_MAX_CALLS = Math.max(0, Number(process.env.AEROAPI_DAILY_MAX_CALLS || 48));
+const AEROAPI_DAILY_MAX_USD = Math.max(0, Number(process.env.AEROAPI_DAILY_MAX_USD || 0.5));
+const AEROAPI_MONTHLY_MAX_USD = Math.max(0, Number(process.env.AEROAPI_MONTHLY_MAX_USD || 5));
+// Fail closed: billable calls only after FA's own /account/usage (free, all keys) confirmed
+// month-to-date + today spend is under the caps within the last hour. Survives restarts.
+const AEROAPI_REQUIRE_USAGE_CHECK = process.env.AEROAPI_REQUIRE_USAGE_CHECK !== '0';
+const AEROAPI_USAGE_CHECK_MS = 20 * 60 * 1000;
 
 const KSFO_DEFAULT = { lat: 37.62818, lon: -122.38487, dist: 360 }; // ~60–90 min jet cruise box
 const ADSB_CACHE_FRESH_MS = 22000;
@@ -160,6 +180,7 @@ function classifyPrivacy(ac) {
 }
 
 function buildAdsbPayload(list, sourceName) {
+  beginScheduleMatch();
   const states = [];
   const acMeta = [];
   for (const ac of list) {
@@ -177,6 +198,8 @@ function buildAdsbPayload(list, sourceName) {
     const flightOut = priv.blocked && looksLikeUsTail(priv.flightRaw)
       ? null
       : ((ac.flight || '').trim() || null);
+    // Destination truth (AeroAPI scheduled_arrivals match by tail / callsign / hex).
+    const dst = matchScheduleForAc(ac, priv);
     acMeta.push({
       hex: String(ac.hex || '').toLowerCase(),
       // Never leak registry for PIA / LADD / FA-style privacy aircraft
@@ -197,11 +220,13 @@ function buildAdsbPayload(list, sourceName) {
       ladd: !!priv.ladd,
       blocked: !!priv.blocked,
       source: sourceName,
+      dst: dst,
     });
   }
   return {
     states,
     ac: acMeta,
+    sched: scheduleSummary(),
     source: sourceName,
     n_states: states.length,
     time: Math.floor(Date.now() / 1000),
@@ -436,6 +461,293 @@ async function fetchOpenSkyStates(bboxPath) {
   }
 }
 
+
+/* ───────────────────────── FlightAware AeroAPI (optional) ─────────────────────────
+ * GET /airports/{id}/flights/scheduled_arrivals?type=General_Aviation returns undeparted
+ * AND en-route GA flights filed to the airport (ordered by estimated_on). We use it as
+ * destination truth for ADS-B targets (match by tail / callsign; hex remembered after a
+ * match) and to list filed inbounds still beyond ADS-B range.
+ * Blocked (LADD/FA-blocked) flights are NOT visible in AeroAPI unless the owner grants
+ * access — those stay ADS-B-only (BLOCKED/PIA geometry path in the client).
+ */
+const aeroState = {
+  enabled: !!AEROAPI_KEY,
+  ok: false,
+  lastFetchAt: 0,
+  lastError: AEROAPI_KEY ? '' : 'AEROAPI_KEY not set',
+  flights: [],        // normalized scheduled/en-route arrivals
+  byKey: new Map(),   // normalized tail/ident/callsign -> flight
+  hexToId: new Map(), // icao24 hex -> fa_flight_id (sticky after a match)
+  inflight: null,
+  queries: 0,
+  pagesBilled: 0,
+  // spend ledger (local, reconciled with FA /account/usage)
+  dayKey: '',
+  monthKey: '',
+  dayCalls: 0,
+  dayUsd: 0,
+  monthUsd: 0,
+  usageCheckedAt: 0,
+  usageError: '',
+  capBlocked: '',
+};
+let lastClientAt = 0;
+let buildMatches = new Map(); // fa_flight_id -> hex (per payload build)
+
+function normIdent(s) {
+  return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+function isoNoMs(ms) {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+function toEpoch(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? Math.round(t / 1000) : null;
+}
+
+function normalizeAeroFlight(f) {
+  if (!f || f.cancelled) return null;
+  const dest = f.destination || {};
+  const orig = f.origin || {};
+  const blocked = !!f.blocked;
+  return {
+    id: f.fa_flight_id || null,
+    ident: blocked ? 'BLOCKED' : (f.ident || null),
+    identIcao: blocked ? null : (f.ident_icao || null),
+    atcIdent: blocked ? null : (f.atc_ident || null),
+    reg: blocked ? null : (f.registration || null),
+    type: f.aircraft_type || null,
+    origin: orig.code_icao || orig.code || null,
+    originName: orig.city || orig.name || null,
+    dest: dest.code_icao || dest.code || AEROAPI_AIRPORT,
+    schedOn: toEpoch(f.scheduled_on),
+    etaOn: toEpoch(f.estimated_on) || toEpoch(f.scheduled_on),
+    actualOff: toEpoch(f.actual_off),
+    actualOn: toEpoch(f.actual_on),
+    status: f.status || null,
+    progress: f.progress_percent != null ? Number(f.progress_percent) : null,
+    blocked,
+    positionOnly: !!f.position_only,
+    diverted: !!f.diverted,
+  };
+}
+
+function rebuildAeroIndex(list) {
+  const byKey = new Map();
+  for (const fl of list) {
+    if (fl.blocked) continue;
+    for (const k of [fl.reg, fl.ident, fl.identIcao, fl.atcIdent]) {
+      const n = normIdent(k);
+      if (!n) continue;
+      const prev = byKey.get(n);
+      // Prefer the en-route leg (departed, not landed), else the soonest ETA
+      const score = (x) => (x.actualOff && !x.actualOn ? 0 : 1e10) + (x.etaOn || 9e9);
+      if (!prev || score(fl) < score(prev)) byKey.set(n, fl);
+    }
+  }
+  aeroState.byKey = byKey;
+}
+
+
+function utcDayKey(ms) { return new Date(ms).toISOString().slice(0, 10); }
+function utcMonthKey(ms) { return new Date(ms).toISOString().slice(0, 7); }
+
+function rollLedger() {
+  const now = Date.now();
+  const d = utcDayKey(now), m = utcMonthKey(now);
+  if (aeroState.dayKey !== d) { aeroState.dayKey = d; aeroState.dayCalls = 0; aeroState.dayUsd = 0; }
+  if (aeroState.monthKey !== m) { aeroState.monthKey = m; aeroState.monthUsd = 0; }
+}
+
+async function aeroUsageQuery(startIso) {
+  const qs = new URLSearchParams({ start: startIso, all_keys: 'true' });
+  const r = await fetch(`${AEROAPI_BASE}/account/usage?${qs}`, {
+    headers: { 'x-apikey': AEROAPI_KEY, Accept: 'application/json', 'User-Agent': UA },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error('usage HTTP ' + r.status);
+  const j = await r.json();
+  const cost = Number(j.total_cost);
+  if (!Number.isFinite(cost)) throw new Error('usage: no total_cost');
+  return { cost, calls: Number(j.total_calls) || 0 };
+}
+
+/** Reconcile local ledger with FlightAware's own account usage (free endpoint). */
+async function refreshAeroUsage(force) {
+  if (!AEROAPI_KEY) return;
+  if (!force && Date.now() - aeroState.usageCheckedAt < AEROAPI_USAGE_CHECK_MS) return;
+  rollLedger();
+  try {
+    const now = Date.now();
+    const month = await aeroUsageQuery(utcMonthKey(now) + '-01');
+    const day = await aeroUsageQuery(utcDayKey(now));
+    aeroState.monthUsd = Math.max(aeroState.monthUsd, month.cost);
+    aeroState.dayUsd = Math.max(aeroState.dayUsd, day.cost);
+    aeroState.usageCheckedAt = Date.now();
+    aeroState.usageError = '';
+    log('AeroAPI usage (all keys) month $' + month.cost.toFixed(3) + ' today $' + day.cost.toFixed(3), 'OK');
+  } catch (e) {
+    aeroState.usageError = e.message || String(e);
+    log('AeroAPI usage check failed: ' + aeroState.usageError, 'WARN');
+  }
+}
+
+/** Returns '' when a billable call is allowed, else the reason it is blocked. */
+function aeroCapReason() {
+  rollLedger();
+  const worst = AEROAPI_MAX_PAGES * AEROAPI_COST_PER_PAGE;
+  if (AEROAPI_REQUIRE_USAGE_CHECK && (Date.now() - aeroState.usageCheckedAt) > 60 * 60 * 1000) {
+    return 'usage check unavailable (' + (aeroState.usageError || 'pending') + ') — failing closed';
+  }
+  if (aeroState.dayCalls >= AEROAPI_DAILY_MAX_CALLS) return 'daily call cap ' + AEROAPI_DAILY_MAX_CALLS;
+  if (aeroState.dayUsd + worst > AEROAPI_DAILY_MAX_USD) return 'daily $ cap ' + AEROAPI_DAILY_MAX_USD;
+  if (aeroState.monthUsd + worst > AEROAPI_MONTHLY_MAX_USD) return 'monthly $ cap ' + AEROAPI_MONTHLY_MAX_USD;
+  return '';
+}
+
+async function fetchAeroArrivals() {
+  if (!AEROAPI_KEY) return null;
+  if (aeroState.inflight) return aeroState.inflight;
+  aeroState.inflight = (async () => {
+    await refreshAeroUsage(false);
+    const capWhy = aeroCapReason();
+    if (capWhy) {
+      if (aeroState.capBlocked !== capWhy) log('AeroAPI paused: ' + capWhy, 'WARN');
+      aeroState.capBlocked = capWhy;
+      aeroState.lastError = 'cap: ' + capWhy;
+      aeroState.lastFetchAt = Date.now(); // back off a full poll interval
+      return null;
+    }
+    aeroState.capBlocked = '';
+    const now = Date.now();
+    const qs = new URLSearchParams({
+      type: 'General_Aviation',
+      start: isoNoMs(now - 90 * 60 * 1000),
+      end: isoNoMs(now + AEROAPI_WINDOW_H * 3600 * 1000),
+      max_pages: String(AEROAPI_MAX_PAGES),
+    });
+    const url = `${AEROAPI_BASE}/airports/${encodeURIComponent(AEROAPI_AIRPORT)}/flights/scheduled_arrivals?${qs}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'x-apikey': AEROAPI_KEY, Accept: 'application/json', 'User-Agent': UA },
+      });
+      clearTimeout(timer);
+      aeroState.lastFetchAt = Date.now();
+      aeroState.queries++;
+      aeroState.dayCalls++;
+      // Pessimistic local charge until FA usage reconciles (failed calls may still bill)
+      aeroState.dayUsd += AEROAPI_COST_PER_PAGE;
+      aeroState.monthUsd += AEROAPI_COST_PER_PAGE;
+      if (!r.ok) {
+        aeroState.ok = false;
+        aeroState.lastError = 'HTTP ' + r.status;
+        log('AeroAPI HTTP ' + r.status, 'WARN');
+        return null;
+      }
+      const j = await r.json();
+      const pages = Math.max(1, Number(j.num_pages) || 1);
+      aeroState.pagesBilled += pages;
+      aeroState.dayUsd += (pages - 1) * AEROAPI_COST_PER_PAGE;
+      aeroState.monthUsd += (pages - 1) * AEROAPI_COST_PER_PAGE;
+      const raw = Array.isArray(j.scheduled_arrivals) ? j.scheduled_arrivals : [];
+      const list = raw.map(normalizeAeroFlight).filter((f) => f && !f.actualOn);
+      list.sort((a, b) => (a.etaOn || 9e12) - (b.etaOn || 9e12));
+      aeroState.flights = list;
+      rebuildAeroIndex(list);
+      aeroState.ok = true;
+      aeroState.lastError = '';
+      log('AeroAPI ' + AEROAPI_AIRPORT + ' GA scheduled/en-route n=' + list.length + ' pages=' + (j.num_pages || 1), 'OK');
+      return list;
+    } catch (e) {
+      clearTimeout(timer);
+      aeroState.ok = false;
+      aeroState.lastFetchAt = Date.now();
+      aeroState.lastError = e.name === 'AbortError' ? 'timeout' : (e.message || String(e));
+      log('AeroAPI ' + aeroState.lastError, 'WARN');
+      return null;
+    } finally {
+      aeroState.inflight = null;
+    }
+  })();
+  return aeroState.inflight;
+}
+
+function aeroFresh() {
+  return aeroState.enabled && aeroState.ok
+    && (Date.now() - aeroState.lastFetchAt) < (AEROAPI_POLL_SEC * 1000 * 2.5);
+}
+
+function maybeRefreshAero() {
+  if (!AEROAPI_KEY) return;
+  const now = Date.now();
+  if (now - lastClientAt > AEROAPI_IDLE_STOP_MS && aeroState.lastFetchAt) return; // nobody watching
+  if (now - aeroState.lastFetchAt < AEROAPI_POLL_SEC * 1000) return;
+  fetchAeroArrivals().catch(() => {});
+}
+
+function beginScheduleMatch() { buildMatches = new Map(); }
+
+/** Match one ADS-B aircraft to an AeroAPI arrival. Returns a compact dst object or null. */
+function matchScheduleForAc(ac, priv) {
+  if (!aeroFresh()) return null;
+  const hex = String(ac.hex || '').toLowerCase();
+  let fl = null;
+  let via = null;
+  const keys = [
+    ['reg', ac.r],
+    ['callsign', ac.flight],
+  ];
+  for (const [kind, v] of keys) {
+    const n = normIdent(v);
+    if (n && aeroState.byKey.has(n)) { fl = aeroState.byKey.get(n); via = kind; break; }
+  }
+  if (!fl && hex && aeroState.hexToId.has(hex)) {
+    const id = aeroState.hexToId.get(hex);
+    fl = aeroState.flights.find((x) => x.id === id) || null;
+    if (fl) via = 'hex';
+  }
+  if (!fl) return null;
+  if (hex && fl.id) {
+    aeroState.hexToId.set(hex, fl.id);
+    buildMatches.set(fl.id, hex);
+  }
+  return {
+    icao: fl.dest || AEROAPI_AIRPORT,
+    src: 'aeroapi',
+    via,
+    origin: fl.origin,
+    eta: fl.etaOn,
+    type: fl.type,
+    // Never echo a schedule ident for privacy-masked ADS-B targets
+    ident: priv && priv.blocked ? null : (fl.ident || null),
+  };
+}
+
+/** Compact schedule list for the client (filed inbounds, incl. beyond ADS-B range). */
+function scheduleSummary() {
+  const base = {
+    enabled: aeroState.enabled,
+    authoritative: aeroFresh(),
+    source: aeroState.enabled ? 'aeroapi' : null,
+    airport: AEROAPI_AIRPORT,
+    fetchedAgoSec: aeroState.lastFetchAt ? Math.round((Date.now() - aeroState.lastFetchAt) / 1000) : null,
+    error: aeroState.lastError || null,
+    flights: [],
+  };
+  if (!aeroFresh()) return base;
+  base.flights = aeroState.flights.slice(0, 60).map((f) => ({
+    id: f.id, ident: f.ident, reg: f.reg, type: f.type, origin: f.origin,
+    eta: f.etaOn, sched: f.schedOn, off: f.actualOff, status: f.status,
+    progress: f.progress, blocked: f.blocked,
+    hex: (f.id && buildMatches.get(f.id)) || null,
+  }));
+  return base;
+}
+
 async function handleAdsbStates(query, res) {
   let lat, lon, dist, bboxPath;
   if (query.lat != null && query.lon != null) {
@@ -643,6 +955,31 @@ const server = http.createServer(async (req, res) => {
         // back-compat
         adsbLol: statusSnapshot('adsb.lol'),
         openskyConfigured: !!(OSKY_ID && OSKY_SECRET),
+        aeroapi: {
+          enabled: aeroState.enabled,
+          ok: aeroState.ok,
+          authoritative: aeroFresh(),
+          airport: AEROAPI_AIRPORT,
+          lastFetchAgo: aeroState.lastFetchAt ? Math.round((Date.now() - aeroState.lastFetchAt) / 1000) : null,
+          n: aeroState.flights.length,
+          queries: aeroState.queries,
+          pagesBilled: aeroState.pagesBilled,
+          pollSec: AEROAPI_POLL_SEC,
+          lastError: aeroState.lastError || null,
+          caps: {
+            dailyCalls: AEROAPI_DAILY_MAX_CALLS, dailyUsd: AEROAPI_DAILY_MAX_USD,
+            monthlyUsd: AEROAPI_MONTHLY_MAX_USD, maxPagesPerCall: AEROAPI_MAX_PAGES,
+          },
+          spend: {
+            dayCalls: aeroState.dayCalls,
+            dayUsd: Number(aeroState.dayUsd.toFixed(4)),
+            monthUsd: Number(aeroState.monthUsd.toFixed(4)),
+            usageCheckedAgo: aeroState.usageCheckedAt ? Math.round((Date.now() - aeroState.usageCheckedAt) / 1000) : null,
+            usageError: aeroState.usageError || null,
+            pausedBy: aeroState.capBlocked || null,
+          },
+        },
+        faWebScrape: 'disabled (FlightAware ToS forbids automated page retrieval; use AEROAPI_KEY)',
         primary: ADSB_PRIMARY,
         cache: {
           key: cacheKey,
@@ -654,7 +991,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === '/arrivals/schedule') {
+      lastClientAt = Date.now();
+      maybeRefreshAero();
+      sendJSON(res, 200, scheduleSummary());
+      return;
+    }
+
     if (pathname === '/adsb/states') {
+      lastClientAt = Date.now();
+      maybeRefreshAero();
       const q = Object.fromEntries(u.searchParams.entries());
       await handleAdsbStates(q, res);
       return;
@@ -718,4 +1064,15 @@ server.listen(PORT, () => {
   // Warm cache immediately, then every ~20s
   backgroundRefresh();
   setInterval(backgroundRefresh, BG_REFRESH_MS);
+  if (AEROAPI_KEY) {
+    log('AeroAPI enabled for ' + AEROAPI_AIRPORT + ' (GA scheduled_arrivals every ' + AEROAPI_POLL_SEC + 's while viewed)', 'OK');
+    log('AeroAPI caps: ' + AEROAPI_DAILY_MAX_CALLS + ' calls/day, $' + AEROAPI_DAILY_MAX_USD + '/day, $' + AEROAPI_MONTHLY_MAX_USD + '/month (all keys, via /account/usage)', 'OK');
+    refreshAeroUsage(true)
+      .then(() => fetchAeroArrivals())
+      .then(() => { cacheByKey.clear(); })
+      .catch(() => {});
+    setInterval(maybeRefreshAero, 30000);
+  } else {
+    log('AeroAPI off (set AEROAPI_KEY to enable destination truth + scheduled inbounds)', 'INFO');
+  }
 });

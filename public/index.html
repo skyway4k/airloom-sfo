@@ -924,7 +924,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v25'; // mobile safe-area chrome lift + compact HUD (CT47/iOS/Android)
+const BUILD_MARK = 'airloom-v26'; // destination-first KSFO arrivals (AeroAPI/geometry) · no Bay VFR/airliners in FBO list
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -982,6 +982,11 @@ window.__AIRLOOM_FEATURES = {
   soonBarCt47: true,
   soonBarEtaProgress: true,
   mobileEtaVisual: true,
+  destinationFirstArrivals: true,
+  lightPistonFinalOnly: true,
+  satelliteFieldFit: true,
+  airlinersOffFboList: true,
+  aeroApiSchedule: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1076,6 +1081,12 @@ const BAY_FIELDS = [
   { icao: 'KHAF', short: 'HAF', name: 'Half Moon Bay', lat: 37.5134, lon: -122.5012 },
   { icao: 'KPAO', short: 'PAO', name: 'Palo Alto', lat: 37.4611, lon: -122.1150 },
   { icao: 'KSJC', short: 'SJC', name: 'San Jose Intl', lat: 37.3626, lon: -121.9290 },
+  // v26: more Bay fields so OAK/HWD/NUQ traffic is never mistaken for SFO arrivals
+  { icao: 'KOAK', short: 'OAK', name: 'Oakland Intl', lat: 37.7213, lon: -122.2208 },
+  { icao: 'KHWD', short: 'HWD', name: 'Hayward Exec', lat: 37.6589, lon: -122.1217 },
+  { icao: 'KNUQ', short: 'NUQ', name: 'Moffett Fed', lat: 37.4161, lon: -122.0490 },
+  { icao: 'KCCR', short: 'CCR', name: 'Buchanan Fld', lat: 37.9897, lon: -122.0569 },
+  { icao: 'KLVK', short: 'LVK', name: 'Livermore', lat: 37.6934, lon: -121.8203 },
 ];
 
 const TYPE_PLAIN = {
@@ -1280,19 +1291,35 @@ function nearestBayField(lat, lon) {
  * Used for extended-centerline final detection — not SQL/HAF/PAO.
  */
 const KSFO_FINALS = [
-  { name: '28L', thrLat: 37.6125, thrLon: -122.3580, hdg: 284, flow: '28' },
-  { name: '28R', thrLat: 37.6278, thrLon: -122.3665, hdg: 284, flow: '28' },
-  { name: '10L', thrLat: 37.6210, thrLon: -122.3935, hdg: 104, flow: '10' },
-  { name: '10R', thrLat: 37.6058, thrLon: -122.3850, hdg: 104, flow: '10' },
-  { name: '19L', thrLat: 37.6310, thrLon: -122.3845, hdg: 192, flow: '19' },
-  { name: '19R', thrLat: 37.6305, thrLon: -122.3785, hdg: 192, flow: '19' },
-  { name: '01L', thrLat: 37.6075, thrLon: -122.3715, hdg: 12, flow: '01' },
-  { name: '01R', thrLat: 37.6080, thrLon: -122.3775, hdg: 12, flow: '01' },
+  // v26: true headings + surveyed thresholds (OurAirports/FAA). v25 used magnetic 284/104/192/12
+  // as TRUE (~14° off), which pushed the computed extended centerlines ~2.5 nm off at 10 nm.
+  { name: '28L', thrLat: 37.611720, thrLon: -122.358367, hdg: 298, flow: '28' },
+  { name: '28R', thrLat: 37.613538, thrLon: -122.357160, hdg: 298, flow: '28' },
+  { name: '10L', thrLat: 37.628742, thrLon: -122.393410, hdg: 118, flow: '10' },
+  { name: '10R', thrLat: 37.626298, thrLon: -122.393124, hdg: 118, flow: '10' },
+  { name: '19L', thrLat: 37.627346, thrLon: -122.367124, hdg: 208, flow: '19' },
+  { name: '19R', thrLat: 37.626476, thrLon: -122.370630, hdg: 208, flow: '19' },
+  { name: '01L', thrLat: 37.607898, thrLon: -122.382950, hdg: 28, flow: '01' },
+  { name: '01R', thrLat: 37.606333, thrLon: -122.381061, hdg: 28, flow: '01' },
+];
+
+/** v26: competing jet-capable Bay runways (landing threshold + true landing heading). */
+const OTHER_FINALS = [
+  { apt: 'OAK', name: '30', thrLat: 37.70150, thrLon: -122.21400, hdg: 310 },
+  { apt: 'OAK', name: '12', thrLat: 37.71910, thrLon: -122.24100, hdg: 130 },
+  { apt: 'OAK', name: '28L', thrLat: 37.72230, thrLon: -122.20600, hdg: 292 },
+  { apt: 'OAK', name: '10R', thrLat: 37.72870, thrLon: -122.22600, hdg: 112 },
+  { apt: 'SJC', name: '30L', thrLat: 37.35100, thrLon: -121.91700, hdg: 319 },
+  { apt: 'SJC', name: '12R', thrLat: 37.37370, thrLon: -121.94200, hdg: 139 },
+  { apt: 'HWD', name: '28L', thrLat: 37.65430, thrLon: -122.11300, hdg: 300 },
+  { apt: 'HWD', name: '10R', thrLat: 37.66200, thrLon: -122.13000, hdg: 120 },
+  { apt: 'NUQ', name: '32R', thrLat: 37.40550, thrLon: -122.04300, hdg: 338 },
+  { apt: 'NUQ', name: '14L', thrLat: 37.42890, thrLon: -122.05500, hdg: 158 },
 ];
 
 /** Opposite / parallel flow pairs — prefer active, never default closed opposite. */
 const FLOW_OPPOSITE = { '28': '10', '10': '28', '19': '01', '01': '19' };
-const FLOW_HDG = { '28': 284, '10': 104, '19': 192, '01': 12 };
+const FLOW_HDG = { '28': 298, '10': 118, '19': 208, '01': 28 }; // true
 /** Predominant KSFO config is west ops (28s). Never invent east ops without evidence. */
 let activeFlow = '28';
 let _flowVotes = { '28': 0, '10': 0, '19': 0, '01': 0 };
@@ -4601,7 +4628,7 @@ function bindArrivalsSidebarEvents() {
   igP._arrBound = true;
   igP.addEventListener('pointerover', (ev) => {
     const row = ev.target.closest && ev.target.closest('.ig-arr-row');
-    if (!row || !igP.contains(row)) return;
+    if (!row || !igP.contains(row) || row.classList.contains('sched')) return;
     if (igP._hovRow === row) return;
     if (igP._hovRow) igP._hovRow.classList.remove('hovering');
     igP._hovRow = row;
@@ -4627,7 +4654,7 @@ function bindArrivalsSidebarEvents() {
       return;
     }
     const row = ev.target.closest && ev.target.closest('.ig-arr-row');
-    if (!row || !igP.contains(row)) return;
+    if (!row || !igP.contains(row) || row.classList.contains('sched')) return;
     const id = row.getAttribute('data-icao');
     selectedId = id;
     orbitUserPickId = id; // user override — keep until they clear / pick another
@@ -5046,28 +5073,259 @@ function isKsfoEnrouteInbound(p) {
   return true;
 }
 
+
+/* ───────────── airloom-v26: destination-first KSFO arrival decision ─────────────
+ * A plane is a KSFO arrival only when:
+ *   (a) a destination source confirms KSFO (server AeroAPI match → p.dest), or
+ *   (b) geometry is strong: on/near an active-runway extended centerline or tightly
+ *       converging, descending on a sensible profile/speed, and SFO fits better than
+ *       SQL/PAO/OAK/HWD/SJC/NUQ/HAF/CCR/LVK.
+ * Light pistons/trainers count only on a real SFO final (≤6 nm, tight, low).
+ * Airliners stay off the GA/FBO list (still available in Arrivals / All modes).
+ */
+let schedInfo = { enabled: false, authoritative: false, flights: [], source: null };
+
+const LIGHT_PISTON_TYPES = new Set([
+  'C150','C152','C162','C170','C172','C175','C177','C180','C182','C185','C195','C206','C207','C210','T206','T210','P210','C337',
+  'P28A','P28B','P28R','P28T','PA28','PA24','PA30','PA32','P32R','PA34','PA38','PA44','PA18','PA22','PA12','PA46',
+  'SR20','SR22','S22T','DA20','DV20','DA40','DA42','DA62','BE23','BE24','BE33','BE35','BE36','BE55','BE58','BE76',
+  'M20P','M20T','M20J','AA1','AA5','GLAS','RV4','RV6','RV7','RV8','RV9','RV10','RV12','RV14','C42','CH7A','CH7B',
+  'AC11','LA4','TB20','TB21','TOBA','G115','BL8','CUB','J3','DR40','EXPL','ULAC','GLID','R22','R44',
+]);
+
+function isLightPiston(p) {
+  const t = String((p && p.type) || '').toUpperCase().trim();
+  if (t && LIGHT_PISTON_TYPES.has(t)) return true;
+  if (/^(C1[5-9]\d|C2[01]\d|P28|PA[1-4]\d|SR2|DA[24]0|BE3[3-6]|M20|RV\d)/.test(t)) return true;
+  // No type: ADS-B emitter cat A1 (light <15.5k lb) that is slow → treat as piston
+  if (!t) {
+    const gs = p.gsKt != null ? p.gsKt : (p.vel != null ? p.vel / KT_MS : null);
+    if (String(p.adsbCat || '').toUpperCase() === 'A1' && (gs == null || gs < 170)) return true;
+  }
+  return false;
+}
+
+function trackMissNm(p, lat, lon) {
+  const d = haversineNm(p.lat, p.lon, lat, lon);
+  if (p.track == null || !Number.isFinite(p.track)) return { d, miss: d, te: null };
+  const te = Math.abs(angDiff(p.track, bearingDeg(p.lat, p.lon, lat, lon)));
+  const miss = te >= 90 ? d + 5 : d * Math.sin(te * Math.PI / 180);
+  return { d, miss, te };
+}
+
+/** How well does the aircraft's present path fit landing at field f (lower = better). */
+function fieldFitScore(p, f) {
+  const altFt = (p.altM || 0) / FT_M;
+  const m = trackMissNm(p, f.lat, f.lon);
+  const profileFt = 340 * m.d + 1300; // ~3° plus pattern cushion
+  const high = Math.max(0, altFt - profileFt);
+  return { d: m.d, miss: m.miss, te: m.te, score: m.miss + high / 600 };
+}
+
+/** Jets can't use PAO/SQL/HAF (short runways); SF50/pistons/turboprops can. */
+const JET_ONLY_LONG_RWY_RE = /^(C25[ABC]|C5[05]\d|C56X|C6[58]\d|C68A|C7[05]0|GLF\d|GL[567]T|GLEX|GA[567]C|CL[36]\d|CL35|FA[5-8]X?|FA[25]0|F2TH|F900|LJ\d\d|E5[05]P|E545|E550|HA4T|HDJT|PC24|G150|G280|GALX|H25B|BE40|PRM1|A3\d\d|A2\d\w|B7\d\w|B3\dM|BCS\d|E1\d\d|E2\d\d|E7\d|CRJ\d|MD\d\d)$/;
+const SHORT_RWY_FIELDS = new Set(['KPAO', 'KSQL', 'KHAF']);
+
+function candidateBayFields(p) {
+  const t = String((p && p.type) || '').toUpperCase().trim();
+  const jet = !!t && JET_ONLY_LONG_RWY_RE.test(t);
+  return BAY_FIELDS.slice(1).filter((f) => !(jet && SHORT_RWY_FIELDS.has(f.icao)));
+}
+
+/** Corridor fit for one runway: on/near extended centerline, heading roughly along final. */
+function corridorFit(p, rw, maxAlong) {
+  if (p.track == null || !Number.isFinite(p.track)) return null;
+  const off = rwyTrackOffsets(p.lat, p.lon, rw.thrLat, rw.thrLon, rw.hdg);
+  const along = -off.atkNm;
+  if (along < 0 || along > (maxAlong || 35)) return null;
+  if (Math.abs(off.xtkNm) > 1.0 + 0.12 * along) return null;
+  const hd = Math.abs(angDiff(p.track, rw.hdg));
+  if (hd > 40) return null;
+  return { rwy: rw.name, apt: rw.apt || 'SFO', xtkNm: off.xtkNm, alongNm: along, hdgDiff: hd };
+}
+
+/** Another Bay field explains this path better than SFO → not an SFO arrival. */
+function betterBayField(p, opts) {
+  const sfo = fieldFitScore(p, BAY_FIELDS[0]);
+  const margin = (opts && opts.margin != null) ? opts.margin : 1.0;
+  const altFt = (p.altM || 0) / FT_M;
+  let best = null;
+  for (const f of candidateBayFields(p)) {
+    const o = fieldFitScore(p, f);
+    if (o.d > 30) continue;
+    // Low & close to a satellite field while SFO is clearly farther (pattern / local ops)
+    const localPattern = o.d < 4.5 && altFt < 3000 && sfo.d > o.d + 2;
+    if (localPattern || o.score + margin < sfo.score) {
+      if (!best || o.score < best.fit.score) best = { field: f, fit: o };
+    }
+  }
+  return best;
+}
+
+
+/** Where the present track meets a runway's extended centerline (flat ENU around threshold). */
+function finalIntercept(p, rw) {
+  if (p.track == null || !Number.isFinite(p.track)) return null;
+  const cosT = Math.cos(rw.thrLat * Math.PI / 180);
+  const px = (p.lon - rw.thrLon) * 60 * cosT, py = (p.lat - rw.thrLat) * 60;
+  const ub = (rw.hdg + 180) * Math.PI / 180, vb = p.track * Math.PI / 180;
+  const ux = Math.sin(ub), uy = Math.cos(ub), vx = Math.sin(vb), vy = Math.cos(vb);
+  const det = vx * (-uy) - vy * (-ux);
+  if (Math.abs(det) < 1e-6) return null;
+  const t = ((-px) * (-uy) - (-py) * (-ux)) / det; // nm ahead along track
+  const sAlong = (vx * (-py) - vy * (-px)) / det;  // nm from threshold along final
+  if (!(t > 0) || !(sAlong > 0)) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  const ia = Math.abs(angDiff(p.track, rw.hdg));
+  const grad = altFt / (t + sAlong);
+  return { t, s: sAlong, ia, grad, score: Math.abs(grad - 300) / 50 + ia / 30, rwy: rw.name, apt: rw.apt || 'SFO' };
+}
+
+/** Strong-geometry KSFO arrival test. Returns { tier, ... } or null. */
+function strongKsfoGeometry(p) {
+  if (!p || p.onGround) return null;
+  const altFt = (p.altM || 0) / FT_M;
+  if (altFt < 50) return null;
+  const dist = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
+  const fin = p.finalInfo || detectKsfoFinal(p);
+  if (fin) return { tier: 'final', fin, dist };
+  if (p.track == null || !Number.isFinite(p.track)) return null;
+  const gs = (p.gsKt != null && !isNaN(p.gsKt)) ? p.gsKt : (p.vel != null ? p.vel / KT_MS : null);
+  if (gs == null) return null;
+  if (dist > 80) return null;
+  const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
+  if (vrFpm > 300) return null; // climbing
+
+  const sfo = trackMissNm(p, BAY_FIELDS[0].lat, BAY_FIELDS[0].lon);
+  const descending = vrFpm <= -300;
+  const profileMax = 380 * dist + 2500;
+  const profileMin = Math.max(0, 140 * dist - 2000);
+  const onProfile = altFt <= profileMax && altFt >= profileMin;
+  const gsMax = dist > 25 ? 500 : (dist > 12 ? 320 : 250);
+  const speedOk = gs >= 110 && gs <= gsMax;
+
+  // 1) Established in the active-runway arrival corridor (extended centerline ≤35 nm)
+  if (dist <= 40 && speedOk && onProfile && altFt <= 15000 && (descending || altFt < 4000)) {
+    let corr = null;
+    for (const rw of finalsForFlow(activeFlow)) {
+      const c = corridorFit(p, rw, 35);
+      if (c && (!corr || Math.abs(c.xtkNm) < Math.abs(corr.xtkNm))) corr = c;
+    }
+    if (corr) {
+      // Reject when an OAK/SJC/HWD/NUQ final corridor explains it better
+      let rival = null;
+      for (const rw of OTHER_FINALS) {
+        const c = corridorFit(p, rw, 25);
+        if (c && Math.abs(c.xtkNm) + 0.3 < Math.abs(corr.xtkNm) && (!rival || Math.abs(c.xtkNm) < Math.abs(rival.xtkNm))) rival = c;
+      }
+      if (!rival) return { tier: 'approach', corr, dist };
+    }
+  }
+
+  // 2) Intercepting the active SFO final (STAR/vector geometry, e.g. east arrivals joining 28L/R)
+  //    jets/turboprops only; SFO intercept must clearly beat OAK/SJC/HWD/NUQ intercepts + straight-ins.
+  if (dist <= 45 && descending && speedOk && altFt <= 16000) {
+    let best = null;
+    for (const rw of finalsForFlow(activeFlow)) {
+      const x = finalIntercept(p, rw);
+      if (!x || x.t > 35 || x.s < 8 || x.s > 28 || x.ia > 60 || x.grad < 200 || x.grad > 400) continue;
+      if (!best || x.score < best.score) best = x;
+    }
+    if (best) {
+      let rivalScore = Infinity;
+      for (const rw of OTHER_FINALS) {
+        const x = finalIntercept(p, rw);
+        if (!x || x.s > 30 || x.ia > 90 || x.grad < 150 || x.grad > 600) continue;
+        rivalScore = Math.min(rivalScore, x.score);
+      }
+      for (const f of candidateBayFields(p)) {
+        const m = trackMissNm(p, f.lat, f.lon);
+        if (m.te == null || m.te > 60 || m.d < 1) continue;
+        const g = altFt / m.d;
+        rivalScore = Math.min(rivalScore, m.miss / 2 + Math.abs(g - 300) / 50);
+      }
+      if (best.score + 0.4 <= rivalScore) return { tier: 'intercept', icpt: best, dist };
+    }
+  }
+  if (betterBayField(p)) return null;
+
+  // 3) Close-in straight convergence on the field
+  if (dist <= 30) {
+    if (!speedOk || !onProfile || altFt > 15000) return null;
+    if (sfo.te != null && sfo.te <= 25 && descending && sfo.miss <= 3) return { tier: 'approach', dist };
+    return null;
+  }
+  // 4) 30–80 nm: tight convergence + on-profile descent; SFO must beat every other field clearly
+  if (!(sfo.te != null && sfo.te <= 12 && descending && onProfile && speedOk && sfo.miss <= 3.5 && altFt <= 26000)) return null;
+  for (const f of candidateBayFields(p)) {
+    const o = trackMissNm(p, f.lat, f.lon);
+    if (o.miss < sfo.miss + 2.5) return null;
+  }
+  return { tier: 'inbound', dist };
+}
+
+/** Real SFO final for light pistons: tight, low, ≤6 nm. */
+function isTightShortFinal(p) {
+  const fin = p.finalInfo || detectKsfoFinal(p);
+  if (!fin) return false;
+  const altFt = (p.altM || 0) / FT_M;
+  return fin.alongNm <= 6 && Math.abs(fin.xtkNm) <= 0.45 && altFt <= 2300;
+}
+
+/** Has a public identity AeroAPI would know (tail or callsign), i.e. absence is evidence. */
+function hasPublicIdent(p) {
+  if (!p || p.blocked) return false;
+  return !!((p.reg && String(p.reg).trim()) || (p.callsign && String(p.callsign).trim()));
+}
+
+/**
+ * The arrival decision. Returns { ok, why, geo, confirmed } — ok=false drops the aircraft.
+ */
+function ksfoArrivalDecision(p, opts) {
+  const allowAirline = !!(opts && opts.allowAirline);
+  const isGa = !!(p.isPrivateGa || isPrivateOrGa(p));
+  if (!isGa && !allowAirline) return { ok: false, why: 'airliner (not FBO list)' };
+  const dst = p.dest || null;
+  if (dst && dst.icao && dst.icao !== 'KSFO') return { ok: false, why: 'dest ' + dst.icao };
+  const confirmed = !!(dst && dst.icao === 'KSFO');
+  const light = isLightPiston(p);
+  if (confirmed) {
+    // Filed to KSFO (even a rare piston IFR plan) — trust the destination source
+    return { ok: true, why: 'dest KSFO (' + (dst.src || 'schedule') + ')', confirmed: true, geo: strongKsfoGeometry(p) };
+  }
+  if (light) {
+    return isTightShortFinal(p)
+      ? { ok: true, why: 'light piston on SFO short final', geo: { tier: 'final', fin: p.finalInfo || detectKsfoFinal(p) } }
+      : { ok: false, why: 'light piston / trainer not on SFO final' };
+  }
+  const geo = strongKsfoGeometry(p);
+  if (!geo) return { ok: false, why: 'no destination + weak geometry' };
+  // AeroAPI fresh + GA with a public ident not on the filed-arrival list → only trust a real final/close approach
+  if (schedInfo.authoritative && isGa && hasPublicIdent(p) && geo.tier !== 'final'
+      && !(geo.tier === 'approach' && geo.dist <= 12)) {
+    return { ok: false, why: 'not on KSFO filed arrivals (AeroAPI)' };
+  }
+  return { ok: true, why: 'geometry ' + geo.tier, geo };
+}
+
 /**
  * Score a useful KSFO arrival for Orbit (~60–110 min window).
  * Prefers GA/private but includes clear airline inbounds/finals + enroute ADS-B.
  */
-function scoreOrbitArrival(p) {
+function scoreOrbitArrival(p, opts) {
   if (!p || p.onGround) return null;
   const altFt = (p.altM || 0) / FT_M;
   if (altFt < 50) return null;
   const distNm = (p.dist != null) ? p.dist : haversineNm(ORIGIN.lat, ORIGIN.lon, p.lat, p.lon);
 
-  const finalHit = p.finalInfo || detectKsfoFinal(p);
-  const clearIn = isClearKsfoInbound(p);
-  const enroute = isKsfoEnrouteInbound(p);
-  const assoc = p.isKsfo || isKsfoAssociated(p);
-  if (!finalHit && !clearIn && !enroute && !(assoc && p.isArrival)) return null;
-
-  // Near/approach pack stays within local altitudes; enroute may be FL450 cruise
-  if (!finalHit && !enroute) {
-    if (altFt > 22000) return null;
-    if (distNm > 70) return null;
-  }
-  if (enroute && !finalHit && !clearIn && distNm > 380) return null;
+  // v26: destination-first gate (replaces permissive toward-field heuristics)
+  const allowAirline = !!(opts && opts.allowAirline) || settings.trafficMode !== 'ga';
+  const dec = ksfoArrivalDecision(p, { allowAirline });
+  if (!dec.ok) return null;
+  const geo = dec.geo || null;
+  const finalHit = (geo && geo.tier === 'final') ? (geo.fin || p.finalInfo || detectKsfoFinal(p)) : (p.finalInfo || null);
+  const clearIn = !!(geo && (geo.tier === 'approach' || geo.tier === 'final' || geo.tier === 'intercept'));
+  const enroute = !finalHit && !clearIn;
 
   // Reject hard climb-outs (do not loosen false-final)
   const vrFpm = p.vr != null ? p.vr / 0.00508 : 0;
@@ -5090,6 +5348,11 @@ function scoreOrbitArrival(p) {
   if (etaUse == null && tca != null) etaUse = tca;
   if (etaUse == null && gs != null && gs >= 35) etaUse = (distNm / gs) * 60;
   if (etaUse == null) etaUse = distNm * 1.15; // slow unknown-GS estimate
+  // Confirmed destination: FA/AeroAPI runway ETA beyond the approach (matches FA board)
+  if (dec.confirmed && p.dest && p.dest.eta && distNm > 30) {
+    const schedEta = (p.dest.eta * 1000 - Date.now()) / 60000;
+    if (Number.isFinite(schedEta) && schedEta > 0) etaUse = schedEta;
+  }
   const windowMax = (enroute && !clearIn && !finalHit)
     ? Math.max(ORBIT_ARRIVAL_WINDOW_MIN + 20, 110)
     : (ORBIT_ARRIVAL_WINDOW_MIN + 12);
@@ -5130,12 +5393,16 @@ function scoreOrbitArrival(p) {
     gsKt: gs,
     altFt,
     enroute: !!enroute && !clearIn && !finalHit,
+    why: dec.why,
+    confirmed: !!dec.confirmed,
+    origin: (p.dest && p.dest.origin) || null,
   };
 }
 
 /** True when a non-GA should still appear (useful KSFO arrival in ~60 min). */
 function isOrbitUsefulArrival(p) {
-  return !!scoreOrbitArrival(p);
+  // Scene visibility keeps real airliner arrivals as context; lists use the GA gate.
+  return !!scoreOrbitArrival(p, { allowAirline: true });
 }
 
 function collectOrbitArrivals(fromList) {
@@ -5179,7 +5446,8 @@ function collectSoonArrivals(fromList) {
   // slice so soonest-first sort does not reorder Orbit HUD cache
   const scored = src
     .filter((s) => s && s.etaMin != null && Number.isFinite(s.etaMin) && s.etaMin <= SOON_WINDOW_MIN)
-    .slice();
+    .slice()
+    .concat(schedInboundsUnmatched(SOON_WINDOW_MIN));
   scored.sort((a, b) => {
     if (Math.abs(a.etaMin - b.etaMin) > 0.2) return a.etaMin - b.etaMin;
     // tie: on-final / nearer along
@@ -5190,6 +5458,74 @@ function collectSoonArrivals(fromList) {
   soonArrivalsCache = scored;
   return scored;
 }
+
+
+/**
+ * v26: filed KSFO GA inbounds from AeroAPI that are NOT on the ADS-B arrivals list
+ * (still beyond ADS-B range, not departed yet, or not yet matched). FA-board parity.
+ */
+function schedInboundsUnmatched(maxEtaMin) {
+  if (!schedInfo.authoritative || !schedInfo.flights.length) return [];
+  const listed = new Set(orbitArrivalsCache.map((s) => s.icao));
+  const now = Date.now();
+  const out = [];
+  for (const f of schedInfo.flights) {
+    if (!f || !f.eta) continue;
+    if (f.hex && (listed.has(f.hex) || aircraft.has(f.hex))) continue;
+    const etaMin = (f.eta * 1000 - now) / 60000;
+    if (etaMin < -5 || (maxEtaMin != null && etaMin > maxEtaMin)) continue;
+    // Blocked filings can't be matched by tail/hex: fold into an ADS-B BLOCKED/PIA
+    // arrival of the same type with a similar ETA instead of listing it twice.
+    if (f.blocked || !f.hex) {
+      const typ = String(f.type || '').toUpperCase();
+      const dup = orbitArrivalsCache.some((s) => typ && String(s.type || '').toUpperCase() === typ
+        && (f.blocked ? /BLOCKED|PIA|~/i.test(String(s.callsign || '')) : (f.ident && s.callsign === f.ident))
+        && s.etaMin != null && Math.abs(s.etaMin - etaMin) <= 20);
+      if (dup) continue;
+    }
+    out.push({
+      icao: 'sched:' + (f.id || f.ident || out.length),
+      sched: true,
+      callsign: f.blocked ? 'BLOCKED' : (f.ident || f.reg || '—'),
+      type: f.type || '',
+      origin: f.origin || null,
+      etaMin: Math.max(0, etaMin),
+      departed: !!f.off,
+      nm: null, mi: null, onFinal: false, conf: 'sched', isGa: true,
+    });
+  }
+  out.sort((a, b) => a.etaMin - b.etaMin);
+  return out;
+}
+let _lastParsedForDebug = [];
+/** Why each nearby GA/bizjet target is (not) a KSFO arrival — diagnostics only. */
+window.__AIRLOOM_ARRIVAL_DECISIONS = (maxNm) => _lastParsedForDebug
+  .filter((p) => !p.onGround && p.dist <= (maxNm || 120))
+  .map((p) => {
+    const d = ksfoArrivalDecision(p, { allowAirline: true });
+    const sfo = trackMissNm(p, BAY_FIELDS[0].lat, BAY_FIELDS[0].lon);
+    const alt = betterBayField(p);
+    return {
+      ident: displayIdent(p), hex: p.icao, type: p.type, ga: !!p.isPrivateGa, light: isLightPiston(p),
+      nm: +p.dist.toFixed(1), altFt: Math.round((p.altM || 0) / FT_M), gs: p.gsKt != null ? Math.round(p.gsKt) : null,
+      trk: p.track != null ? Math.round(p.track) : null, vr: p.vr != null ? Math.round(p.vr / 0.00508) : null,
+      te: sfo.te != null ? Math.round(sfo.te) : null, miss: +sfo.miss.toFixed(1),
+      betterField: alt ? alt.field.short : null, dest: p.dest ? p.dest.icao : null,
+      ok: d.ok, why: d.why,
+    };
+  })
+  .sort((a, b) => a.nm - b.nm);
+window.__AIRLOOM_ARRIVALS_DEBUG = () => ({
+  build: BUILD_MARK,
+  activeFlow,
+  schedule: { enabled: schedInfo.enabled, authoritative: schedInfo.authoritative, n: schedInfo.flights.length },
+  arrivals: orbitArrivalsCache.map((s) => ({
+    ident: s.callsign, hex: s.icao, type: s.type, etaMin: s.etaMin != null ? +s.etaMin.toFixed(1) : null,
+    nm: s.nm != null ? +s.nm.toFixed(1) : null, conf: s.conf, why: s.why, confirmed: s.confirmed, origin: s.origin,
+  })),
+  soon: soonArrivalsCache.map((s) => ({ ident: s.callsign, type: s.type, etaMin: s.etaMin != null ? +s.etaMin.toFixed(1) : null, sched: !!s.sched })),
+  scheduledBeyondAdsb: schedInboundsUnmatched(24 * 60).map((s) => ({ ident: s.callsign, type: s.type, origin: s.origin, etaMin: Math.round(s.etaMin) })),
+});
 
 /** Clock time for ETA minutes from now (user-local, short). */
 function formatEtaClock(etaMin) {
@@ -5944,14 +6280,23 @@ function updateInfoPanel() {
   bindArrivalsSidebarEvents();
 
   const badge = dual ? 'DUAL FINAL' : (list.some((s) => s.onFinal) ? 'APPROACH' : 'INBOUND');
-  const sig = orbitArrivalsSignature(list) + '#' + badge + '#' + (orbitHoverPreview || '') + '#' + (selectedId || '');
+  const sig = orbitArrivalsSignature(list) + '#' + badge + '#' + (orbitHoverPreview || '') + '#' + (selectedId || '')
+    + '#s' + (schedInfo.authoritative ? schedInfo.flights.length : 0) + ':' + Math.floor(Date.now() / 60000);
   // Avoid wiping DOM every 500ms (drops hover); refresh when pack changes
   if (sig === _orbitArrivalsSig && igP && igP.querySelector('.ig-arr-list, .ig-arr-empty')) return;
   _orbitArrivalsSig = sig;
 
   const closeBtn = `<button type="button" class="panel-x" id="btnCloseArrivals" title="Close arrivals" aria-label="Close arrivals">✕</button>`;
+  // v26: filed GA inbounds still beyond ADS-B (AeroAPI) — informational rows, no 3D target
+  const schedHtml = schedInboundsUnmatched(12 * 60).slice(0, 8).map((f) =>
+    `<div class="ig-arr-row sched ga" data-icao="${f.icao}">` +
+    `<div class="cs">${f.callsign}</div>` +
+    `<div class="eta">${formatEtaClock(f.etaMin)}<span class="eta-to">${f.departed ? 'en route' : 'filed'}</span></div>` +
+    `<div class="meta">${f.type || '????'}${f.origin ? ' · ' + f.origin : ''}</div>` +
+    `<div class="dist">sched</div>` +
+    `</div>`);
 
-  if (!list.length) {
+  if (!list.length && !schedHtml.length) {
     igP.innerHTML =
       `<div class="ig-arr-head"><div class="ig-arr-title">FBO · arrivals</div>` +
       `<div style="display:flex;align-items:center;gap:6px"><div class="ig-arr-count">60m</div>${closeBtn}</div></div>` +
@@ -5974,16 +6319,18 @@ function updateInfoPanel() {
     return `<div class="${cls}" data-icao="${s.icao}">` +
       `<div class="cs">${s.callsign}${nextTag}</div>` +
       etaHtml +
-      `<div class="meta">${typ}${rwy}</div>` +
+      `<div class="meta">${typ}${rwy}${s.origin && !s.rwy ? ' · ' + s.origin : ''}</div>` +
       `<div class="dist">${mi}</div>` +
       `</div>`;
   }).join('');
 
+  const schedRows = schedHtml.length ? (
+    `<div class="ig-arr-count" style="margin:8px 0 4px">Filed · beyond ADS-B (FlightAware)</div>` + schedHtml.join('')) : '';
   igP.innerHTML =
     `<div class="ig-arr-head"><div class="ig-arr-title">FBO · next ~60 min</div>` +
     `<div style="display:flex;align-items:center;gap:6px"><div class="ig-badge">${badge}</div>${closeBtn}</div></div>` +
     `<div class="ig-arr-count" style="margin:-2px 0 6px">${list.length} to KSFO · soonest first</div>` +
-    `<div class="ig-arr-list">${rows}</div>`;
+    `<div class="ig-arr-list">${rows}${schedRows}</div>`;
 }
 
 function showToast(msg, ms = 4000) {
@@ -6990,6 +7337,18 @@ function ingest(data) {
   const now = performance.now();
   const seen = new Set();
 
+  // v26: AeroAPI schedule (destination truth + filed inbounds beyond ADS-B range)
+  if (data.sched && typeof data.sched === 'object') {
+    schedInfo = {
+      enabled: !!data.sched.enabled,
+      authoritative: !!data.sched.authoritative,
+      source: data.sched.source || null,
+      flights: Array.isArray(data.sched.flights) ? data.sched.flights : [],
+    };
+  } else {
+    schedInfo = { enabled: false, authoritative: false, flights: [], source: null };
+  }
+
   // Merge ac meta by hex
   const metaByHex = new Map();
   for (const a of (data.ac || [])) {
@@ -7041,12 +7400,15 @@ function ingest(data) {
       icao, callsign: csUse, lat, lon, altM, onGround, vel, track, vr, dist,
       source: src, type, reg, gsKt, cat, squawk,
       dbFlags, ownOp, pia, ladd, blocked: isBlocked, privacyMode: privMode,
+      dest: (meta && meta.dst && meta.dst.icao) ? meta.dst : null,
+      adsbCat: meta && meta.category ? String(meta.category) : null,
     };
     p.isArrival = isArrival(p);
     parsed.push(p);
   }
 
   const arrivals = parsed.filter((p) => p.isArrival);
+  _lastParsedForDebug = parsed;
 
   // Tag private/GA + KSFO association / final on every parsed aircraft
   // First pass: soft finals for flow vote (activeFlow may still be prior)
@@ -7063,7 +7425,9 @@ function ingest(data) {
     p.isKsfo = isKsfoAssociated(p);
   }
   const privateGa = parsed.filter((p) => p.isPrivateGa);
-  const ksfoGa = parsed.filter((p) => p.isPrivateGa && p.isKsfo);
+  // v26: airborne KSFO GA must pass the destination-first arrival decision (ground = on field)
+  const ksfoGa = parsed.filter((p) => p.isPrivateGa && p.isKsfo
+    && (p.onGround || ksfoArrivalDecision(p, { allowAirline: false }).ok));
   const onFinalAll = parsed.filter((p) => p.isOnFinal);
 
   // Orbit usefulness: score clear KSFO inbounds/finals/enroute in ~60–110 min
@@ -7140,6 +7504,7 @@ function ingest(data) {
       pia: !!p.pia, ladd: !!p.ladd, blocked: !!p.blocked,
       privacyMode: p.privacyMode || null,
       dbFlags: p.dbFlags || 0, ownOp: p.ownOp || null,
+      dest: p.dest || null, adsbCat: p.adsbCat || null,
     });
     // feed closing-distance into score via parsed proxy fields
     p._prevDistField = p._prevDistField;
@@ -7185,7 +7550,7 @@ function ingest(data) {
   const finalN = [...aircraft.values()].filter((r) => r.isOnFinal).length;
   if ($('gaCount')) $('gaCount').textContent = String(settings.trafficMode === 'ga' ? aircraft.size : gaTotal);
   if ($('uiGaCount')) $('uiGaCount').textContent = String(gaTotal);
-  $('uiArrCount').textContent = String(arrivals.filter((a) => a.isKsfo).length);
+  $('uiArrCount').textContent = String(orbitArrivalsCache.length);
   if ($('uiFinalCount')) $('uiFinalCount').textContent = String(finalN || onFinalAll.length);
   // List panel: KSFO private/GA in default mode, KSFO arrivals otherwise
   const listForPanel = settings.trafficMode === 'ga'
@@ -7194,7 +7559,7 @@ function ingest(data) {
         if (fa !== fb) return fa - fb;
         return a.dist - b.dist;
       }).slice(0, 40)
-    : arrivals.filter((a) => a.isKsfo);
+    : arrivals.filter((a) => a.isKsfo && ksfoArrivalDecision(a, { allowAirline: true }).ok);
   renderArrivalsList(listForPanel);
   if (selectedId && aircraft.has(selectedId)) updateSelPanel(aircraft.get(selectedId));
 

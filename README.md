@@ -4,8 +4,37 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
-- Routes: `/`, `/airloom`, `/adsb/states`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v25)
+- Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v26)
+
+## airloom-v26
+
+- **Destination-first KSFO arrivals**: an aircraft is listed as a KSFO arrival only if (a) a schedule source confirms destination KSFO (AeroAPI, optional), or (b) its geometry is strong: on/joining a KSFO final for the active flow (28L/R, 19L/R, 10L/R, 01L/R, using **true** runway headings — v25 used magnetic headings as true, ~14° off), or converging and descending toward SFO with SFO clearly the best-fitting field.
+- **Satellite-field rejection**: OAK, HWD, SJC, NUQ, PAO, SQL, HAF, CCR, LVK (incl. OAK/SJC/HWD/NUQ final corridors) — if another field fits the track/profile better, it is not an SFO arrival. Jets are never assigned to short-runway fields (PAO/SQL/HAF).
+- **Light pistons / trainers** (C150–C210, PA-28, SR20/22, DA40, etc.) only count when on a tight SFO short final (≤6 nm, ≤0.45 nm off centerline, ≤2300 ft).
+- **Airliners off the GA/FBO list** (rail, soon bar, drawer in GA mode). Airliners still appear in Arrivals / All modes. BLOCKED / PIA ADS-B targets keep their labels.
+- **Scheduled inbounds beyond ADS-B range** (when `AEROAPI_KEY` is set): FlightAware AeroAPI `/airports/KSFO/flights/scheduled_arrivals?type=General_Aviation` (filed + en route, next 12 h) is merged with ADS-B by tail → callsign → sticky hex. Unmatched filings appear under "Filed · beyond ADS-B (FlightAware)" in the rail, and in the soon bar when ≤30 min. Blocked filings are folded into an ADS-B BLOCKED target of the same type/ETA.
+- **No flightaware.com scraping**: FA's Terms of Use forbid automated retrieval of site pages; the enroute/arrivals pages also require login. Use AeroAPI (or a SWIM feed) instead.
+- UI from v24/v25 unchanged (30-min soon bar, green progress, mobile/CT47 layout).
+
+### AeroAPI (optional, OFF by default, hard-capped)
+
+Set only in the Render dashboard (never commit a key). Without `AEROAPI_KEY` no FlightAware call is ever made.
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `AEROAPI_KEY` | *(unset → off)* | AeroAPI v4 key (`x-apikey`) |
+| `AEROAPI_AIRPORT` | `KSFO` | Airport for `scheduled_arrivals` |
+| `AEROAPI_POLL_SEC` | `600` (min 120) | Poll interval, only while someone is viewing (stops after 15 min idle) |
+| `AEROAPI_MAX_PAGES` | `3` (1–10) | Max 15-record pages per call |
+| `AEROAPI_WINDOW_H` | `12` | Look-ahead window (hours) |
+| `AEROAPI_DAILY_MAX_CALLS` | `48` | Hard cap on billable calls per UTC day |
+| `AEROAPI_DAILY_MAX_USD` | `0.50` | Hard cap on spend per UTC day |
+| `AEROAPI_MONTHLY_MAX_USD` | `5` | Hard cap on spend per UTC month |
+| `AEROAPI_COST_PER_PAGE` | `0.005` | Used for the pessimistic local ledger |
+| `AEROAPI_REQUIRE_USAGE_CHECK` | `1` | Fail closed unless FA `/account/usage` (free, `all_keys=true`) succeeded within 60 min |
+
+Spend is reconciled against FlightAware's own account usage for **all keys** on the account (survives restarts / free-tier sleeps), and every call is charged pessimistically (max pages) before it is made. Caps and live spend are shown in `/status` → `aeroapi`.
 
 ## airloom-v25
 
@@ -39,6 +68,7 @@ npm start
 
 Push to GitHub; Blueprint `render.yaml` or create a Docker web service pointed at this repo.
 Set `OSKY_ID` / `OSKY_SECRET` in the dashboard if you want OpenSky fallback.
+Optionally set `AEROAPI_KEY` (+ caps above) for confirmed destinations and filed inbounds beyond ADS-B range.
 
 ## Aircraft models
 

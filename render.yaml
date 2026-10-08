@@ -14,3 +14,11 @@ services:
         sync: false
       - key: OSKY_SECRET
         sync: false
+      - key: AEROAPI_KEY
+        sync: false
+      - key: AEROAPI_DAILY_MAX_CALLS
+        value: "48"
+      - key: AEROAPI_DAILY_MAX_USD
+        value: "0.50"
+      - key: AEROAPI_MONTHLY_MAX_USD
+        value: "5"
