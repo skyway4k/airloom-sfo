@@ -997,7 +997,7 @@ async function warmTileCacheOnBoot() {
 
 function tileManifest() {
   return {
-    build: 'airloom-v27',
+    build: 'airloom-v27.1',
     schedule: TILE_SCHEDULE,
     baked: bakeInfo ? {
       tiles: bakeInfo.ok + bakeInfo.skipped, total: bakeInfo.total, mb: bakeInfo.mb, seconds: bakeInfo.seconds,

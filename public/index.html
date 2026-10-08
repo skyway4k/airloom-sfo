@@ -30,8 +30,10 @@
     --display: "Cormorant Garamond", "Times New Roman", Georgia, serif;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
     /* iOS Safari / Android Chrome / CT47: safe-area + dynamic browser chrome */
-    --safe-bottom: max(0px, constant(safe-area-inset-bottom), env(safe-area-inset-bottom, 0px));
-    --safe-top: max(0px, constant(safe-area-inset-top), env(safe-area-inset-top, 0px));
+    /* v27.1: no legacy constant() here — WebKit/Chrome treat it as invalid inside max(), which made
+       --stack-bottom invalid at computed-value time → #camStack fell to bottom:auto (off-screen). */
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
     --chrome-bottom: 0px; /* visualViewport overlay chrome (JS) */
     --mobile-chrome-floor: 0px; /* generous floor so collapsed↔expanded Safari never buries UI */
     --stack-pad: 8px;
@@ -638,9 +640,11 @@
   @media (max-width: 800px) {
     :root {
       /* Survives Safari collapsed+expanded URL/tab bars; JS may raise via --chrome-bottom */
-      --mobile-chrome-floor: 56px;
+      --mobile-chrome-floor: 64px;
       --stack-pad: 10px;
     }
+    /* iOS Safari floating URL bar / tab bar (not reported by visualViewport when collapsed) */
+    html.ios-safari-chrome { --mobile-chrome-floor: 78px; }
     #camStack {
       width: calc(100vw - 12px); max-width: calc(100vw - 12px);
       bottom: var(--stack-bottom);
@@ -924,7 +928,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v27'; // AirTiles quadtree LOD · baked Bay tile cache · loading gate · SW tile cache
+const BUILD_MARK = 'airloom-v27.1'; // AirTiles quadtree LOD · baked Bay tile cache · loading gate · SW tile cache
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -992,6 +996,7 @@ window.__AIRLOOM_FEATURES = {
   tileLoadingGate: true,
   tileServiceWorker: true,
   tilesNotToneMapped: true,
+  stackBottomFix271: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -1025,6 +1030,13 @@ function syncMobileChromeInsets() {
   root.style.setProperty('--vv-height', ((window.visualViewport && window.visualViewport.height) || window.innerHeight || 0) + 'px');
 }
 window.__AIRLOOM_SYNC_CHROME = syncMobileChromeInsets;
+// v27.1: iPhone/iPad Safari in a browser tab (not home-screen standalone) gets the taller floor
+try {
+  const ua = navigator.userAgent || '';
+  const iosLike = /iP(hone|ad|od)/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const standalone = (navigator.standalone === true) || (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
+  if (iosLike && !standalone) document.documentElement.classList.add('ios-safari-chrome');
+} catch (_) {}
 (function bindMobileChromeInsets() {
   const run = () => { try { syncMobileChromeInsets(); } catch (_) {} };
   run();
@@ -3453,6 +3465,8 @@ class AirTileEngine {
     if (!this.queue.size) return;
     const lanes = airInteract.active ? AIRTILE_LANES_GESTURE : AIRTILE_LANES;
     if (this.inflight.so >= lanes.so && this.inflight.direct >= lanes.direct) return;
+    // backpressure: never let decoded-but-not-uploaded bitmaps pile up (iOS memory)
+    if (this.readyQ.length >= (AIRTILE_MOBILE ? 12 : 32)) return;
     const jobs = [...this.queue.values()].sort((a, b) => a.pri - b.pri);
     for (const j of jobs) {
       let route = airTileRoute(j.kind, j.z, j.y, j.x);
@@ -3469,7 +3483,7 @@ class AirTileEngine {
   async load(j, route) {
     const gen = this.gen || 0;
     const prev = this.tex.get(j.k);
-    const ent = { state: 'loading', tex: null, used: performance.now(), z: j.z, kind: j.kind, pinned: j.pinned || !!(prev && prev.pinned), fails: prev ? prev.fails || 0 : 0 };
+    const ent = { k: j.k, state: 'loading', tex: null, used: performance.now(), z: j.z, kind: j.kind, pinned: j.pinned || !!(prev && prev.pinned), fails: prev ? prev.fails || 0 : 0 };
     this.tex.set(j.k, ent);
     const [url, lane, fb] = route;
     this.inflight[lane]++;
@@ -3590,6 +3604,13 @@ class AirTileEngine {
     const upCap = gesture ? 2 : (transition ? 6 : (AIRTILE_MOBILE ? 12 : 24));
     for (let n = 0; n < upCap && this.readyQ.length; n++) {
       const e = this.readyQ.shift();
+      // camera moved on while it decoded → free it instead of uploading
+      if (!e.pinned && now - e.used > 2500) {
+        this.free(e);
+        if (this.tex.get(e.k) === e) this.tex.delete(e.k);
+        n--; if (n < -64) break;
+        continue;
+      }
       if (e.tex && e.state === 'loading') e.state = 'ready';
     }
     if (now - this.lastLeafAt > (gesture ? 200 : 90) || !this.leaves.length) {
@@ -3813,6 +3834,11 @@ const airGate = { state: 'loading', startMs: performance.now(), doneMs: null, el
       + '<div id="airTileGatePct" style="margin-top:10px;font-variant-numeric:tabular-nums;opacity:.7;font-size:12px">0%</div>';
     (document.body || document.documentElement).appendChild(el);
     airGate.el = el;
+    // failsafe: the gate can never outlive 15 s (e.g. WebGL failure → no ticks)
+    setTimeout(() => {
+      if (airGate.state === 'loading') { airGate.state = 'failsafe'; airGate.doneMs = Math.round(performance.now() - airGate.startMs); }
+      try { el.style.opacity = '0'; el.style.pointerEvents = 'none'; setTimeout(() => { try { el.remove(); } catch (_) {} }, 600); } catch (_) {}
+    }, 15000);
   } catch (_) {}
 })();
 function airGateTick(engine, camReady) {
