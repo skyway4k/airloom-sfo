@@ -6786,10 +6786,24 @@ function scoreInboundGa(p) {
  * from scoreOrbitArrival → ksfoArrivalDecision non-legacy). Rejected traffic (light pistons
  * without a SWIM KSFO filing, other-field finals …) can be drawn but never gets SFO ETA labels,
  * the plane→KSFO line, or the default Follow camera. */
+/** Live airborne aircraft matched to a SWIM (FAA TFMS) KSFO filing — the soon bar lists these too. */
+function swimConfirmedLive(r) {
+  return !!(r && r.alive && !r.onGround && r.dest && r.dest.icao === 'KSFO' && r.dest.src === 'skyway-swim'
+    && r.display && Number.isFinite(r.display.x) && Number.isFinite(r.display.y));
+}
+function swimLiveEtaMin(r) {
+  const e = r && r.dest && Number(r.dest.eta);
+  if (Number.isFinite(e) && e > 0) {
+    const m = (e * 1000 - Date.now()) / 60000;
+    if (m > 0) return m;
+  }
+  const kt = spdKt(r);
+  return (kt && kt > 60 && Number.isFinite(r.dist)) ? r.dist / kt * 60 : null;
+}
 function isFilteredKsfoInbound(icao) {
   if (!icao) return false;
   for (const s of orbitArrivalsCache) if (s && s.icao === icao) return true;
-  return false;
+  return swimConfirmedLive(aircraft.get(icao));
 }
 /** Soonest airborne live aircraft from the filtered set (same ordering as the soon bar). */
 function pickFilteredFollowTarget() {
@@ -6803,6 +6817,15 @@ function pickFilteredFollowTarget() {
     if (s.onFinal !== best.onFinal) { if (s.onFinal) best = s; continue; }
     const na = s.nm != null ? s.nm : 999, nb = best.nm != null ? best.nm : 999;
     if (na < nb) best = s;
+  }
+  // SWIM-confirmed KSFO filings matched to a live airborne track (e.g. still climbing out of
+  // KMRY, which the geometric scorer skips) are part of the same soon-bar set.
+  for (const r of aircraft.values()) {
+    if (!swimConfirmedLive(r)) continue;
+    if (orbitArrivalsCache.some((s) => s && s.icao === r.icao)) continue;
+    const etaMin = swimLiveEtaMin(r);
+    if (etaMin == null) continue;
+    if (!best || etaMin < best.etaMin - 0.2) best = { icao: r.icao, etaMin, onFinal: false, nm: r.dist, swimLive: true };
   }
   return best;
 }
@@ -8714,6 +8737,7 @@ function updateCtxOverlay(cam) {
   let etaMin = null;
   const sc = orbitArrivalsCache.find((s) => s.icao === rec.icao);
   if (sc && sc.etaMin != null && Number.isFinite(sc.etaMin)) etaMin = sc.etaMin;
+  else if (swimConfirmedLive(rec)) etaMin = swimLiveEtaMin(rec);
   else { const kt = spdKt(rec); if (kt && kt > 60) etaMin = nm / kt * 60; }
   const nmTxt = (nm < 10 ? nm.toFixed(1) : String(Math.round(nm))) + ' nm to KSFO';
   const etaTxt = etaMin != null && etaMin >= 0 ? 'ETA ' + formatEtaClock(etaMin) + ' PT' : '';
