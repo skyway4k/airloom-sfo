@@ -5,7 +5,17 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28.1)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28.2)
+
+## airloom-v28.2 — zoomed-out context view (how far is it from SFO?)
+
+- **Default Follow view is now a context view**: the camera sits beyond the tracked/closest inbound, pitched ~36°, looking plane → KSFO, and solves its distance so the plane *and* the KSFO bullseye (plus labels and a ≥3.5 nm margin) fit inside the free band between the HUD and the soon bar/mode pills (measured live, re-centred vertically). Planes > 70 nm out frame the plane + 40 nm toward SFO. Pinch/wheel in tightens onto the plane (classic chase); out widens; drag yaw/pitch still works.
+- **Range rings** at 10 / 20 / 40 nm around KSFO with labels (kept on the screen-right side).
+- **Plane → KSFO line** with a "NN nm to KSFO · ETA h:mm PM PT" label (ETA from the arrival scorer, else distance/groundspeed). Follow: tracked plane; Orbit: focused plane.
+- Plane icons scale with camera distance in Follow (≈ constant on-screen size, ×1–34) so they stay readable; KSFO label stays a constant pixel size; the tracked/selected plane's label is no longer hidden by distance.
+- Tiles: unchanged engine — the quadtree LOD + leaf/texture caps pick coarser tiles automatically for the wider view (WebKit 390×844: 60 s soak + 4 view switches, no crash, max gpuTex 253 / iOS cap 320).
+- Server: the Skyway clean endpoint `/api/swim/arrivals?airport=KSFO` is now tried even when Skyway `/status` fails (health comes from its `feed.swim`), so a `/status` blip no longer blocks the SWIM merge.
+- Test hook: `window.__AIRLOOM_CTX()` (camera distance, insets, plane/KSFO screen positions).
 
 ## airloom-v28.1 — tighter ADS-B-only arrival filter (lists + soon bar only)
 

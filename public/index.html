@@ -947,7 +947,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v28.1'; // v28.1: ADS-B-only other-field (NUQ/SJC/PAO/SQL/HAF/OAK) + small-aircraft list filter, PT on-base · FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
+const BUILD_MARK = 'airloom-v28.2'; // v28.2: zoomed-out context Follow view (plane + KSFO framed), range rings, plane→KSFO nm/ETA line · v28.1: ADS-B-only other-field (NUQ/SJC/PAO/SQL/HAF/OAK) + small-aircraft list filter, PT on-base · FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -1021,6 +1021,9 @@ window.__AIRLOOM_FEATURES = {
   otherFieldVeto281: true,
   smallAircraftSwimOnly281: true,
   onBasePt281: true,
+  followContextView282: true,
+  rangeRings282: true,
+  planeToKsfoLine282: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -2614,7 +2617,7 @@ scene.fog = new THREE.FogExp2(0xc2d4c8, 0.00000085);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 20, 8e6);
 // Air Loom Orbit framing (Follow uses cockpitCam)
-camera.position.set(78000, 48000, 92000);
+camera.position.set(30000, 38000, 48000); // v28.2: ~35–40 nm KSFO context when nothing is tracked
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -4825,7 +4828,7 @@ function updateLandingCuesForRec(rec) {
     if (o.isSprite && o.userData && (o.userData.kind === 'aptLabel' || o.userData.rwy)) {
       scaleSpriteToScreenPx(o, cam, o.userData.screenPx || 24, {
         hideUnder: settings.cameraMode === 'follow' ? 480 : 0,
-        cap: 280,
+        cap: o.userData.kind === 'aptLabel' ? 1e7 : 280, // v28.2: KSFO label readable in the wide view
       });
     }
   });
@@ -6991,6 +6994,127 @@ function cockpitEyeFor(rec, outPos, outLook, lagScale) {
   return Number.isFinite(outPos.x) && Number.isFinite(outLook.x);
 }
 
+/* ─── airloom-v28.2: zoomed-out context view (default Follow framing) ──────────
+ * Camera sits beyond the tracked inbound on the side away from KSFO, pitched ~36° down,
+ * looking along plane → KSFO so the plane is in the foreground and the KSFO bullseye
+ * beyond it. Distance is solved so both (plus margin) fit inside the canvas minus the
+ * HUD (top) and the soon bar / mode pills (bottom). Far inbounds (> 70 nm) frame the
+ * plane + 40 nm of the way toward SFO; the plane→KSFO line carries the full nm/ETA.
+ * Pinch/wheel zoom-in (followZoom < 1) tightens onto the plane (classic chase feel);
+ * zoom-out widens. Drag yaw/pitch still orbit the view. */
+const FOLLOW_CONTEXT = true;
+const CTX_PITCH_DEG = 36;
+const CTX_FAR_NM = 70;
+const CTX_FAR_SPAN_NM = 40;
+const CTX_MIN_HALF_NM = 3.5;
+const CTX_APT = enu(ORIGIN.lat, ORIGIN.lon, 0);
+let _ctxInsets = { t: -1e9, top: 80, bottom: 170 };
+const _cxT = new THREE.Vector3(), _cxS = new THREE.Vector3(), _cxDir = new THREE.Vector3();
+const _cxRight = new THREE.Vector3(), _cxCamUp = new THREE.Vector3(), _cxW = new THREE.Vector3(), _cxQ = new THREE.Vector3();
+let _ctxLastDist = 0;
+function ctxViewInsetsPx() {
+  const now = performance.now();
+  if (now - _ctxInsets.t < 500) return _ctxInsets;
+  const H = innerHeight || 800;
+  let top = 0, bottom = 0;
+  try {
+    const hud = document.getElementById('hud');
+    if (hud && getComputedStyle(hud).display !== 'none') { const r = hud.getBoundingClientRect(); if (r.height > 0) top = r.bottom; }
+  } catch (_) {}
+  try {
+    const st = document.getElementById('camStack');
+    if (st) { const r = st.getBoundingClientRect(); if (r.height > 0 && r.top < H) bottom = H - r.top; }
+  } catch (_) {}
+  try {
+    const lc = document.getElementById('landingChip');
+    if (lc && getComputedStyle(lc).display !== 'none') { const r = lc.getBoundingClientRect(); if (r.height > 0 && r.top > H * 0.45) bottom = Math.max(bottom, H - r.top); }
+  } catch (_) {}
+  _ctxInsets = { t: now, top: Math.min(top, H * 0.3), bottom: Math.min(bottom, H * 0.45) };
+  return _ctxInsets;
+}
+
+function contextEyeFor(rec, outPos, outLook, cam) {
+  if (!rec || !rec.display || !Number.isFinite(rec.display.x) || !Number.isFinite(rec.display.y) || !Number.isFinite(rec.display.z)) return false;
+  const P = rec.display;
+  let ux = P.x - CTX_APT.x, uz = P.z - CTX_APT.z;
+  const D = Math.hypot(ux, uz);
+  if (D < 2 * NM_M) {
+    // At/near the field: classic behind-the-plane view along track
+    const tr = THREE.MathUtils.degToRad((rec.track != null && Number.isFinite(rec.track)) ? rec.track : 298);
+    ux = -Math.sin(tr); uz = Math.cos(tr);
+  } else { ux /= D; uz /= D; }
+  const far = D > CTX_FAR_NM * NM_M;
+  if (far) _cxS.set(P.x - ux * CTX_FAR_SPAN_NM * NM_M, 0, P.z - uz * CTX_FAR_SPAN_NM * NM_M);
+  else _cxS.set(CTX_APT.x, 10, CTX_APT.z);
+  const zoom = THREE.MathUtils.clamp(followZoom || 1, FOLLOW_ZOOM_MIN, FOLLOW_ZOOM_MAX);
+  const tFocus = THREE.MathUtils.clamp((1 - zoom) / 0.65, 0, 1); // 0 = plane+KSFO, 1 = plane only
+  // Effective far point slides toward the plane while zooming in
+  _cxS.lerp(P, tFocus);
+  _cxT.set((P.x + _cxS.x) * 0.5, P.y * 0.45, (P.z + _cxS.z) * 0.5);
+  _cxT.lerp(P, tFocus);
+  // View direction: from plane toward KSFO (−u), user yaw/pitch drags applied
+  const yaw = followYaw || 0;
+  const hx = -ux * Math.cos(yaw) - (-uz) * Math.sin(yaw);
+  const hz = -ux * Math.sin(yaw) + (-uz) * Math.cos(yaw);
+  const pitch = THREE.MathUtils.clamp(THREE.MathUtils.degToRad(CTX_PITCH_DEG) + (followPitch || 0) * 0.7,
+    THREE.MathUtils.degToRad(10), THREE.MathUtils.degToRad(82));
+  _cxDir.set(hx * Math.cos(pitch), -Math.sin(pitch), hz * Math.cos(pitch)).normalize();
+  _cxRight.crossVectors(_cxDir, _ckUp).normalize();
+  _cxCamUp.crossVectors(_cxRight, _cxDir).normalize();
+  const c = cam || cockpitCam;
+  const tanV = Math.tan(THREE.MathUtils.degToRad(c.fov || 52) / 2);
+  const aspect = (innerWidth || 1) / (innerHeight || 1);
+  const tanH = tanV * aspect;
+  const H = innerHeight || 800;
+  const ins = ctxViewInsetsPx();
+  const yMax = Math.max(0.25, 1 - 2 * (ins.top + 16) / H);
+  const yMin = Math.min(-0.25, -1 + 2 * (ins.bottom + 16) / H);
+  const xMax = 0.84;
+  const half = CTX_MIN_HALF_NM * NM_M * (1 - tFocus) + 500;
+  let dist = 900;
+  let ndcHi = -9, ndcLo = 9;
+  const fit = (q, measure) => {
+    _cxW.subVectors(q, _cxT);
+    const a = _cxW.dot(_cxDir), xc = _cxW.dot(_cxRight), yc = _cxW.dot(_cxCamUp);
+    if (measure) {
+      const ny = yc / (Math.max(1, a + dist) * tanV);
+      ndcHi = Math.max(ndcHi, ny); ndcLo = Math.min(ndcLo, ny);
+      return;
+    }
+    dist = Math.max(dist, Math.abs(xc) / (tanH * xMax) - a);
+    dist = Math.max(dist, yc >= 0 ? yc / (tanV * yMax) - a : yc / (tanV * yMin) - a);
+  };
+  const fitAll = (measure) => {
+    fit(P, measure);
+    _cxQ.copy(P); _cxQ.y += 260; fit(_cxQ, measure); // label above the plane
+    fit(_cxS, measure);
+    if (!far && tFocus < 0.5) { _cxQ.set(CTX_APT.x, 700, CTX_APT.z); fit(_cxQ, measure); } // KSFO label
+    if (!measure) {
+      _cxQ.copy(_cxT).addScaledVector(_cxRight, half); fit(_cxQ);
+      _cxQ.copy(_cxT).addScaledVector(_cxRight, -half); fit(_cxQ);
+    }
+  };
+  // Fit, then re-centre the look point vertically inside the free band (HUD..bottom bar) and refit:
+  // perspective puts the near plane low on screen, so without this it hugs the soon bar.
+  const yMid = (yMax + yMin) / 2;
+  for (let it = 0; it < 3; it++) {
+    dist = 900;
+    fitAll(false);
+    if (it === 2) break;
+    ndcHi = -9; ndcLo = 9;
+    fitAll(true);
+    const off = ((ndcHi + ndcLo) / 2 - yMid) * tanV * dist;
+    if (!Number.isFinite(off) || Math.abs(off) < 30) break;
+    _cxT.addScaledVector(_cxCamUp, off * 0.9);
+  }
+  dist = Math.min(dist * 1.04 * Math.max(1, zoom), 480000);
+  _ctxLastDist = dist;
+  outLook.copy(_cxT);
+  outPos.copy(_cxT).addScaledVector(_cxDir, -dist);
+  if (outPos.y < P.y + 120) outPos.y = P.y + 120;
+  return Number.isFinite(outPos.x) && Number.isFinite(outLook.x);
+}
+
 function camPosFinite(cam) {
   const p = cam.position;
   return Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z);
@@ -7015,10 +7139,13 @@ function updateCockpitCameras(dt) {
     return updateCockpitCameras(dt);
   }
 
-  if (!cockpitEyeFor(prim, _ckPos, _ckLook, 1)) {
+  const eyeOk = FOLLOW_CONTEXT ? contextEyeFor(prim, _ckPos, _ckLook, cockpitCam) : cockpitEyeFor(prim, _ckPos, _ckLook, 1);
+  if (!eyeOk) {
     _ckSmoothInit = false;
     return false;
   }
+  // v28.2: depth range scales with the context distance (log depth buffer, keep near small but sane)
+  cockpitCam.near = FOLLOW_CONTEXT ? THREE.MathUtils.clamp(_ctxLastDist * 0.002, 8, 160) : 8;
   const alpha = 1 - Math.exp(-3.2 * dt);
   if (!_ckSmoothInit || !Number.isFinite(_ckPosSm.x)) {
     _ckPosSm.copy(_ckPos); _ckLookSm.copy(_ckLook); _ckSmoothInit = true;
@@ -7870,7 +7997,7 @@ function updateLabelScreen(rec, cam, view) {
   }
   const behind = _lblProj.z > 1;
   const offscreen = Math.abs(_lblProj.x) > 1.15 || Math.abs(_lblProj.y) > 1.2;
-  const tooFar = dist > LABEL_MAX_DIST;
+  const tooFar = dist > LABEL_MAX_DIST * ((cockpitPrimaryId && rec.icao === cockpitPrimaryId) || rec.icao === selectedId ? 6 : 1);
   const show = rec.alive && !behind && !offscreen && !tooFar;
   if (!show) {
     el.classList.add('hidden');
@@ -8456,6 +8583,114 @@ const clock = new THREE.Clock();
 const _raycaster = new THREE.Raycaster();
 const _ptr = new THREE.Vector2();
 
+/* ─── airloom-v28.2: KSFO range rings (10/20/40 nm) + plane → KSFO line (nm · ETA PT) ─── */
+const ctxOverlay = new THREE.Group();
+ctxOverlay.name = 'ctxOverlay';
+scene.add(ctxOverlay);
+const CTX_RINGS = [];
+for (const nm of [10, 20, 40]) {
+  const pts = [];
+  const R = nm * NM_M;
+  for (let i = 0; i <= 192; i++) {
+    const a = (i / 192) * Math.PI * 2;
+    pts.push(CTX_APT.x + Math.sin(a) * R, 22, CTX_APT.z - Math.cos(a) * R);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const line = new THREE.Line(g, new THREE.LineBasicMaterial({
+    color: 0xf0d5a0, transparent: true, opacity: nm === 40 ? 0.34 : 0.46, depthWrite: false,
+  }));
+  line.renderOrder = 4;
+  line.frustumCulled = false;
+  ctxOverlay.add(line);
+  const lbl = makeBillboardLabel([nm + ' nm'], 300, {
+    color: 'rgba(245,230,200,0.92)', border: 'rgba(240,213,160,0.25)', opacity: 0.8,
+  });
+  lbl.userData.screenPx = 17;
+  ctxOverlay.add(lbl);
+  CTX_RINGS.push({ nm, line, lbl });
+}
+const _ctxLineGeo = new THREE.BufferGeometry();
+_ctxLineGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+const ctxPlaneLine = new THREE.Line(_ctxLineGeo, new THREE.LineBasicMaterial({
+  color: 0x9fe3c0, transparent: true, opacity: 0.75, depthWrite: false, depthTest: false,
+}));
+ctxPlaneLine.renderOrder = 7;
+ctxPlaneLine.frustumCulled = false;
+ctxPlaneLine.visible = false;
+ctxOverlay.add(ctxPlaneLine);
+let ctxPlaneLbl = null;
+let ctxPlaneLblText = '';
+
+function ctxOverlayTarget() {
+  if (settings.cameraMode === 'follow') return cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
+  const id = orbitUserPickId || orbitFocusId || selectedId;
+  return id ? aircraft.get(id) : null;
+}
+
+function updateCtxOverlay(cam) {
+  if (!cam || !camPosFinite(cam)) return;
+  // Ring labels on the screen-right side of each ring (never under the approach line)
+  _cxW.subVectors(CTX_APT, cam.position); _cxW.y = 0;
+  if (_cxW.lengthSq() < 1) _cxW.set(0, 0, -1);
+  _cxW.normalize();
+  const rx = -_cxW.z, rz = _cxW.x; // right of view direction
+  for (const r of CTX_RINGS) {
+    const R = r.nm * NM_M;
+    r.lbl.position.set(CTX_APT.x + (rx * 0.92 - _cxW.x * 0.38) * R, 140, CTX_APT.z + (rz * 0.92 - _cxW.z * 0.38) * R);
+    scaleSpriteToScreenPx(r.lbl, cam, r.lbl.userData.screenPx, { hideUnder: 0, cap: 1e7 });
+  }
+  const rec = ctxOverlayTarget();
+  if (!rec || !rec.alive || rec.onGround || !rec.display || !Number.isFinite(rec.display.x)) {
+    ctxPlaneLine.visible = false;
+    if (ctxPlaneLbl) ctxPlaneLbl.visible = false;
+    return;
+  }
+  const P = rec.display;
+  const arr = _ctxLineGeo.attributes.position.array;
+  arr[0] = P.x; arr[1] = P.y; arr[2] = P.z;
+  arr[3] = CTX_APT.x; arr[4] = 30; arr[5] = CTX_APT.z;
+  _ctxLineGeo.attributes.position.needsUpdate = true;
+  ctxPlaneLine.visible = true;
+  const lat = Number.isFinite(rec.estLat) ? rec.estLat : rec.lat;
+  const lon = Number.isFinite(rec.estLon) ? rec.estLon : rec.lon;
+  const nm = haversineNm(ORIGIN.lat, ORIGIN.lon, lat, lon);
+  let etaMin = null;
+  const sc = orbitArrivalsCache.find((s) => s.icao === rec.icao);
+  if (sc && sc.etaMin != null && Number.isFinite(sc.etaMin)) etaMin = sc.etaMin;
+  else { const kt = spdKt(rec); if (kt && kt > 60) etaMin = nm / kt * 60; }
+  const nmTxt = (nm < 10 ? nm.toFixed(1) : String(Math.round(nm))) + ' nm to KSFO';
+  const etaTxt = etaMin != null && etaMin >= 0 ? 'ETA ' + formatEtaClock(etaMin) + ' PT' : '';
+  const text = nmTxt + '|' + etaTxt;
+  if (text !== ctxPlaneLblText) {
+    ctxPlaneLblText = text;
+    if (ctxPlaneLbl) {
+      ctxOverlay.remove(ctxPlaneLbl);
+      ctxPlaneLbl.material.map?.dispose?.();
+      ctxPlaneLbl.material.dispose?.();
+    }
+    ctxPlaneLbl = makeBillboardLabel(etaTxt ? [nmTxt, etaTxt] : [nmTxt], 300, {
+      color: 'rgba(200,245,220,0.98)', border: 'rgba(125,206,160,0.45)', opacity: 0.94,
+    });
+    ctxPlaneLbl.material.depthTest = false;
+    ctxPlaneLbl.renderOrder = 8;
+    ctxOverlay.add(ctxPlaneLbl);
+  }
+  // Label ~45% of the way from the plane toward KSFO, lifted off the line
+  ctxPlaneLbl.position.set(P.x + (CTX_APT.x - P.x) * 0.45, P.y * 0.55 + 200, P.z + (CTX_APT.z - P.z) * 0.45);
+  scaleSpriteToScreenPx(ctxPlaneLbl, cam, 26, { hideUnder: 0, cap: 1e7 });
+  // Hide when the plane is basically at the field (bullseye already says it)
+  if (nm < 1.2) { ctxPlaneLine.visible = false; ctxPlaneLbl.visible = false; }
+}
+window.__AIRLOOM_CTX = () => {
+  const rec = ctxOverlayTarget();
+  const cam = settings.cameraMode === 'follow' && rec ? cockpitCam : camera;
+  const scr = (v) => { if (!v) return null; const q = v.clone().project(cam); return { x: Math.round((q.x + 1) / 2 * innerWidth), y: Math.round((1 - q.y) / 2 * innerHeight), inFront: q.z < 1 }; };
+  return { mode: settings.cameraMode, dist: Math.round(_ctxLastDist), insets: _ctxInsets, label: ctxPlaneLblText,
+    target: rec ? rec.icao : null, callsign: rec ? (rec.callsign || '') : null,
+    plane: rec && rec.display ? scr(rec.display) : null, ksfo: scr(new THREE.Vector3(CTX_APT.x, 30, CTX_APT.z)) };
+};
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -8503,6 +8738,13 @@ function animate() {
       const LOD_MESH_M = 32000; // show airframe farther so type/shape reads in Orbit
       const showMesh = isFollow || dist < LOD_MESH_M;
       if (rec.model) rec.model.visible = showMesh;
+      // v28.2: readable icons in the zoomed-out Follow context view (~constant on-screen size far out)
+      const kScale = (isFollow && FOLLOW_CONTEXT) ? THREE.MathUtils.clamp(dist / 1600, 1, 34) : 1;
+      if (rec.model) {
+        if (rec.model.userData.baseScale == null) rec.model.userData.baseScale = rec.model.scale.x;
+        const sc = rec.model.userData.baseScale * kScale;
+        if (Math.abs(rec.model.scale.x - sc) > 1e-3 * sc) rec.model.scale.setScalar(sc);
+      }
       if (rec.velLine) rec.velLine.visible = showMesh && settings.showVelVec;
       if (rec.glow) {
         const col = altColor(rec.altM || 0);
@@ -8517,7 +8759,7 @@ function animate() {
           // Close / Follow: delicate halo around white mesh
           const base = Math.max(70, (rec.span || 12) * SIZE_MULT * 0.95);
           const boost = isFollow ? base * 0.28 : THREE.MathUtils.clamp(dist * 0.003, 0, 280);
-          const gs = Math.max(base * 0.45, boost);
+          const gs = Math.max(base * 0.45, boost) * kScale;
           rec.glow.scale.set(gs, gs, 1);
           rec.glow.material.opacity = isFollow ? 0.22 : 0.34;
           rec.glow.visible = true;
@@ -8595,6 +8837,9 @@ function animate() {
     }
   }
 
+  try { updateCtxOverlay(settings.cameraMode === 'follow' && followOk ? cockpitCam : camera); } catch (e) {
+    if (!updateCtxOverlay._w) { updateCtxOverlay._w = 1; console.warn('ctx overlay', e); }
+  }
   try {
     airTilesTick(settings.cameraMode === 'follow' && followOk ? cockpitCam : camera,
       settings.cameraMode !== 'follow' || followOk);

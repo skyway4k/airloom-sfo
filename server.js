@@ -15,7 +15,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.8 (+https://sfo3d.onrender.com; airloom-sfo; airloom-v28.1)';
+const UA = 'AirLoomSFO/1.8 (+https://sfo3d.onrender.com; airloom-sfo; airloom-v28.2)';
 // FlightAware AeroAPI (optional): destination truth + scheduled GA inbounds beyond ADS-B range.
 // Off unless AEROAPI_KEY is set. Never scrape flightaware.com web pages (FA ToS §7 forbids robots).
 const AEROAPI_KEY = process.env.AEROAPI_KEY || '';
@@ -1065,21 +1065,29 @@ async function fetchSwimArrivals() {
     swimState.polls++;
     const hadData = swimFresh();
     try {
-      const st = await swimGetJson('/status');
-      const sw = (st && st.swim) || {};
-      const tfms = (sw.feeds && sw.feeds.tfms) || {};
-      swimState.connected = !!(sw.connected || tfms.connected);
-      swimState.msgs = Number.isFinite(Number(sw.msgs)) ? Number(sw.msgs) : (Number(tfms.msgs) || null);
-      if (!swimState.connected) throw new Error('Skyway SWIM disconnected' + (sw.reason ? ' (' + sw.reason + ')' : ''));
+      // v28.2: Skyway /status and the clean endpoint are independent — a /status blip (e.g. 502)
+      // must not stop us using /api/swim/arrivals, which carries its own feed.swim health.
+      let st = null, stErr = null;
+      try { st = await swimGetJson('/status'); } catch (e) { stErr = e; }
+      const applyHealth = (sw) => {
+        sw = sw || {};
+        const tfms = (sw.feeds && sw.feeds.tfms) || {};
+        swimState.connected = !!(sw.connected || tfms.connected);
+        swimState.msgs = Number.isFinite(Number(sw.msgs)) ? Number(sw.msgs) : (Number(tfms.msgs) || null);
+        return sw;
+      };
+      let health = st ? applyHealth(st.swim) : null;
       // Prefer Skyway's clean read-only SWIM endpoint (SWIM-only, LADD-masked, no ramp fields).
       // A 200 is not enough: an unknown path can return Skyway's catch-all JSON, so require rows.
       let rows = null, endpoint = null;
-      if (Date.now() >= swimState.cleanRetryAt) {
+      if (Date.now() >= swimState.cleanRetryAt || !st) {
         try {
           const jc = await swimGetJson(SWIM_CLEAN_PATH);
           rows = swimRowsOf(jc);
-          if (rows) { endpoint = SWIM_CLEAN_PATH; swimState.cleanAvailable = true; }
-          else throw new Error('no rows array');
+          if (rows) {
+            endpoint = SWIM_CLEAN_PATH; swimState.cleanAvailable = true;
+            if (!st && jc && jc.feed && jc.feed.swim) health = applyHealth(jc.feed.swim);
+          } else throw new Error('no rows array');
         } catch (e) {
           if (swimState.cleanAvailable !== false) log('Skyway clean SWIM endpoint unavailable (' + ((e && e.message) || e) + ') — using /api/arrivals + SWIM-only filter', 'INFO');
           swimState.cleanAvailable = false;
@@ -1087,6 +1095,8 @@ async function fetchSwimArrivals() {
           rows = null;
         }
       }
+      if (!health) throw (stErr || new Error('Skyway status unavailable'));
+      if (!swimState.connected) throw new Error('Skyway SWIM disconnected' + (health.reason ? ' (' + health.reason + ')' : ''));
       if (!rows) {
         rows = swimRowsOf(await swimGetJson('/api/arrivals'));
         endpoint = '/api/arrivals';
@@ -1480,7 +1490,7 @@ async function warmTileCacheOnBoot() {
 
 function tileManifest() {
   return {
-    build: 'airloom-v28.1',
+    build: 'airloom-v28.2',
     schedule: TILE_SCHEDULE,
     baked: bakeInfo ? {
       tiles: bakeInfo.ok + bakeInfo.skipped, total: bakeInfo.total, mb: bakeInfo.mb, seconds: bakeInfo.seconds,
@@ -1563,7 +1573,7 @@ const server = http.createServer(async (req, res) => {
           loadedAgoSec: laddState.loadedAt ? Math.round((Date.now() - laddState.loadedAt) / 1000) : null,
           error: laddState.error || null,
         },
-        build: 'airloom-v28.1',
+        build: 'airloom-v28.2',
         faWebScrape: 'disabled (FlightAware ToS forbids automated page retrieval; use AEROAPI_KEY)',
         primary: ADSB_PRIMARY,
         cache: {
