@@ -8739,7 +8739,9 @@ function animate() {
       const showMesh = isFollow || dist < LOD_MESH_M;
       if (rec.model) rec.model.visible = showMesh;
       // v28.2: readable icons in the zoomed-out Follow context view (~constant on-screen size far out)
-      const kScale = (isFollow && FOLLOW_CONTEXT) ? THREE.MathUtils.clamp(dist / 1600, 1, 34) : 1;
+      const kFull = (isFollow && FOLLOW_CONTEXT) ? THREE.MathUtils.clamp(dist / 1600, 1, 34) : 1;
+      // Tracked plane gets the full boost; others a damped one so airliner streams don't dominate
+      const kScale = (rec.icao === cockpitPrimaryId) ? kFull : Math.pow(kFull, 0.62);
       if (rec.model) {
         if (rec.model.userData.baseScale == null) rec.model.userData.baseScale = rec.model.scale.x;
         const sc = rec.model.userData.baseScale * kScale;
