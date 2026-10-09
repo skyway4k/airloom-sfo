@@ -5,7 +5,14 @@ Standalone browser 3D ADS-B view of **KSFO** airspace — **defaults to KSFO-ass
 - Live positions via **adsb.lol** (OpenSky optional fallback)
 - Vendored Three.js (works on Safari / iPhone without CDN)
 - Routes: `/`, `/airloom`, `/adsb/states`, `/arrivals/schedule`, `/status`
-- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28.2)
+- Live: [sfo3d.onrender.com](https://sfo3d.onrender.com/) (`BUILD_MARK` airloom-v28.3)
+
+## airloom-v28.3 — Follow target = filtered KSFO arrivals set
+
+- The default Follow camera target now comes from the **same** strict set the side list and soon bar use (`orbitArrivalsCache`: v28.1 filter + SWIM-confirmed rows): the soonest *live, airborne* member. The old `scoreInboundGa` pick and the "closest airborne GA" fallback (which let light pistons such as an OAK-pattern Cherokee or a San Carlos-bound Bonanza become the target) are gone. Nothing airborne in the set → Follow frames KSFO with ~40 nm context (rings visible).
+- "~N min to SFO" / "mi" on map tags, the bottom landing chip, approach cues, the plane→KSFO line/label and dual-final views appear **only** for aircraft in that set. Other traffic (incl. BLOCKED/PIA) is still drawn, without SFO ETAs. A user tap can still follow any plane — just without SFO ETA cues.
+- SWIM rows with no ADS-B position yet (e.g. a filing that hasn't departed) stay in the soon bar but can't be camera targets.
+- Test hook: `window.__AIRLOOM_FOLLOW_SET()`.
 
 ## airloom-v28.2 — zoomed-out context view (how far is it from SFO?)
 

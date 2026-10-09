@@ -947,7 +947,7 @@ const ARRIVAL_NM = 50;
 /** Default ADS-B radius: ~320 nm so ~60–90 min jet cruise inbounds are on feed. */
 const DEFAULT_RADIUS_NM = 360;
 const SIZE_MULT = 4.5; // readable type/shape in Orbit (was 2.0; TYPE_DIMS stay real meters)
-const BUILD_MARK = 'airloom-v28.2'; // v28.2: zoomed-out context Follow view (plane + KSFO framed), range rings, plane→KSFO nm/ETA line · v28.1: ADS-B-only other-field (NUQ/SJC/PAO/SQL/HAF/OAK) + small-aircraft list filter, PT on-base · FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
+const BUILD_MARK = 'airloom-v28.3'; // v28.3: Follow target + SFO ETA labels/line only from the filtered KSFO arrivals set (lists/soon bar) · v28.2: zoomed-out context Follow view (plane + KSFO framed), range rings, plane→KSFO nm/ETA line · v28.1: ADS-B-only other-field (NUQ/SJC/PAO/SQL/HAF/OAK) + small-aircraft list filter, PT on-base · FAA SWIM (TFMS) filed plans via Skyway · LADD masking · feed-down badge (v27.1 tiles/mobile unchanged)
 window.__AIRLOOM_BUILD = BUILD_MARK;
 window.__AIRLOOM_FEATURES = {
   denserTiles: true,
@@ -1024,6 +1024,7 @@ window.__AIRLOOM_FEATURES = {
   followContextView282: true,
   rangeRings282: true,
   planeToKsfoLine282: true,
+  followFromFilteredSet283: true,
 };
 window.__AIRLOOM_SIZE_MULT = SIZE_MULT;
 
@@ -4914,7 +4915,7 @@ function updateLandingCuesForRec(rec) {
 function updateLandingChip(rec) {
   const chip = document.getElementById('landingChip');
   if (!chip) return;
-  const showMode = settings.cameraMode === 'follow' && rec && !rec.onGround;
+  const showMode = settings.cameraMode === 'follow' && rec && !rec.onGround && isFilteredKsfoInbound(rec.icao);
   if (!showMode) {
     chip.classList.remove('visible', 'at-threshold');
     resetLdgChipState();
@@ -6780,6 +6781,38 @@ function scoreInboundGa(p) {
   };
 }
 
+/* airloom-v28.3: ONE source of truth for "is this an SFO inbound" on the map/camera —
+ * the same strict v28.1 + SWIM-confirmed set the side list and soon bar use (orbitArrivalsCache,
+ * from scoreOrbitArrival → ksfoArrivalDecision non-legacy). Rejected traffic (light pistons
+ * without a SWIM KSFO filing, other-field finals …) can be drawn but never gets SFO ETA labels,
+ * the plane→KSFO line, or the default Follow camera. */
+function isFilteredKsfoInbound(icao) {
+  if (!icao) return false;
+  for (const s of orbitArrivalsCache) if (s && s.icao === icao) return true;
+  return false;
+}
+/** Soonest airborne live aircraft from the filtered set (same ordering as the soon bar). */
+function pickFilteredFollowTarget() {
+  let best = null;
+  for (const s of orbitArrivalsCache) {
+    if (!s || s.etaMin == null || !Number.isFinite(s.etaMin)) continue;
+    const r = aircraft.get(s.icao);
+    if (!r || !r.alive || r.onGround || !r.display || !Number.isFinite(r.display.x) || !Number.isFinite(r.display.y)) continue;
+    if (!best) { best = s; continue; }
+    if (Math.abs(s.etaMin - best.etaMin) > 0.2) { if (s.etaMin < best.etaMin) best = s; continue; }
+    if (s.onFinal !== best.onFinal) { if (s.onFinal) best = s; continue; }
+    const na = s.nm != null ? s.nm : 999, nb = best.nm != null ? best.nm : 999;
+    if (na < nb) best = s;
+  }
+  return best;
+}
+window.__AIRLOOM_FOLLOW_SET = () => ({
+  primary: cockpitPrimaryId,
+  primaryFiltered: isFilteredKsfoInbound(cockpitPrimaryId),
+  pick: (pickFilteredFollowTarget() || {}).icao || null,
+  set: orbitArrivalsCache.map((s) => ({ icao: s.icao, cs: s.callsign, type: s.type, etaMin: s.etaMin != null ? Math.round(s.etaMin * 10) / 10 : null, why: s.why })),
+});
+
 function pickCockpitTargets(fromList) {
   const scored = [];
   const src = fromList || [...aircraft.values()];
@@ -6804,10 +6837,21 @@ function pickCockpitTargets(fromList) {
     }
   }
   onFinal.sort((a, b) => (a.finalInfo?.score ?? 99) - (b.finalInfo?.score ?? 99));
-  finalCache = onFinal;
+  // v28.3: dual-final views only for filtered SFO inbounds
+  finalCache = onFinal.filter((p) => isFilteredKsfoInbound(p.icao));
 
-  if (!scored.length) {
+  // v28.3: default Follow target = soonest of the filtered arrivals set (lists/soon bar)
+  const pick283 = pickFilteredFollowTarget();
+  if (!pick283) {
     cockpitPrimaryId = null;
+  } else if (true) {
+    let nextId = pick283.icao;
+    if (cockpitPrimaryId && cockpitPrimaryId !== nextId && typeof airInteractRecent === 'function'
+        && airInteractRecent(4000) && isFilteredKsfoInbound(cockpitPrimaryId)) {
+      nextId = cockpitPrimaryId;
+    }
+    if (cockpitPrimaryId !== nextId) resetFollowViewOffsets();
+    cockpitPrimaryId = nextId;
   } else {
     // airloom-v14: always focus soonest arriving (lowest ETA / nearest-to-landing)
     scored.sort((a, b) => {
@@ -7115,6 +7159,19 @@ function contextEyeFor(rec, outPos, outLook, cam) {
   return Number.isFinite(outPos.x) && Number.isFinite(outLook.x);
 }
 
+/** v28.3: Follow with no filtered inbound airborne → frame KSFO with ~40 nm of context (once per entry). */
+let _ksfoCtxFramed = false;
+function frameKsfoContextFallback() {
+  if (_ksfoCtxFramed) return;
+  _ksfoCtxFramed = true;
+  try {
+    controls.target.set(CTX_APT.x, 0, CTX_APT.z);
+    camera.position.set(CTX_APT.x + 30000, 38000, CTX_APT.z + 48000);
+    camera.lookAt(controls.target);
+    controls.update();
+  } catch (_) {}
+}
+
 function camPosFinite(cam) {
   const p = cam.position;
   return Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z);
@@ -7123,21 +7180,20 @@ function camPosFinite(cam) {
 function updateCockpitCameras(dt) {
   const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
 
-  if (!prim || !prim.alive) {
-    // fallback: any closest airborne GA
-    let best = null, bestD = Infinity;
-    for (const r of aircraft.values()) {
-      if (r.onGround || !r.isPrivateGa || r.isKsfo === false) continue;
-      if (!Number.isFinite(r.display?.x) || !Number.isFinite(r.display?.y)) continue;
-      if (r.dist < bestD) { bestD = r.dist; best = r; }
-    }
-    if (!best) {
+  if (!prim || !prim.alive || prim.onGround) {
+    // v28.3: fallback ONLY from the filtered arrivals set; none → KSFO ~40 nm context view
+    const best = pickFilteredFollowTarget();
+    const rb = best ? aircraft.get(best.icao) : null;
+    if (!rb || rb === prim) {
+      cockpitPrimaryId = null;
       _ckSmoothInit = false;
+      frameKsfoContextFallback();
       return false;
     }
-    cockpitPrimaryId = best.icao;
+    cockpitPrimaryId = rb.icao;
     return updateCockpitCameras(dt);
   }
+  _ksfoCtxFramed = false;
 
   const eyeOk = FOLLOW_CONTEXT ? contextEyeFor(prim, _ckPos, _ckLook, cockpitCam) : cockpitEyeFor(prim, _ckPos, _ckLook, 1);
   if (!eyeOk) {
@@ -7227,7 +7283,7 @@ function updateInfoPanel() {
     _orbitArrivalsSig = '';
     const prim = cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
     updateLandingChip(prim);
-    updateLandingCuesForRec(prim);
+    updateLandingCuesForRec(prim && isFilteredKsfoInbound(prim.icao) ? prim : null);
     return;
   }
 
@@ -7885,15 +7941,16 @@ function setLabelInfo(rec) {
     // Compact Follow tag: N724PB · CJ3 · 42 mi · ~15 min (shortTypeName; clamped via updateLabelScreen)
     const parts = [ident];
     if (type) parts.push(type);
-    const ldg = distToLanding(rec);
+    const sfoOk283 = isFilteredKsfoInbound(rec.icao); // v28.3: no SFO mi/ETA on rejected traffic
+    const ldg = sfoOk283 ? distToLanding(rec) : null;
     let mi = null;
     let etaMin = null;
     if (ldg && ldg.confidence && ldg.confidence !== 'none' && Number.isFinite(ldg.mi)) {
       mi = ldg.mi;
       etaMin = ldg.etaMin;
     }
-    if (mi == null && Number.isFinite(rec.dist)) mi = rec.dist * SM_PER_NM;
-    if (etaMin == null) {
+    if (mi == null && sfoOk283 && Number.isFinite(rec.dist)) mi = rec.dist * SM_PER_NM;
+    if (etaMin == null && sfoOk283) {
       const gsKt = gs;
       const field = BAY_FIELDS[0];
       const towardish = isClearKsfoInbound(rec) || isKsfoEnrouteInbound(rec) || rec.isOnFinal
@@ -8558,15 +8615,14 @@ function ingest(data) {
   for (const r of cockpitPool) {
     r._prevDistField = r._prevDistField;
   }
-  pickCockpitTargets(cockpitPool);
-  // Refresh Orbit arrivals from live shown aircraft (DR poses / final tags)
+  // v28.3: refresh the filtered arrivals set FIRST — the Follow target is picked from it
   collectOrbitArrivals([...aircraft.values()]);
+  pickCockpitTargets(cockpitPool);
   // If selected aircraft is inbound GA, prefer it as the single chase target
   if (selectedId && aircraft.has(selectedId)) {
     const sel = aircraft.get(selectedId);
-    if (sel && (sel.isPrivateGa || isPrivateOrGa(sel)) && !sel.onGround) {
-      const scored = scoreInboundGa(sel);
-      if (scored) cockpitPrimaryId = sel.icao;
+    if (sel && !sel.onGround && isFilteredKsfoInbound(sel.icao)) {
+      cockpitPrimaryId = sel.icao;
     }
   }
   // Always lock Orbit selection onto closest inbound (unless user picked another)
@@ -8623,9 +8679,9 @@ let ctxPlaneLbl = null;
 let ctxPlaneLblText = '';
 
 function ctxOverlayTarget() {
-  if (settings.cameraMode === 'follow') return cockpitPrimaryId ? aircraft.get(cockpitPrimaryId) : null;
-  const id = orbitUserPickId || orbitFocusId || selectedId;
-  return id ? aircraft.get(id) : null;
+  // v28.3: the plane→KSFO line/label only for the filtered SFO arrivals set
+  const id = settings.cameraMode === 'follow' ? cockpitPrimaryId : (orbitUserPickId || orbitFocusId || selectedId);
+  return id && isFilteredKsfoInbound(id) ? aircraft.get(id) : null;
 }
 
 function updateCtxOverlay(cam) {

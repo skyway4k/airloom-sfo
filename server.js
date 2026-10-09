@@ -15,7 +15,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ADSB_PRIMARY = (process.env.ADSB_PRIMARY || 'adsb.lol').toLowerCase();
 const OSKY_ID = process.env.OSKY_ID || '';
 const OSKY_SECRET = process.env.OSKY_SECRET || '';
-const UA = 'AirLoomSFO/1.8 (+https://sfo3d.onrender.com; airloom-sfo; airloom-v28.2)';
+const UA = 'AirLoomSFO/1.8 (+https://sfo3d.onrender.com; airloom-sfo; airloom-v28.3)';
 // FlightAware AeroAPI (optional): destination truth + scheduled GA inbounds beyond ADS-B range.
 // Off unless AEROAPI_KEY is set. Never scrape flightaware.com web pages (FA ToS §7 forbids robots).
 const AEROAPI_KEY = process.env.AEROAPI_KEY || '';
@@ -1490,7 +1490,7 @@ async function warmTileCacheOnBoot() {
 
 function tileManifest() {
   return {
-    build: 'airloom-v28.2',
+    build: 'airloom-v28.3',
     schedule: TILE_SCHEDULE,
     baked: bakeInfo ? {
       tiles: bakeInfo.ok + bakeInfo.skipped, total: bakeInfo.total, mb: bakeInfo.mb, seconds: bakeInfo.seconds,
@@ -1573,7 +1573,7 @@ const server = http.createServer(async (req, res) => {
           loadedAgoSec: laddState.loadedAt ? Math.round((Date.now() - laddState.loadedAt) / 1000) : null,
           error: laddState.error || null,
         },
-        build: 'airloom-v28.2',
+        build: 'airloom-v28.3',
         faWebScrape: 'disabled (FlightAware ToS forbids automated page retrieval; use AEROAPI_KEY)',
         primary: ADSB_PRIMARY,
         cache: {
